@@ -885,7 +885,8 @@ async def run_agent(
     ]
 
     loop_count = 0
-    max_loops = 15
+    max_loops = 30
+    exec_summary = []  # 记录已执行的工具轮次，兜底时反馈给用户
 
     while loop_count < max_loops:
         loop_count += 1
@@ -1003,6 +1004,11 @@ async def run_agent(
 
             save_message(room.code, "tool", result[:2000], fn_name, tier)
 
+            # 记录执行摘要（兜底时反馈给用户）
+            status = "✅" if "error" not in result.lower()[:50] and "timeout" not in result.lower()[:50] and "[错误]" not in result[:30] else "⚠️"
+            args_brief = json.dumps(fn_args, ensure_ascii=False)[:60] if fn_args else ""
+            exec_summary.append(f"{status} {loop_count}. {fn_name}({args_brief}) → {result[:80].strip()}")
+
             await browser_ws.send_json({
                 "type": "tool_result",
                 "tool": fn_name,
@@ -1016,7 +1022,17 @@ async def run_agent(
                 "content": result[:8000],
             })
 
-    return "Diagnosis exceeded the maximum step limit. Please try a more specific question."
+    # 已到达最大工具调用轮次，返回中文兜底消息并附执行摘要
+    summary_txt = "\n".join(exec_summary[-20:]) if exec_summary else "（本轮未执行任何工具）"
+    fallback = (
+        "我已经尝试了多种方式处理你的请求，但步骤较多、尚未完成。\n\n"
+        f"本次共执行了 {len(exec_summary)} 个诊断/操作步骤：\n{summary_txt}\n\n"
+        "建议：\n"
+        "1. 将问题拆分为更小的步骤，分多次提问，例如先「查看硬件信息」再「查看某进程」；\n"
+        "2. 如果是安装/修改类操作，可先确认网络、权限是否正常；\n"
+        "3. 告诉我你看到的具体报错或现象，我可以针对性地继续排查。"
+    )
+    return fallback
 
 
 # ============================================================
