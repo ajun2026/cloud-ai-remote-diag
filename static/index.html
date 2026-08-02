@@ -70,22 +70,28 @@
   .msg {
     max-width: 85%; padding: 10px 14px; border-radius: 12px;
     line-height: 1.6; font-size: 14px; word-break: break-word;
+    display: flex; align-items: flex-start; gap: 8px;
   }
+  .msg .msg-body { min-width: 0; flex: 1; }
+  .msg .msg-time { font-size: 11px; opacity: 0.65; flex-shrink: 0; margin-top: 3px; white-space: nowrap; }
   .msg.user { align-self: flex-end; background: var(--info); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.user .msg-time { order: 2; }
   .msg.ai {
     align-self: flex-start; background: var(--surface2);
     border: 1px solid var(--border); border-bottom-left-radius: 4px;
   }
+  .msg.ai .msg-time { order: 0; }
   .msg.ai h1, .msg.ai h2, .msg.ai h3 { margin: 8px 0 4px; font-size: 15px; }
   .msg.ai ul, .msg.ai ol { padding-left: 20px; }
   .msg.ai code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
   .msg.ai pre { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; overflow-x: auto; font-size: 12px; }
   .msg.ai strong { color: var(--warn); }
 
-  .msg.system { align-self: center; font-size: 12px; color: var(--text2); background: transparent; padding: 4px 8px; }
+  .msg.system { align-self: center; font-size: 12px; color: var(--text2); background: transparent; padding: 4px 8px; display: block; }
   .msg.error {
     align-self: center; font-size: 13px;
     background: rgba(248,113,113,0.15); border: 1px solid rgba(248,113,113,0.3); color: var(--error);
+    display: block;
   }
 
   /* Tool card */
@@ -258,8 +264,8 @@
 <!-- Approval Dialog -->
 <div id="approval-overlay">
   <div id="approval-dialog">
-    <h3 data-i18n="approval_title">审批请求 — 工具调用需要你的授权</h3>
-    <p style="font-size:13px;color:var(--text2);" data-i18n="approval_desc">AI 想要执行以下 Tier <span id="approval-tier"></span> 操作：</p>
+    <h3 id="approval-title" data-i18n="approval_title">审批请求 — 工具调用需要你的授权</h3>
+    <p id="approval-desc" style="font-size:13px;color:var(--text2);" data-i18n="approval_desc">AI 想要执行以下 Tier <span id="approval-tier"></span> 操作：</p>
     <div class="tool-info">
       <strong id="approval-tool" style="color:var(--info);"></strong>
       <div class="args-display" id="approval-args" style="margin-top: 8px;"></div>
@@ -273,6 +279,31 @@
   </div>
 </div>
 
+<script>
+// ============================================================
+// Debug: version marker + error reporting
+// ============================================================
+const UI_VERSION = '2026-08-02-fix2';
+console.log('[UI] version:', UI_VERSION, 'approval-title exists:', !!document.getElementById('approval-title'));
+try {
+  fetch('/api/debug_log', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ msg: 'UI LOADED', version: UI_VERSION, approval_title: !!document.getElementById('approval-title'), approval_desc: !!document.getElementById('approval-desc'), url: location.href })
+  }).catch(function(){});
+} catch (e) {}
+window.onerror = function(msg, src, line, col, err) {
+  try {
+    console.error('[UI ERROR]', msg, src, line, col, err);
+    fetch('/api/debug_log', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ msg: String(msg), src: src, line: line, col: col, stack: err ? String(err.stack).slice(0, 500) : '', version: UI_VERSION })
+    }).catch(function(){});
+  } catch (e) {}
+  return false;
+};
+</script>
 <script>
 // ============================================================
 // i18n
@@ -451,7 +482,10 @@ function t(key) { return I18N[currentLang]?.[key] || I18N['zh-CN'][key] || key; 
 function applyLang(lang) {
   currentLang = lang; localStorage.setItem('bridge_ui_lang', lang);
   document.documentElement.lang = lang;
-  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    if (el.id === 'approval-desc') return; // 保留内部 span#approval-tier，弹窗显示时动态重建
+    el.textContent = t(el.dataset.i18n);
+  });
   document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
   document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
   document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
@@ -600,9 +634,16 @@ function showApprovalDialog(msg) {
   approvalDeadline = Date.now() + (msg.timeout || 300) * 1000;
 
   document.getElementById('approval-tool').textContent = msg.tool;
-  document.getElementById('approval-tier').textContent = 'T' + (msg.tier || 2);
-  const tierSpan = document.getElementById('approval-tier');
-  tierSpan.style.color = msg.tier === 3 ? 'var(--error)' : 'var(--warn)';
+
+  // 确保 span#approval-tier 存在（applyLang 或 innerHTML 重建可能删除它）
+  let tierEl = document.getElementById('approval-tier');
+  if (!tierEl) {
+    const descEl = document.getElementById('approval-desc');
+    descEl.innerHTML = t('approval_desc') + '<span id="approval-tier"></span> ' + t('tool_tier' + (msg.tier || 2)) + ':';
+    tierEl = document.getElementById('approval-tier');
+  }
+  tierEl.textContent = 'T' + (msg.tier || 2);
+  tierEl.style.color = msg.tier === 3 ? 'var(--error)' : 'var(--warn)';
 
   const argsEl = document.getElementById('approval-args');
   argsEl.textContent = JSON.stringify(msg.args || {}, null, 2);
@@ -612,7 +653,8 @@ function showApprovalDialog(msg) {
 
   approvalOverlay.style.display = 'flex';
   document.getElementById('approval-title').textContent = t('approval_title');
-  document.getElementById('approval-desc').innerHTML = (t('approval_desc') + (msg.tier || 2) + ' ' + t('tool_tier' + (msg.tier || 2)) + ':');
+  const descEl2 = document.getElementById('approval-desc');
+  descEl2.innerHTML = (t('approval_desc') + '<span id="approval-tier" style="color:' + (msg.tier === 3 ? 'var(--error)' : 'var(--warn)') + ';font-weight:700;">T' + (msg.tier || 2) + '</span> ' + t('tool_tier' + (msg.tier || 2)) + ':');
 
   // Flash the page title to get user attention
   let originalTitle = document.title;
@@ -707,14 +749,26 @@ function addErrorMsg(text) {
   el.textContent = '[!] ' + text; messagesEl.appendChild(el); scrollBottom();
 }
 
+function fmtMsgTime() {
+  const d = new Date();
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 function addAiMessage(content) {
   const el = document.createElement('div'); el.className = 'msg ai';
-  el.innerHTML = renderMarkdown(content); messagesEl.appendChild(el); scrollBottom();
+  const time = document.createElement('span'); time.className = 'msg-time'; time.textContent = fmtMsgTime();
+  const body = document.createElement('div'); body.className = 'msg-body';
+  body.innerHTML = renderMarkdown(content);
+  el.appendChild(time); el.appendChild(body);
+  messagesEl.appendChild(el); scrollBottom();
 }
 
 function addUserMessage(text) {
   const el = document.createElement('div'); el.className = 'msg user';
-  el.textContent = text; messagesEl.appendChild(el); scrollBottom();
+  const body = document.createElement('div'); body.className = 'msg-body'; body.textContent = text;
+  const time = document.createElement('span'); time.className = 'msg-time'; time.textContent = fmtMsgTime();
+  el.appendChild(body); el.appendChild(time);
+  messagesEl.appendChild(el); scrollBottom();
 }
 
 function renderMarkdown(md) {
@@ -736,13 +790,13 @@ const TIER3 = ['Shell','App','PlaySound','FileWrite','FileUpload','KillProcess',
 const TIER2 = ['Click','Type','Move','Scroll','Shortcut','FocusWindow','MinimizeAll','Scrape','CancelTask','ReconnectSession'];
 
 function getTierBadge(toolName, tier) {
-  let t = tier || 1;
+  let tierLevel = tier || 1;
   if (!tier) {
-    if (TIER3.includes(toolName)) t = 3;
-    else if (TIER2.includes(toolName)) t = 2;
+    if (TIER3.includes(toolName)) tierLevel = 3;
+    else if (TIER2.includes(toolName)) tierLevel = 2;
   }
-  if (t === 3) return '<span class="tier-badge t3" title="' + t('tool_tier3') + '">T3</span>';
-  if (t === 2) return '<span class="tier-badge t2" title="' + t('tool_tier2') + '">T2</span>';
+  if (tierLevel === 3) return '<span class="tier-badge t3" title="' + t('tool_tier3') + '">T3</span>';
+  if (tierLevel === 2) return '<span class="tier-badge t2" title="' + t('tool_tier2') + '">T2</span>';
   return '';
 }
 

@@ -8,7 +8,8 @@
 A cloud-based AI remote diagnostics system for Windows computers. Users describe PC problems in natural language through a browser, and the cloud AI remotely executes diagnostic and repair commands via a lightweight Windows bridge program, then provides analysis reports.
 
 > **Live Demo:** http://106.54.193.9:8000  
-> **Admin Dashboard:** http://106.54.193.9:8000/admin
+> **Admin Dashboard:** http://106.54.193.9:8000/admin （默认账号：admin / admin）
+> **Update Log:** 详见 [CHANGELOG.md](CHANGELOG.md)
 
 ---
 

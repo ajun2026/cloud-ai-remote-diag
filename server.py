@@ -344,6 +344,85 @@ def generate_room_code() -> str:
 # ============================================================
 app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.3.0")
 
+# ============================================================
+# Admin authentication — simple session cookie
+# ============================================================
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
+ADMIN_SESSIONS: dict[str, float] = {}   # token -> expiry ts
+ADMIN_SESSION_TTL = 12 * 3600            # 12 hours
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", secrets.token_hex(16))
+
+
+def _admin_token_valid(token: str) -> bool:
+    exp = ADMIN_SESSIONS.get(token, 0)
+    return exp > time.time()
+
+
+def _require_admin(request: Request):
+    """Dependency: check admin session cookie."""
+    token = request.cookies.get("admin_token", "")
+    if not token or not _admin_token_valid(token):
+        return False
+    return True
+
+
+@app.post("/api/admin/login")
+async def admin_login(request: Request):
+    body = await request.json()
+    if body.get("username") != ADMIN_USERNAME or body.get("password") != ADMIN_PASSWORD:
+        return JSONResponse({"error": "用户名或密码错误"}, status_code=401)
+    token = secrets.token_hex(24)
+    ADMIN_SESSIONS[token] = time.time() + ADMIN_SESSION_TTL
+    resp = JSONResponse({"ok": True, "token": token})
+    resp.set_cookie("admin_token", token, max_age=ADMIN_SESSION_TTL, httponly=True, samesite="lax")
+    return resp
+
+
+@app.post("/api/admin/logout")
+async def admin_logout(request: Request):
+    token = request.cookies.get("admin_token", "")
+    ADMIN_SESSIONS.pop(token, None)
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("admin_token")
+    return resp
+
+
+@app.post("/api/admin/delete_room")
+async def admin_delete_room(request: Request):
+    """Delete a room's chat history (and approvals) from SQLite."""
+    if not _require_admin(request):
+        return JSONResponse({"error": "未授权"}, status_code=401)
+    body = await request.json()
+    room_code = (body.get("room_code") or "").strip().upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    try:
+        conn = _db_connect()
+        cur = conn.execute("DELETE FROM messages WHERE room_code = ?", (room_code,))
+        m_del = cur.rowcount
+        cur2 = conn.execute("DELETE FROM approvals WHERE room_code = ?", (room_code,))
+        a_del = cur2.rowcount
+        conn.commit()
+        conn.close()
+        # Also drop any in-memory room (disconnect if active)
+        if room_code in rooms:
+            r = rooms.pop(room_code, None)
+            if r:
+                for ws in (getattr(r, "browser_ws", None), getattr(r, "bridge_ws", None)):
+                    try:
+                        if ws:
+                            asyncio.create_task(ws.close())
+                    except Exception:
+                        pass
+        run_logger.info(f"[admin] deleted room {room_code}: {m_del} messages, {a_del} approvals")
+        return {"ok": True, "deleted_messages": m_del, "deleted_approvals": a_del}
+    except Exception as e:
+        run_logger.error(f"[admin] delete room failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+
 static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -353,13 +432,27 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 async def root():
     html_path = static_dir / "index.html"
     if html_path.exists():
-        return HTMLResponse(html_path.read_text(encoding="utf-8"))
+        return HTMLResponse(
+            html_path.read_text(encoding="utf-8"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
     return HTMLResponse("<h1>Please create static/index.html</h1>")
 
 
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.3.0"}
+
+
+@app.post("/api/debug_log")
+async def debug_log(request: Request):
+    """前端 JS 错误上报端点（调试用）"""
+    try:
+        body = await request.json()
+        run_logger.error(f"[UI-ERROR] {json.dumps(body, ensure_ascii=False)[:600]}")
+    except Exception as e:
+        run_logger.error(f"[UI-ERROR] parse failed: {e}")
+    return {"ok": True}
 
 
 @app.post("/api/rooms")
@@ -374,15 +467,19 @@ async def create_room():
 # Chat history API
 # ============================================================
 @app.get("/api/history/{room_code}")
-async def get_history(room_code: str, limit: int = 200):
+async def get_history(request: Request, room_code: str, limit: int = 200):
     """Get chat history for a room from SQLite."""
+    if not _require_admin(request):
+        return JSONResponse({"error": "未授权"}, status_code=401)
     messages = get_room_messages(room_code, limit)
     return {"room_code": room_code, "messages": messages}
 
 
 @app.get("/api/rooms/list")
-async def list_rooms():
+async def list_rooms(request: Request):
     """List all rooms with message history."""
+    if not _require_admin(request):
+        return JSONResponse({"error": "未授权"}, status_code=401)
     return {"rooms": get_all_rooms()}
 
 
@@ -390,8 +487,10 @@ async def list_rooms():
 # Admin API
 # ============================================================
 @app.get("/api/admin/stats")
-async def admin_stats():
+async def admin_stats(request: Request):
     """Return server stats for admin dashboard."""
+    if not _require_admin(request):
+        return JSONResponse({"error": "未授权"}, status_code=401)
     active_rooms = []
     for code, room in rooms.items():
         active_rooms.append({
@@ -415,8 +514,10 @@ async def admin_stats():
 
 
 @app.get("/api/admin/logs/{log_name}")
-async def admin_logs(log_name: str, lines: int = 200):
+async def admin_logs(request: Request, log_name: str, lines: int = 200):
     """Read server log files (server.log, chat.log, bridge.log)."""
+    if not _require_admin(request):
+        return JSONResponse({"error": "未授权"}, status_code=401)
     allowed = {"server.log", "chat.log", "bridge.log"}
     if log_name not in allowed:
         return JSONResponse({"error": f"Log not allowed. Choose: {', '.join(sorted(allowed))}"}, status_code=400)
@@ -433,12 +534,97 @@ async def admin_logs(log_name: str, lines: int = 200):
 
 
 @app.get("/admin")
-async def admin_page():
+async def admin_page(request: Request):
+    if not _require_admin(request):
+        return HTMLResponse(_login_page_html())
     html_path = static_dir / "admin.html"
     if html_path.exists():
         return HTMLResponse(html_path.read_text(encoding="utf-8"))
     # Generate inline admin page
     return _generate_admin_html()
+
+
+def _login_page_html() -> str:
+    return r"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理后台登录 — 云端 AI 远程运维助手</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif;
+    background: #1a1a2e; color: #eaeaea; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .login-box {
+    background: #16213e; border: 1px solid #2a2a4a; border-radius: 12px;
+    padding: 40px 44px; width: 360px; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .login-box h1 { font-size: 20px; color: #60a5fa; margin-bottom: 6px; text-align:center; }
+  .login-box .sub { font-size: 13px; color: #a0a0b0; text-align:center; margin-bottom: 28px; }
+  .login-box label { display:block; font-size: 13px; color: #a0a0b0; margin: 14px 0 6px; }
+  .login-box input {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a2a4a;
+    background: #0f3460; color: #eaeaea; font-size: 14px; outline: none;
+  }
+  .login-box input:focus { border-color: #60a5fa; }
+  .login-box button {
+    width: 100%; margin-top: 24px; padding: 11px; border: none; border-radius: 8px;
+    background: #60a5fa; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .login-box button:hover { background: #3b82f6; }
+  .login-box .err { color: #f87171; font-size: 13px; text-align:center; margin-top: 12px; min-height: 18px; }
+  .login-box .back { display:block; text-align:center; margin-top: 16px; font-size: 12px; color:#a0a0b0; text-decoration:none; }
+  .login-box .back:hover { color:#60a5fa; }
+</style>
+</head>
+<body>
+<div class="login-box">
+  <h1>🔐 管理后台</h1>
+  <div class="sub">云端 AI 远程运维助手 · 请登录</div>
+  <form id="login-form">
+    <label for="username">账号</label>
+    <input type="text" id="username" name="username" placeholder="请输入账号" autocomplete="username" required>
+    <label for="password">密码</label>
+    <input type="password" id="password" name="password" placeholder="请输入密码" autocomplete="current-password" required>
+    <button type="submit" id="login-btn">登 录</button>
+    <div class="err" id="login-err"></div>
+  </form>
+  <a class="back" href="/">← 返回聊天页面</a>
+</div>
+<script>
+document.getElementById('login-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const btn = document.getElementById('login-btn');
+  const err = document.getElementById('login-err');
+  btn.disabled = true; btn.textContent = '登录中...'; err.textContent = '';
+  try {
+    const resp = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        username: document.getElementById('username').value.trim(),
+        password: document.getElementById('password').value
+      })
+    });
+    const data = await resp.json();
+    if (resp.ok && data.ok) {
+      window.location.href = '/admin';
+    } else {
+      err.textContent = data.error || '登录失败';
+      btn.disabled = false; btn.textContent = '登 录';
+    }
+  } catch(ex) {
+    err.textContent = '网络错误: ' + ex.message;
+    btn.disabled = false; btn.textContent = '登 录';
+  }
+});
+</script>
+</body>
+</html>
+"""
 
 
 def _generate_admin_html():
@@ -514,6 +700,7 @@ def _generate_admin_html():
 </div>
 
 <button class="btn-refresh" onclick="refresh()" style="margin-bottom:16px;">刷新数据</button>
+<button class="btn-refresh" onclick="logout()" style="margin-bottom:16px;">退出登录</button>
 <a href="/" style="color:var(--info);margin-left:12px;font-size:13px;">返回聊天页面</a>
 
 <h2>当前活跃房间</h2>
@@ -577,7 +764,8 @@ async function refresh() {
       + '<td>' + r.msg_count + '</td>'
       + '<td>' + r.first_seen + '</td>'
       + '<td>' + r.last_seen + '</td>'
-      + '<td><a href="#" onclick="viewRoom(\'' + r.room_code + '\')" style="color:var(--info)">查看</a></td>'
+      + '<td><a href="#" onclick="viewRoom(\'' + r.room_code + '\')" style="color:var(--info)">查看</a>'
+      + '&nbsp;|&nbsp;<a href="#" onclick="deleteRoom(\'' + r.room_code + '\')" style="color:var(--error)">删除</a></td>'
       + '</tr>';
   }
 }
@@ -600,9 +788,38 @@ async function viewRoom(code) {
   URL.revokeObjectURL(url);
 }
 
+async function deleteRoom(code) {
+  if (!confirm('确定删除房间 ' + code + ' 的所有聊天记录？此操作不可恢复！')) return;
+  try {
+    const resp = await fetch('/api/admin/delete_room', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ room_code: code })
+    });
+    const data = await resp.json();
+    if (resp.ok && data.ok) {
+      alert('已删除房间 ' + code + '：' + (data.deleted_messages||0) + ' 条消息，' + (data.deleted_approvals||0) + ' 条审批');
+      refresh();
+    } else {
+      alert(data.error || '删除失败');
+    }
+  } catch(e) {
+    alert('网络错误: ' + e.message);
+  }
+}
+
+async function logout() {
+  try {
+    await fetch('/api/admin/logout', { method: 'POST' });
+  } catch(e) {}
+  window.location.href = '/admin';
+}
+
 function setActiveLog(name) {
   document.querySelectorAll('.log-tabs button').forEach(b => b.className = 'btn-refresh');
-  document.getElementById('tab-' + name.replace('.','')).className = 'btn-primary';
+  const tabId = 'tab-' + name.split('.')[0];
+  const btn = document.getElementById(tabId);
+  if (btn) btn.className = 'btn-primary';
 }
 
 async function loadLog(name) {
@@ -644,6 +861,7 @@ async def request_approval(room: Room, fn_name: str, fn_args: dict, tier: int,
             "tier": tier,
             "timeout": timeout,
         })
+        run_logger.info(f"[{room.code}] Sent approval_required for {fn_name} (tier {tier}), id={approval_id}")
 
         try:
             result = await asyncio.wait_for(future, timeout=timeout)
@@ -827,6 +1045,7 @@ async def ws_browser(websocket: WebSocket, room_code: str):
     })
 
     http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0), limits=httpx.Limits(max_keepalive_connections=5, max_connections=10))
+    agent_task = None
 
     try:
         while True:
@@ -843,7 +1062,6 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                         "type": "error",
                         "content": "Bridge not connected. Please start the bridge on the Windows PC and enter the room code.",
                     })
-                    sendBtn_disabled = False  # allow retry
                     continue
 
                 # Send "analyzing" and log it
@@ -853,34 +1071,49 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                     "content": "Analyzing your request...",
                 })
 
-                try:
-                    answer = await asyncio.wait_for(
-                        run_agent(user_message, room, http_client, websocket),
-                        timeout=300.0  # 5 minute total timeout for agent
-                    )
-                    chat_logger.info(f"[{room_code}] AI: {answer[:500]}")
-                    await websocket.send_json({
-                        "type": "ai_message",
-                        "content": answer,
-                    })
-                    await websocket.send_json({"type": "ai_done"})
-                except asyncio.TimeoutError:
-                    run_logger.error(f"[{room_code}] Agent timed out after 5 minutes")
+                # 若上一个 agent 还在运行，拒绝新消息（保持串行）
+                if agent_task and not agent_task.done():
+                    run_logger.info(f"[{room_code}] Busy, rejecting message: {user_message[:50]}")
                     await websocket.send_json({
                         "type": "error",
-                        "content": "Request timed out. Please try again with a simpler question.",
+                        "content": "上一条请求还在处理中，请稍候再试。",
                     })
-                except httpx.HTTPStatusError as e:
-                    await websocket.send_json({
-                        "type": "error",
-                        "content": f"AI API call failed ({e.response.status_code}). Please check API configuration.",
-                    })
-                except Exception as e:
-                    run_logger.exception(f"Agent error in room {room_code}")
-                    await websocket.send_json({
-                        "type": "error",
-                        "content": f"Agent error: {str(e)}",
-                    })
+                    continue
+
+                # 后台任务运行 agent，主循环保持活跃以便接收 approval_response
+                async def agent_runner(user_message, room, http_client, websocket):
+                    try:
+                        answer = await asyncio.wait_for(
+                            run_agent(user_message, room, http_client, websocket),
+                            timeout=300.0  # 5 minute total timeout for agent
+                        )
+                        chat_logger.info(f"[{room_code}] AI: {answer[:500]}")
+                        await websocket.send_json({
+                            "type": "ai_message",
+                            "content": answer,
+                        })
+                        await websocket.send_json({"type": "ai_done"})
+                    except asyncio.TimeoutError:
+                        run_logger.error(f"[{room_code}] Agent timed out after 5 minutes")
+                        await websocket.send_json({
+                            "type": "error",
+                            "content": "Request timed out. Please try again with a simpler question.",
+                        })
+                    except httpx.HTTPStatusError as e:
+                        await websocket.send_json({
+                            "type": "error",
+                            "content": f"AI API call failed ({e.response.status_code}). Please check API configuration.",
+                        })
+                    except Exception as e:
+                        run_logger.exception(f"Agent error in room {room_code}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "content": f"Agent error: {str(e)}",
+                        })
+
+                agent_task = asyncio.create_task(
+                    agent_runner(user_message, room, http_client, websocket)
+                )
 
             elif msg_data.get("type") == "approval_response":
                 # User responded to an approval prompt
