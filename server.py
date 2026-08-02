@@ -1,0 +1,993 @@
+"""
+Cloud AI Remote Diagnostics Assistant — Server
+FastAPI + WebSocket + Agent Core
+Features: 49 tools, Tier 2/3 approval, SQLite chat history, admin dashboard
+"""
+import asyncio
+import json
+import logging
+import os
+import secrets
+import sqlite3
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+import httpx
+from dotenv import load_dotenv
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+load_dotenv()
+
+# ============================================================
+# Logging config
+# ============================================================
+LOG_DIR = Path(__file__).parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+chat_logger = logging.getLogger("chat")
+chat_logger.setLevel(logging.INFO)
+chat_handler = logging.FileHandler(LOG_DIR / "chat.log", encoding="utf-8")
+chat_handler.setFormatter(logging.Formatter(
+    "%(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+chat_logger.addHandler(chat_handler)
+
+run_logger = logging.getLogger("server")
+run_logger.setLevel(logging.INFO)
+run_handler = logging.FileHandler(LOG_DIR / "server.log", encoding="utf-8")
+run_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+run_logger.addHandler(run_handler)
+console = logging.StreamHandler()
+console.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+console.setLevel(logging.INFO)
+run_logger.addHandler(console)
+
+# ============================================================
+# Config
+# ============================================================
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "sk-your-api-key-here")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "deepseek-chat")
+SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
+SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
+
+# ============================================================
+# SQLite database for chat history
+# ============================================================
+DB_PATH = LOG_DIR / "chat.db"
+
+def _db_connect():
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+def init_db():
+    conn = _db_connect()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_code TEXT NOT NULL,
+            role TEXT NOT NULL,       -- 'user', 'ai', 'tool', 'status', 'error'
+            content TEXT NOT NULL,
+            tool_name TEXT DEFAULT NULL,
+            tier INTEGER DEFAULT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_code, created_at)")
+    # Approval log
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS approvals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_code TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            args TEXT DEFAULT NULL,
+            tier INTEGER NOT NULL,
+            approved INTEGER NOT NULL DEFAULT 0,  -- 0=pending, 1=approved, -1=denied
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def save_message(room_code: str, role: str, content: str, tool_name: str = None, tier: int = None):
+    try:
+        conn = _db_connect()
+        conn.execute(
+            "INSERT INTO messages (room_code, role, content, tool_name, tier) VALUES (?, ?, ?, ?, ?)",
+            (room_code, role, content, tool_name, tier)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"DB save error: {e}")
+
+def save_approval(room_code: str, tool_name: str, args: dict, tier: int, approved: int):
+    try:
+        conn = _db_connect()
+        conn.execute(
+            "INSERT INTO approvals (room_code, tool_name, args, tier, approved) VALUES (?, ?, ?, ?, ?)",
+            (room_code, tool_name, json.dumps(args, ensure_ascii=False), tier, approved)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"DB approval save error: {e}")
+
+def get_room_messages(room_code: str, limit: int = 200) -> list[dict]:
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            "SELECT * FROM messages WHERE room_code = ? ORDER BY created_at ASC LIMIT ?",
+            (room_code, limit)
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+def get_all_rooms() -> list[dict]:
+    try:
+        conn = _db_connect()
+        rows = conn.execute("""
+            SELECT room_code,
+                   MIN(created_at) AS first_seen,
+                   MAX(created_at) AS last_seen,
+                   COUNT(*) AS msg_count
+            FROM messages
+            GROUP BY room_code
+            ORDER BY last_seen DESC
+            LIMIT 100
+        """).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+def get_server_stats() -> dict:
+    try:
+        conn = _db_connect()
+        total_msgs = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        total_rooms = conn.execute("SELECT COUNT(DISTINCT room_code) FROM messages").fetchone()[0]
+        total_tools = conn.execute("SELECT COUNT(*) FROM messages WHERE role='tool'").fetchone()[0]
+        approvals = conn.execute(
+            "SELECT approved, COUNT(*) FROM approvals GROUP BY approved"
+        ).fetchall()
+        approval_stats = {"pending": 0, "approved": 0, "denied": 0}
+        for row in approvals:
+            if row[0] == 0: approval_stats["pending"] = row[1]
+            elif row[0] == 1: approval_stats["approved"] = row[1]
+            elif row[0] == -1: approval_stats["denied"] = row[1]
+        conn.close()
+        return {
+            "total_messages": total_msgs,
+            "total_rooms": total_rooms,
+            "total_tool_calls": total_tools,
+            "approval_stats": approval_stats,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+# Initialize DB on startup
+init_db()
+
+# ============================================================
+# Tool definitions — 3 tiers
+# ============================================================
+TOOL_TIERS = {
+    "run_systeminfo": 1, "run_dxdiag": 1, "read_event_log": 1, "run_powershell": 1,
+    "GetSystemInfo": 1, "Snapshot": 1, "AnnotatedSnapshot": 1, "GetClipboard": 1,
+    "ListProcesses": 1, "FileList": 1, "FileSearch": 1, "FileRead": 1,
+    "FileDownload": 1, "RegRead": 1, "ServiceList": 1, "TaskList": 1,
+    "EventLog": 1, "Ping": 1, "PortCheck": 1, "NetConnections": 1,
+    "OCR": 1, "ScreenRecord": 1, "Notification": 1, "Wait": 1,
+    "GetTaskStatus": 1, "GetRunningTasks": 1,
+    # Tier 2 — Interactive
+    "Click": 2, "Type": 2, "Move": 2, "Scroll": 2, "Shortcut": 2,
+    "FocusWindow": 2, "MinimizeAll": 2, "Scrape": 2, "CancelTask": 2,
+    "ReconnectSession": 2,
+    # Tier 3 — Dangerous
+    "Shell": 3, "App": 3, "PlaySound": 3, "FileWrite": 3, "FileUpload": 3,
+    "KillProcess": 3, "RegWrite": 3, "ServiceStart": 3, "ServiceStop": 3,
+    "TaskCreate": 3, "TaskDelete": 3, "SetClipboard": 3, "LockScreen": 3,
+}
+
+TOOLS = [
+    {"type":"function","function":{"name":"run_systeminfo","description":"Run systeminfo to get OS version, hardware, memory, and network info.","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"run_dxdiag","description":"Generate DirectX diagnostic report (dxdiag) with GPU, audio, and driver info.","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"read_event_log","description":"Read Windows System event log for errors and warnings.","parameters":{"type":"object","properties":{"max_events":{"type":"integer","description":"Max entries (default 50)","default":50},"level":{"type":"string","enum":["Critical","Error","Warning","Information"],"description":"Level filter"}},"required":[]}}},
+    {"type":"function","function":{"name":"run_powershell","description":"Execute a read-only PowerShell diagnostic command. Do NOT use for write/delete/modify.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"PowerShell command (read-only only)"}},"required":["command"]}}},
+    {"type":"function","function":{"name":"GetSystemInfo","description":"Get system info: CPU, memory, disk, network, uptime. Quick summary.","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"Snapshot","description":"Capture desktop screenshot + window list + interactive UI elements. Returns base64 JPEG + text summary.","parameters":{"type":"object","properties":{"use_vision":{"type":"boolean","description":"Include screenshot (default true)","default":True},"quality":{"type":"integer","description":"JPEG quality 1-100","default":75},"max_width":{"type":"integer","description":"Max image width, 0=native","default":0},"monitor":{"type":"integer","description":"Monitor 0=all, 1/2/3=specific","default":0}},"required":[]}}},
+    {"type":"function","function":{"name":"AnnotatedSnapshot","description":"Screenshot with numbered red rectangles on clickable UI elements.","parameters":{"type":"object","properties":{"max_elements":{"type":"integer","description":"Max elements (default 30)","default":30},"quality":{"type":"integer","description":"JPEG quality 1-100","default":75},"max_width":{"type":"integer","description":"Max image width","default":0}},"required":[]}}},
+    {"type":"function","function":{"name":"GetClipboard","description":"Read the Windows clipboard text content.","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"SetClipboard","description":"Set the Windows clipboard text. [Tier 3 — write]","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text to place on clipboard"}},"required":["text"]}}},
+    {"type":"function","function":{"name":"Click","description":"Mouse click at screen coordinates. [Tier 2 — interactive]","parameters":{"type":"object","properties":{"x":{"type":"integer","description":"X coordinate"},"y":{"type":"integer","description":"Y coordinate"},"button":{"type":"string","enum":["left","right","middle"],"default":"left"},"action":{"type":"string","enum":["click","double","hover"],"default":"click"}},"required":["x","y"]}}},
+    {"type":"function","function":{"name":"Type","description":"Type text, optionally at coordinates. [Tier 2]","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text to type"},"x":{"type":"integer","default":0},"y":{"type":"integer","default":0},"clear":{"type":"boolean","default":False},"press_enter":{"type":"boolean","default":False}},"required":["text"]}}},
+    {"type":"function","function":{"name":"Move","description":"Move mouse or drag. [Tier 2]","parameters":{"type":"object","properties":{"x":{"type":"integer"},"y":{"type":"integer"},"drag":{"type":"boolean","default":False},"start_x":{"type":"integer","default":0},"start_y":{"type":"integer","default":0},"duration":{"type":"number","default":0.3}},"required":["x","y"]}}},
+    {"type":"function","function":{"name":"Scroll","description":"Scroll at position. [Tier 2]","parameters":{"type":"object","properties":{"amount":{"type":"integer"},"x":{"type":"integer","default":0},"y":{"type":"integer","default":0},"horizontal":{"type":"boolean","default":False}},"required":["amount"]}}},
+    {"type":"function","function":{"name":"Shortcut","description":"Execute keyboard shortcut e.g. 'ctrl+c', 'alt+tab'. [Tier 2]","parameters":{"type":"object","properties":{"keys":{"type":"string","description":"Shortcut string"}},"required":["keys"]}}},
+    {"type":"function","function":{"name":"Wait","description":"Pause execution for N seconds.","parameters":{"type":"object","properties":{"seconds":{"type":"number","default":1.0}},"required":[]}}},
+    {"type":"function","function":{"name":"FocusWindow","description":"Bring window to foreground. [Tier 2]","parameters":{"type":"object","properties":{"title":{"type":"string","default":""},"handle":{"type":"integer","default":0}},"required":[]}}},
+    {"type":"function","function":{"name":"MinimizeAll","description":"Minimize all windows (Win+D). [Tier 2]","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"App","description":"Launch/switch/resize an application. [Tier 3]","parameters":{"type":"object","properties":{"action":{"type":"string","enum":["launch","switch","resize"],"default":"launch"},"name":{"type":"string","default":""},"args":{"type":"string","default":""},"handle":{"type":"integer","default":0},"width":{"type":"integer","default":0},"height":{"type":"integer","default":0}},"required":[]}}},
+    {"type":"function","function":{"name":"ReconnectSession","description":"Reconnect disconnected RDP session to console. [Tier 2]","parameters":{"type":"object","properties":{"force":{"type":"boolean","default":False}},"required":[]}}},
+    {"type":"function","function":{"name":"Notification","description":"Show a Windows toast notification.","parameters":{"type":"object","properties":{"title":{"type":"string","default":"Bridge Alert"},"message":{"type":"string","default":""}},"required":[]}}},
+    {"type":"function","function":{"name":"PlaySound","description":"Play audio file (.wav/.mp3/.ogg). [Tier 3]","parameters":{"type":"object","properties":{"path":{"type":"string","default":""},"url":{"type":"string","default":""}},"required":[]}}},
+    {"type":"function","function":{"name":"LockScreen","description":"Lock the Windows workstation. [Tier 3]","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"ListProcesses","description":"List running processes with CPU/memory usage.","parameters":{"type":"object","properties":{"filter":{"type":"string","default":""},"sort_by":{"type":"string","enum":["cpu","memory","name"],"default":"memory"},"limit":{"type":"integer","default":30}},"required":[]}}},
+    {"type":"function","function":{"name":"KillProcess","description":"Kill a process by PID or name. [Tier 3 — destructive]","parameters":{"type":"object","properties":{"pid":{"type":"integer","default":0},"name":{"type":"string","default":""}},"required":[]}}},
+    {"type":"function","function":{"name":"FileRead","description":"Read file content. Returns base64 for binary.","parameters":{"type":"object","properties":{"path":{"type":"string"},"encoding":{"type":"string","default":"utf-8"}},"required":["path"]}}},
+    {"type":"function","function":{"name":"FileWrite","description":"Write content to a file. [Tier 3]","parameters":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"encoding":{"type":"string","default":"utf-8"},"append":{"type":"boolean","default":False}},"required":["path","content"]}}},
+    {"type":"function","function":{"name":"FileList","description":"List directory contents with size and date.","parameters":{"type":"object","properties":{"path":{"type":"string","default":"."},"show_hidden":{"type":"boolean","default":False}},"required":[]}}},
+    {"type":"function","function":{"name":"FileSearch","description":"Search files by name pattern (glob).","parameters":{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string","default":"."},"recursive":{"type":"boolean","default":True},"limit":{"type":"integer","default":50}},"required":["pattern"]}}},
+    {"type":"function","function":{"name":"FileDownload","description":"Download a file as base64-encoded content.","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}},
+    {"type":"function","function":{"name":"FileUpload","description":"Upload a file from base64-encoded content. [Tier 3]","parameters":{"type":"object","properties":{"path":{"type":"string"},"data_base64":{"type":"string"}},"required":["path","data_base64"]}}},
+    {"type":"function","function":{"name":"RegRead","description":"Read a Windows registry value.","parameters":{"type":"object","properties":{"key":{"type":"string"},"value_name":{"type":"string"}},"required":["key","value_name"]}}},
+    {"type":"function","function":{"name":"RegWrite","description":"Write a Windows registry value. [Tier 3 — dangerous]","parameters":{"type":"object","properties":{"key":{"type":"string"},"value_name":{"type":"string"},"data":{"type":"string"},"reg_type":{"type":"string","enum":["REG_SZ","REG_EXPAND_SZ","REG_DWORD","REG_QWORD","REG_BINARY","REG_MULTI_SZ"],"default":"REG_SZ"}},"required":["key","value_name","data"]}}},
+    {"type":"function","function":{"name":"ServiceList","description":"List Windows services.","parameters":{"type":"object","properties":{"filter":{"type":"string","default":""}},"required":[]}}},
+    {"type":"function","function":{"name":"ServiceStart","description":"Start a Windows service. [Tier 3]","parameters":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}},
+    {"type":"function","function":{"name":"ServiceStop","description":"Stop a Windows service. [Tier 3]","parameters":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}},
+    {"type":"function","function":{"name":"TaskList","description":"List Windows scheduled tasks.","parameters":{"type":"object","properties":{"filter":{"type":"string","default":""}},"required":[]}}},
+    {"type":"function","function":{"name":"TaskCreate","description":"Create a scheduled task. [Tier 3 — persistence]","parameters":{"type":"object","properties":{"name":{"type":"string"},"command":{"type":"string"},"schedule":{"type":"string"}},"required":["name","command","schedule"]}}},
+    {"type":"function","function":{"name":"TaskDelete","description":"Delete a scheduled task. [Tier 3]","parameters":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}},
+    {"type":"function","function":{"name":"EventLog","description":"Read Windows Event Log (System/Application/Security).","parameters":{"type":"object","properties":{"log_name":{"type":"string","default":"System"},"count":{"type":"integer","default":20},"level":{"type":"string","enum":["critical","error","warning","information","verbose"],"default":""}},"required":[]}}},
+    {"type":"function","function":{"name":"Ping","description":"Ping a host.","parameters":{"type":"object","properties":{"host":{"type":"string"},"count":{"type":"integer","default":4}},"required":["host"]}}},
+    {"type":"function","function":{"name":"PortCheck","description":"Check if a TCP port is open.","parameters":{"type":"object","properties":{"host":{"type":"string"},"port":{"type":"integer"},"timeout":{"type":"number","default":5.0}},"required":["host","port"]}}},
+    {"type":"function","function":{"name":"NetConnections","description":"List active network connections.","parameters":{"type":"object","properties":{"filter":{"type":"string","default":""},"limit":{"type":"integer","default":50}},"required":[]}}},
+    {"type":"function","function":{"name":"OCR","description":"Extract text from screen using OCR.","parameters":{"type":"object","properties":{"left":{"type":"integer","default":0},"top":{"type":"integer","default":0},"right":{"type":"integer","default":0},"bottom":{"type":"integer","default":0},"lang":{"type":"string","default":"eng"}},"required":[]}}},
+    {"type":"function","function":{"name":"ScreenRecord","description":"Record screen as animated GIF.","parameters":{"type":"object","properties":{"duration":{"type":"number","default":3.0},"fps":{"type":"integer","default":5},"left":{"type":"integer","default":0},"top":{"type":"integer","default":0},"right":{"type":"integer","default":0},"bottom":{"type":"integer","default":0},"max_width":{"type":"integer","default":800}},"required":[]}}},
+    {"type":"function","function":{"name":"Shell","description":"Execute a PowerShell command. [Tier 3 — full system access]","parameters":{"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer","default":30},"cwd":{"type":"string","default":""}},"required":["command"]}}},
+    {"type":"function","function":{"name":"Scrape","description":"Fetch URL content as markdown. [Tier 2]","parameters":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}}},
+    {"type":"function","function":{"name":"CancelTask","description":"Cancel a running task. [Tier 2]","parameters":{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"]}}},
+    {"type":"function","function":{"name":"GetTaskStatus","description":"Get status of a task or list recent tasks.","parameters":{"type":"object","properties":{"task_id":{"type":"string","default":""}},"required":[]}}},
+    {"type":"function","function":{"name":"GetRunningTasks","description":"List all running and pending tasks.","parameters":{"type":"object","properties":{},"required":[]}}},
+]
+
+SYSTEM_PROMPT = """You are a professional Windows remote diagnostics assistant. You remotely execute diagnostic commands via a bridge program installed on the user's PC to help troubleshoot computer issues.
+
+## Your Capabilities
+
+You have access to 49 tools across 3 tiers:
+
+### Tier 1 — Read-only Diagnostics (always available, no approval needed)
+- **System Info**: GetSystemInfo, run_systeminfo, run_dxdiag, ListProcesses
+- **Desktop View**: Snapshot, AnnotatedSnapshot, GetClipboard, OCR, ScreenRecord
+- **Files**: FileList, FileSearch, FileRead, FileDownload
+- **Registry**: RegRead (read only)
+- **Services & Tasks**: ServiceList, TaskList (view only)
+- **Network**: Ping, PortCheck, NetConnections
+- **Events**: read_event_log, EventLog
+- **Other**: Notification, Wait, GetTaskStatus, GetRunningTasks, run_powershell
+
+### Tier 2 — Interactive Desktop Control (requires user approval)
+- **Mouse**: Click, Move, Scroll
+- **Keyboard**: Type, Shortcut
+- **Window**: FocusWindow, MinimizeAll
+- **Other**: Scrape, CancelTask, ReconnectSession
+
+### Tier 3 — System Modification (requires explicit user approval)
+- **Shell**: Shell (arbitrary PowerShell), App (launch apps)
+- **Files**: FileWrite, FileUpload
+- **Processes**: KillProcess
+- **Registry**: RegWrite
+- **Services**: ServiceStart, ServiceStop
+- **Tasks**: TaskCreate, TaskDelete
+- **Other**: SetClipboard, LockScreen, PlaySound
+
+## IMPORTANT Rules for Actions
+When the user asks you to do something (close a program, delete a file, etc.):
+1. First use a Tier 1 tool to understand the situation (e.g. ListProcesses to find PIDs)
+2. Then IMMEDIATELY call the action tool — do NOT write paragraphs asking for confirmation
+3. The system shows an approval popup — that IS the confirmation
+4. If the tool returns [approval_denied], tell the user "The operation was denied"
+
+Example flow:
+User: "Close Feishu"
+You: call ListProcesses(filter="Feishu") first → see 9 processes
+You: "Feishu has 9 processes, closing them now." → call KillProcess(name="Feishu")
+  → Approval popup appears → user clicks Approve → done!
+
+NOT this:
+User: "Close Feishu"
+You: "Are you sure? This is dangerous. Please confirm..." → never calls the tool!
+
+## How to Work
+1. Understand the problem, plan what to collect
+2. Tier 1 tools first to diagnose
+3. For actions: EXPLAIN BRIEFLY (1-2 sentences) then CALL THE TOOL
+4. Report in Chinese with markdown
+5. If information is insufficient, ask for more details"""
+
+
+
+
+# ============================================================
+# Room management
+# ============================================================
+class Room:
+    def __init__(self, code: str):
+        self.code = code
+        self.browser_ws: Optional[WebSocket] = None
+        self.bridge_ws: Optional[WebSocket] = None
+        self.created_at = datetime.now(timezone.utc)
+        self.pending_commands: dict[str, asyncio.Future] = {}
+        # Approval: cmd_id -> Future that resolves when user approves/denies
+        self.pending_approvals: dict[str, asyncio.Future] = {}
+        # Auto-approve setting: if True, skip approval prompts for Tier 2
+        self.auto_approve_tier2: bool = False
+        # Machine identity — populated when bridge connects and sends identify
+        self.machine: dict = {}
+        self.remote_ip: str = ""
+
+    def is_ready(self) -> bool:
+        return self.browser_ws is not None and self.bridge_ws is not None
+
+
+rooms: dict[str, Room] = {}
+
+
+def generate_room_code() -> str:
+    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(chars) for _ in range(6))
+
+
+# ============================================================
+# FastAPI app
+# ============================================================
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.3.0")
+
+static_dir = Path(__file__).parent / "static"
+static_dir.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+@app.get("/")
+async def root():
+    html_path = static_dir / "index.html"
+    if html_path.exists():
+        return HTMLResponse(html_path.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Please create static/index.html</h1>")
+
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.3.0"}
+
+
+@app.post("/api/rooms")
+async def create_room():
+    code = generate_room_code()
+    rooms[code] = Room(code)
+    run_logger.info(f"Room created: {code}")
+    return {"room_code": code}
+
+
+# ============================================================
+# Chat history API
+# ============================================================
+@app.get("/api/history/{room_code}")
+async def get_history(room_code: str, limit: int = 200):
+    """Get chat history for a room from SQLite."""
+    messages = get_room_messages(room_code, limit)
+    return {"room_code": room_code, "messages": messages}
+
+
+@app.get("/api/rooms/list")
+async def list_rooms():
+    """List all rooms with message history."""
+    return {"rooms": get_all_rooms()}
+
+
+# ============================================================
+# Admin API
+# ============================================================
+@app.get("/api/admin/stats")
+async def admin_stats():
+    """Return server stats for admin dashboard."""
+    active_rooms = []
+    for code, room in rooms.items():
+        active_rooms.append({
+            "room_code": code,
+            "browser_connected": room.browser_ws is not None,
+            "bridge_connected": room.bridge_ws is not None,
+            "created_at": room.created_at.isoformat(),
+            "auto_approve_tier2": room.auto_approve_tier2,
+            "machine": room.machine,
+            "remote_ip": room.remote_ip,
+        })
+
+    db_stats = get_server_stats()
+    return {
+        "active_rooms": active_rooms,
+        "active_count": len(active_rooms),
+        **db_stats,
+        "tool_count": len(TOOLS),
+        "version": "0.3.0",
+    }
+
+
+@app.get("/api/admin/logs/{log_name}")
+async def admin_logs(log_name: str, lines: int = 200):
+    """Read server log files (server.log, chat.log, bridge.log)."""
+    allowed = {"server.log", "chat.log", "bridge.log"}
+    if log_name not in allowed:
+        return JSONResponse({"error": f"Log not allowed. Choose: {', '.join(sorted(allowed))}"}, status_code=400)
+    log_path = LOG_DIR / log_name
+    if not log_path.exists():
+        return {"log": log_name, "content": "(log file not found)", "lines": 0}
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            content_lines = f.readlines()
+        tail = content_lines[-lines:] if len(content_lines) > lines else content_lines
+        return {"log": log_name, "content": "".join(tail), "total_lines": len(content_lines), "shown": len(tail)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/admin")
+async def admin_page():
+    html_path = static_dir / "admin.html"
+    if html_path.exists():
+        return HTMLResponse(html_path.read_text(encoding="utf-8"))
+    # Generate inline admin page
+    return _generate_admin_html()
+
+
+def _generate_admin_html():
+    return HTMLResponse(r"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理后台 — 云端 AI 远程运维助手</title>
+<style>
+  :root {
+    --bg: #1a1a2e; --surface: #16213e; --surface2: #0f3460;
+    --accent: #e94560; --text: #eaeaea; --text2: #a0a0b0;
+    --border: #2a2a4a; --success: #4ade80; --warn: #fbbf24;
+    --error: #f87171; --info: #60a5fa;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); padding: 20px;
+  }
+  h1 { margin-bottom: 6px; color: var(--info); }
+  h1 .subtitle { font-size: 14px; color: var(--text2); font-weight: 400; margin-left: 12px; }
+  h2 { margin: 24px 0 10px; font-size: 18px; color: var(--warn); }
+  .stats { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
+  .stat-card {
+    background: var(--surface); border:1px solid var(--border);
+    border-radius:10px; padding:16px 24px; min-width:140px; text-align:center;
+  }
+  .stat-card .num { font-size: 32px; font-weight: 700; color: var(--info); }
+  .stat-card .label { font-size: 12px; color: var(--text2); margin-top:4px; }
+  table {
+    width:100%; border-collapse:collapse; margin-bottom:16px;
+    background: var(--surface); border-radius:8px; overflow:hidden;
+  }
+  th, td {
+    padding:8px 12px; text-align:left; font-size:13px;
+    border-bottom:1px solid var(--border);
+  }
+  th { background: var(--surface2); color: var(--text2); }
+  .badge {
+    display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600;
+  }
+  .badge.on { background:rgba(74,222,128,0.2); color:var(--success); }
+  .badge.off { background:rgba(248,113,113,0.2); color:var(--error); }
+  .badge.yes { background:rgba(251,191,36,0.15); color:var(--warn); }
+  .badge.no { background:rgba(96,165,250,0.15); color:var(--info); }
+  pre {
+    background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    padding:12px; font-size:11px; max-height:400px; overflow:auto; white-space:pre-wrap;
+  }
+  button {
+    padding:8px 16px; border:none; border-radius:6px; cursor:pointer;
+    font-size:13px; font-weight:600; margin-right:8px;
+  }
+  .btn-primary { background:var(--info); color:#fff; }
+  .btn-refresh { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
+  .log-tabs { display:flex; gap:8px; margin-bottom:12px; }
+  .log-tabs button.active { background:var(--info); }
+  #log-container { margin-top:16px; }
+</style>
+</head>
+<body>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.3.0</span></h1>
+
+<div class="stats" id="stats-cards">
+  <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
+  <div class="stat-card"><div class="num" id="stat-total-rooms">-</div><div class="label">历史房间总数</div></div>
+  <div class="stat-card"><div class="num" id="stat-msgs">-</div><div class="label">消息总数</div></div>
+  <div class="stat-card"><div class="num" id="stat-tools">-</div><div class="label">工具调用次数</div></div>
+  <div class="stat-card"><div class="num" id="stat-approved">-</div><div class="label">已同意 / 已拒绝</div></div>
+</div>
+
+<button class="btn-refresh" onclick="refresh()" style="margin-bottom:16px;">刷新数据</button>
+<a href="/" style="color:var(--info);margin-left:12px;font-size:13px;">返回聊天页面</a>
+
+<h2>当前活跃房间</h2>
+<table id="rooms-table">
+  <thead><tr><th>房间码</th><th>主机名</th><th>系统</th><th>IP</th><th>用户</th><th>浏览器</th><th>桥接器</th><th>T2 自动</th><th>创建时间</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>历史聊天记录</h2>
+<table id="history-rooms">
+  <thead><tr><th>房间码</th><th>消息数</th><th>首次记录</th><th>最近记录</th><th>操作</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>服务器日志</h2>
+<div class="log-tabs">
+  <button class="btn-primary" id="tab-server" onclick="loadLog('server.log')">server.log</button>
+  <button class="btn-refresh" id="tab-chat" onclick="loadLog('chat.log')">chat.log</button>
+  <button class="btn-refresh" id="tab-bridge" onclick="loadLog('bridge.log')">bridge.log</button>
+</div>
+<pre id="log-container">点击上方标签加载日志...</pre>
+
+<script>
+async function refresh() {
+  const resp = await fetch('/api/admin/stats');
+  const data = await resp.json();
+
+  document.getElementById('stat-rooms').textContent = data.active_count;
+  document.getElementById('stat-total-rooms').textContent = data.total_rooms;
+  document.getElementById('stat-msgs').textContent = data.total_messages;
+  document.getElementById('stat-tools').textContent = data.total_tool_calls;
+  const as = data.approval_stats || {};
+  document.getElementById('stat-approved').textContent = (as.approved||0) + ' / ' + (as.denied||0);
+
+  // 活跃房间表格
+  const tbody = document.querySelector('#rooms-table tbody');
+  tbody.innerHTML = '';
+  for (const r of data.active_rooms || []) {
+    const m = r.machine || {};
+    tbody.innerHTML += '<tr>'
+      + '<td><strong>' + r.room_code + '</strong></td>'
+      + '<td>' + (m.hostname || '-') + '</td>'
+      + '<td title="' + (m.os||'') + '">' + (m.os ? m.os.split(' ')[0] + ' ' + (m.os.split(' ')[1]||'') : '-') + '</td>'
+      + '<td><code style="font-size:11px;color:var(--info)">' + (m.local_ip || '-') + '</code></td>'
+      + '<td>' + (m.username || '-') + '</td>'
+      + '<td><span class="badge ' + (r.browser_connected ? 'on' : 'off') + '">' + (r.browser_connected ? '在线' : '离线') + '</span></td>'
+      + '<td><span class="badge ' + (r.bridge_connected ? 'on' : 'off') + '">' + (r.bridge_connected ? '在线' : '离线') + '</span></td>'
+      + '<td>' + (r.auto_approve_tier2 ? '<span class="badge yes">是</span>' : '<span class="badge no">否</span>') + '</td>'
+      + '<td>' + new Date(r.created_at).toLocaleString('zh-CN') + '</td>'
+      + '</tr>';
+  }
+
+  // 历史房间表格
+  const resp2 = await fetch('/api/rooms/list');
+  const roomsData = await resp2.json();
+  const htbody = document.querySelector('#history-rooms tbody');
+  htbody.innerHTML = '';
+  for (const r of roomsData.rooms || []) {
+    htbody.innerHTML += '<tr>'
+      + '<td><strong>' + r.room_code + '</strong></td>'
+      + '<td>' + r.msg_count + '</td>'
+      + '<td>' + r.first_seen + '</td>'
+      + '<td>' + r.last_seen + '</td>'
+      + '<td><a href="#" onclick="viewRoom(\'' + r.room_code + '\')" style="color:var(--info)">查看</a></td>'
+      + '</tr>';
+  }
+}
+
+async function viewRoom(code) {
+  const resp = await fetch('/api/history/' + code);
+  const data = await resp.json();
+  const msgs = data.messages || [];
+  let text = '房间 ' + code + ' 的聊天记录' + '\\n' + '='.repeat(60) + '\\n\\n';
+  const roleMap = { user: '用户', ai: 'AI分析', tool: '工具调用', status: '系统状态', error: '错误' };
+  for (const m of msgs) {
+    const badge = m.tier ? ' [T' + m.tier + ']' : '';
+    const roleLabel = roleMap[m.role] || m.role;
+    text += '[' + roleLabel + badge + '] ' + m.created_at + '\\n' + m.content.substr(0, 2000) + '\\n\\n';
+  }
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = '聊天记录_' + code + '.txt'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function setActiveLog(name) {
+  document.querySelectorAll('.log-tabs button').forEach(b => b.className = 'btn-refresh');
+  document.getElementById('tab-' + name.replace('.','')).className = 'btn-primary';
+}
+
+async function loadLog(name) {
+  setActiveLog(name);
+  try {
+    const resp = await fetch('/api/admin/logs/' + name + '?lines=300');
+    const data = await resp.json();
+    document.getElementById('log-container').textContent = data.content || data.error || '(empty)';
+  } catch(e) {
+    document.getElementById('log-container').textContent = 'Failed to load: ' + e.message;
+  }
+}
+
+refresh();
+setInterval(refresh, 15000);  // 每15秒自动刷新
+</script>
+</body>
+</html>
+""")
+
+
+# ============================================================
+# Agent core — OpenAI-compatible tool calling loop with approval
+# ============================================================
+async def request_approval(room: Room, fn_name: str, fn_args: dict, tier: int,
+                            browser_ws: WebSocket, timeout: float = 300.0) -> tuple[bool, str]:
+    """Request user approval for a Tier 2/3 tool. Returns (approved, reason).
+       Default timeout = 5 minutes to give user plenty of time to see and respond."""
+    approval_id = f"approve_{fn_name}_{int(time.time())}"
+    future: asyncio.Future = asyncio.get_event_loop().create_future()
+    room.pending_approvals[approval_id] = future
+
+    try:
+        await browser_ws.send_json({
+            "type": "approval_required",
+            "id": approval_id,
+            "tool": fn_name,
+            "args": fn_args,
+            "tier": tier,
+            "timeout": timeout,
+        })
+
+        try:
+            result = await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            return False, "approval_timeout"
+
+        return result.get("approved", False), result.get("reason", "")
+    finally:
+        room.pending_approvals.pop(approval_id, None)
+
+
+async def run_agent(
+    user_message: str,
+    room: Room,
+    http_client: httpx.AsyncClient,
+    browser_ws: WebSocket,
+) -> str:
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_message},
+    ]
+
+    loop_count = 0
+    max_loops = 15
+
+    while loop_count < max_loops:
+        loop_count += 1
+
+        payload = {
+            "model": OPENAI_MODEL,
+            "messages": messages,
+            "tools": TOOLS,
+            "tool_choice": "auto",
+        }
+
+        resp = await http_client.post(
+            f"{OPENAI_BASE_URL}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        choice = data["choices"][0]
+        msg = choice["message"]
+        tool_calls = msg.get("tool_calls")
+
+        if not tool_calls:
+            content = msg.get("content", "")
+            save_message(room.code, "ai", content)
+            return content
+
+        messages.append(msg)
+
+        for tc in tool_calls:
+            fn_name = tc["function"]["name"]
+            fn_args = json.loads(tc["function"]["arguments"] or "{}")
+            tc_id = tc["id"]
+            tier = TOOL_TIERS.get(fn_name, 1)
+
+            await browser_ws.send_json({
+                "type": "tool_start",
+                "tool": fn_name,
+                "args": fn_args,
+                "tier": tier,
+            })
+
+            # === APPROVAL CHECK for Tier 2/3 ===
+            if tier >= 2:
+                # For Tier 2 with auto_approve, skip the prompt
+                if tier == 2 and room.auto_approve_tier2:
+                    save_approval(room.code, fn_name, fn_args, tier, 1)
+                    run_logger.info(f"[{room.code}] Auto-approved Tier 2: {fn_name}")
+                else:
+                    # Send tool_start to frontend FIRST so user sees what's coming
+                    await browser_ws.send_json({
+                        "type": "tool_waiting_approval",
+                        "tool": fn_name,
+                        "args": fn_args,
+                        "tier": tier,
+                    })
+
+                    approved, reason = await request_approval(
+                        room, fn_name, fn_args, tier, browser_ws
+                    )
+
+                    if not approved:
+                        result = f"[approval_denied] Tier {tier} tool '{fn_name}' was denied by user."
+                        if reason and reason != "approval_timeout":
+                            result += f" Reason: {reason}"
+                        elif reason == "approval_timeout":
+                            result += " (approval timed out)"
+
+                        save_approval(room.code, fn_name, fn_args, tier, -1)
+                        save_message(room.code, "tool", result, fn_name, tier)
+
+                        await browser_ws.send_json({
+                            "type": "tool_result",
+                            "tool": fn_name,
+                            "content": result[:3000],
+                            "tier": tier,
+                            "denied": True,
+                        })
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": result,
+                        })
+                        continue
+
+                    save_approval(room.code, fn_name, fn_args, tier, 1)
+                    run_logger.info(f"[{room.code}] User approved Tier {tier}: {fn_name}")
+
+            # Execute the tool
+            cmd_id = f"cmd_{loop_count}_{tc_id}"
+            future: asyncio.Future = asyncio.get_event_loop().create_future()
+            room.pending_commands[cmd_id] = future
+
+            if room.bridge_ws:
+                await room.bridge_ws.send_json({
+                    "type": "command",
+                    "id": cmd_id,
+                    "tool": fn_name,
+                    "args": fn_args,
+                    "tier": tier,
+                })
+            else:
+                future.set_result("[error] Bridge not connected")
+
+            try:
+                result = await asyncio.wait_for(future, timeout=120.0)
+            except asyncio.TimeoutError:
+                result = "[timeout] Command exceeded 120s"
+
+            room.pending_commands.pop(cmd_id, None)
+
+            save_message(room.code, "tool", result[:2000], fn_name, tier)
+
+            await browser_ws.send_json({
+                "type": "tool_result",
+                "tool": fn_name,
+                "content": result[:3000],
+                "tier": tier,
+            })
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": result[:8000],
+            })
+
+    return "Diagnosis exceeded the maximum step limit. Please try a more specific question."
+
+
+# ============================================================
+# WebSocket endpoints
+# ============================================================
+@app.websocket("/ws/browser/{room_code}")
+async def ws_browser(websocket: WebSocket, room_code: str):
+    await websocket.accept()
+
+    room = rooms.get(room_code)
+    if not room:
+        await websocket.send_json({
+            "type": "error", "content": "Room does not exist. Please refresh and create a new one."
+        })
+        await websocket.close()
+        return
+
+    room.browser_ws = websocket
+    run_logger.info(f"[browser] joined room {room_code}")
+
+    ready_msg = "Bridge connected [OK]" if room.bridge_ws else "Waiting for bridge connection [--]"
+    await websocket.send_json({
+        "type": "status",
+        "content": f"Joined room {room_code}  {ready_msg}",
+        "bridge_connected": room.bridge_ws is not None,
+    })
+
+    http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0), limits=httpx.Limits(max_keepalive_connections=5, max_connections=10))
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            msg_data = json.loads(raw)
+
+            if msg_data.get("type") == "chat":
+                user_message = msg_data["content"]
+                save_message(room_code, "user", user_message)
+                chat_logger.info(f"[{room_code}] USER: {user_message[:500]}")
+
+                if not room.bridge_ws:
+                    await websocket.send_json({
+                        "type": "error",
+                        "content": "Bridge not connected. Please start the bridge on the Windows PC and enter the room code.",
+                    })
+                    sendBtn_disabled = False  # allow retry
+                    continue
+
+                # Send "analyzing" and log it
+                run_logger.info(f"[{room_code}] Starting agent for message: {user_message[:100]}")
+                await websocket.send_json({
+                    "type": "status",
+                    "content": "Analyzing your request...",
+                })
+
+                try:
+                    answer = await asyncio.wait_for(
+                        run_agent(user_message, room, http_client, websocket),
+                        timeout=300.0  # 5 minute total timeout for agent
+                    )
+                    chat_logger.info(f"[{room_code}] AI: {answer[:500]}")
+                    await websocket.send_json({
+                        "type": "ai_message",
+                        "content": answer,
+                    })
+                    await websocket.send_json({"type": "ai_done"})
+                except asyncio.TimeoutError:
+                    run_logger.error(f"[{room_code}] Agent timed out after 5 minutes")
+                    await websocket.send_json({
+                        "type": "error",
+                        "content": "Request timed out. Please try again with a simpler question.",
+                    })
+                except httpx.HTTPStatusError as e:
+                    await websocket.send_json({
+                        "type": "error",
+                        "content": f"AI API call failed ({e.response.status_code}). Please check API configuration.",
+                    })
+                except Exception as e:
+                    run_logger.exception(f"Agent error in room {room_code}")
+                    await websocket.send_json({
+                        "type": "error",
+                        "content": f"Agent error: {str(e)}",
+                    })
+
+            elif msg_data.get("type") == "approval_response":
+                # User responded to an approval prompt
+                approval_id = msg_data["id"]
+                approved = msg_data.get("approved", False)
+                reason = msg_data.get("reason", "")
+                future = room.pending_approvals.get(approval_id)
+                if future and not future.done():
+                    future.set_result({"approved": approved, "reason": reason})
+                    run_logger.info(f"[{room_code}] Approval {approval_id}: {'approved' if approved else 'denied'}")
+
+            elif msg_data.get("type") == "auto_approve_toggle":
+                # Toggle auto-approve for Tier 2
+                room.auto_approve_tier2 = msg_data.get("enabled", False)
+                await websocket.send_json({
+                    "type": "status",
+                    "content": f"Tier 2 auto-approval: {'ON' if room.auto_approve_tier2 else 'OFF'}",
+                })
+                run_logger.info(f"[{room_code}] auto_approve_tier2 = {room.auto_approve_tier2}")
+
+            elif msg_data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+
+    except WebSocketDisconnect:
+        run_logger.info(f"[browser] left room {room_code}")
+    finally:
+        room.browser_ws = None
+        await http_client.aclose()
+
+
+@app.websocket("/ws/bridge/{room_code}")
+async def ws_bridge(websocket: WebSocket, room_code: str):
+    await websocket.accept()
+
+    room = rooms.get(room_code)
+    if not room:
+        await websocket.send_json({
+            "type": "error", "content": "Room does not exist. Please check the room code."
+        })
+        await websocket.close()
+        return
+
+    room.bridge_ws = websocket
+    room.remote_ip = websocket.client.host if hasattr(websocket.client, 'host') else ""
+    run_logger.info(f"[bridge] joined room {room_code} (ip={room.remote_ip})")
+
+    await websocket.send_json({
+        "type": "status",
+        "content": f"Connected to room {room_code}",
+    })
+
+    if room.browser_ws:
+        await room.browser_ws.send_json({
+            "type": "status",
+            "content": "Bridge connected [OK] — ready for diagnostics",
+            "bridge_connected": True,
+        })
+
+    # Ask bridge for machine identity (bridge may have sent it already,
+    # but this is a fallback in case the auto-send was missed)
+    await websocket.send_json({"type": "identify_request"})
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            msg_data = json.loads(raw)
+
+            if msg_data.get("type") == "command_result":
+                cmd_id = msg_data["id"]
+                output = msg_data.get("output", "")
+                future = room.pending_commands.get(cmd_id)
+                if future and not future.done():
+                    future.set_result(output)
+
+            elif msg_data.get("type") == "identify":
+                # Bridge sent machine identity info
+                info = msg_data.get("info", {})
+                room.machine = info
+                run_logger.info(f"[bridge] {room_code} identify: hostname={info.get('hostname')}, "
+                                f"os={info.get('os')}, ip={info.get('local_ip')}, user={info.get('username')}")
+
+            elif msg_data.get("type") == "heartbeat":
+                pass
+
+            elif msg_data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+
+    except WebSocketDisconnect:
+        run_logger.info(f"[bridge] left room {room_code}")
+    finally:
+        room.bridge_ws = None
+        if room.browser_ws:
+            try:
+                await room.browser_ws.send_json({
+                    "type": "status",
+                    "content": "Bridge disconnected [--]",
+                    "bridge_connected": False,
+                })
+            except Exception:
+                pass
+
+
+# ============================================================
+# Entry point
+# ============================================================
+if __name__ == "__main__":
+    import uvicorn
+    run_logger.info(f"Starting server v0.3.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
+    uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info")

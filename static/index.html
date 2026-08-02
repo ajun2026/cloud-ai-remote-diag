@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>云端 AI 远程运维助手</title>
+<style>
+  :root {
+    --bg: #1a1a2e; --surface: #16213e; --surface2: #0f3460;
+    --accent: #e94560; --text: #eaeaea; --text2: #a0a0b0;
+    --border: #2a2a4a; --success: #4ade80; --warn: #fbbf24;
+    --error: #f87171; --info: #60a5fa;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh; display: flex; justify-content: center; align-items: center;
+  }
+
+  #app {
+    width: 100%; max-width: 800px; height: 100vh;
+    display: flex; flex-direction: column; background: var(--surface);
+  }
+
+  /* ====== Header ====== */
+  #header {
+    padding: 12px 20px; background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  }
+  #header .title { font-size: 16px; font-weight: 600; }
+  #status-dot {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; margin-right: 6px;
+  }
+  #status-dot.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+  #status-dot.offline { background: var(--error); }
+  #status-dot.connecting { background: var(--warn); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  #status-text { font-size: 13px; color: var(--text2); }
+
+  #room-display {
+    font-family: monospace; font-size: 14px; color: var(--info);
+    background: var(--bg); padding: 4px 12px; border-radius: 6px; letter-spacing: 2px;
+  }
+
+  #lang-switcher {
+    font-size: 12px; padding: 3px 6px; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text2); cursor: pointer; outline: none;
+  }
+  #lang-switcher:hover, #lang-switcher:focus { border-color: var(--info); }
+
+  /* Auto-approve toggle */
+  #auto-approve-btn {
+    font-size: 11px; padding: 3px 8px; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text2); cursor: pointer;
+    display: none;
+  }
+  #auto-approve-btn.enabled { background: rgba(251,191,36,0.15); color: var(--warn); border-color: var(--warn); }
+
+  /* ====== Messages ====== */
+  #messages {
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+
+  .msg {
+    max-width: 85%; padding: 10px 14px; border-radius: 12px;
+    line-height: 1.6; font-size: 14px; word-break: break-word;
+  }
+  .msg.user { align-self: flex-end; background: var(--info); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.ai {
+    align-self: flex-start; background: var(--surface2);
+    border: 1px solid var(--border); border-bottom-left-radius: 4px;
+  }
+  .msg.ai h1, .msg.ai h2, .msg.ai h3 { margin: 8px 0 4px; font-size: 15px; }
+  .msg.ai ul, .msg.ai ol { padding-left: 20px; }
+  .msg.ai code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  .msg.ai pre { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; overflow-x: auto; font-size: 12px; }
+  .msg.ai strong { color: var(--warn); }
+
+  .msg.system { align-self: center; font-size: 12px; color: var(--text2); background: transparent; padding: 4px 8px; }
+  .msg.error {
+    align-self: center; font-size: 13px;
+    background: rgba(248,113,113,0.15); border: 1px solid rgba(248,113,113,0.3); color: var(--error);
+  }
+
+  /* Tool card */
+  .msg.tool {
+    align-self: flex-start; width: 100%; max-width: 100%;
+    font-size: 13px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
+  }
+  .tool-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; cursor: pointer; user-select: none;
+  }
+  .tool-header .icon { font-size: 16px; }
+  .tool-header .name { font-weight: 600; color: var(--info); }
+  .tool-header .status { font-size: 12px; margin-left: auto; }
+  .tool-body {
+    padding: 8px 12px 12px; border-top: 1px solid var(--border);
+    display: none; overflow-x: auto;
+  }
+  .tool-body.open { display: block; }
+  .tool-body pre {
+    font-size: 11px; max-height: 300px; overflow-y: auto; white-space: pre-wrap;
+    background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; margin: 0;
+  }
+
+  .tool-status.running { color: var(--warn); }
+  .tool-status.done { color: var(--success); }
+  .tool-status.error { color: var(--error); }
+  .tool-status.denied { color: var(--error); }
+
+  /* Tier badge */
+  .tier-badge { padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+  .tier-badge.t2 { background: rgba(251,191,36,0.2); color: var(--warn); }
+  .tier-badge.t3 { background: rgba(248,113,113,0.2); color: var(--error); }
+
+  /* ====== Approval Dialog ====== */
+  #approval-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+    display: none; justify-content: center; align-items: center; z-index: 9999;
+  }
+  #approval-dialog {
+    background: var(--surface); border: 2px solid var(--error); border-radius: 16px;
+    padding: 24px; width: 420px; max-width: 95vw;
+    box-shadow: 0 0 40px rgba(233,69,96,0.3);
+  }
+  #approval-dialog h3 { margin-bottom: 8px; color: var(--error); }
+  #approval-dialog .tool-info {
+    background: var(--bg); padding: 12px; border-radius: 8px; margin: 12px 0;
+    font-size: 13px;
+  }
+  #approval-dialog .tool-info code {
+    background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 11px;
+  }
+  #approval-dialog .args-display {
+    font-size: 11px; color: var(--text2); word-break: break-all; max-height: 100px; overflow-y: auto;
+  }
+  #approval-dialog .timer { font-size: 13px; color: var(--warn); margin: 8px 0; }
+  #approval-dialog .btn-row { display: flex; gap: 10px; margin-top: 16px; }
+  #approval-dialog button {
+    flex: 1; padding: 14px; border: none; border-radius: 8px;
+    font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 8px;
+  }
+  #approval-dialog .btn-deny { background: rgba(248,113,113,0.3); color: var(--error); border: 1px solid var(--error); }
+  #approval-dialog .btn-deny:hover { background: rgba(248,113,113,0.5); }
+  #approval-dialog .btn-approve { background: var(--success); color: #000; font-weight: 700; }
+  #approval-dialog .btn-approve:hover { opacity: 0.85; }
+  #approval-dialog .deny-reason {
+    width: 100%; padding: 8px; margin-top: 8px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg); color: var(--text); font-size: 12px; outline: none;
+    display: none;
+  }
+
+  /* ====== Input ====== */
+  #input-area {
+    padding: 12px 16px; border-top: 1px solid var(--border);
+    display: flex; gap: 8px; flex-shrink: 0; background: var(--surface);
+  }
+  #input-box {
+    flex: 1; padding: 10px 14px; border: 1px solid var(--border);
+    border-radius: 24px; background: var(--bg); color: var(--text);
+    font-size: 14px; outline: none; resize: none;
+    min-height: 42px; max-height: 120px; font-family: inherit;
+  }
+  #input-box:focus { border-color: var(--info); }
+  #send-btn {
+    padding: 10px 24px; border: none; border-radius: 24px;
+    background: var(--accent); color: #fff; font-size: 14px;
+    font-weight: 600; cursor: pointer; transition: opacity 0.2s;
+  }
+  #send-btn:hover { opacity: 0.85; }
+  #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ====== Connect Dialog ====== */
+  #connect-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: flex; justify-content: center; align-items: center; z-index: 100;
+  }
+  #connect-dialog {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+    padding: 32px; width: 400px; max-width: 95vw; text-align: center;
+  }
+  #connect-dialog h2 { margin-bottom: 8px; }
+  #connect-dialog p { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
+  #connect-dialog input {
+    width: 100%; padding: 12px; border: 1px solid var(--border);
+    border-radius: 10px; background: var(--bg); color: var(--text);
+    font-size: 16px; text-align: center; letter-spacing: 3px;
+    font-family: monospace; outline: none; text-transform: uppercase;
+  }
+  #connect-dialog input:focus { border-color: var(--info); }
+  #connect-dialog button {
+    width: 100%; margin-top: 14px; padding: 12px; border: none;
+    border-radius: 10px; background: var(--accent); color: #fff;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  #connect-dialog button:hover { opacity: 0.85; }
+  #connect-dialog .hint { margin-top: 12px; font-size: 12px; color: var(--text2); }
+  #connect-dialog .hint a { color: var(--info); cursor: pointer; text-decoration: underline; }
+
+  /* ====== Scrollbar ====== */
+  #messages::-webkit-scrollbar { width: 6px; }
+  #messages::-webkit-scrollbar-track { background: transparent; }
+  #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="header">
+    <div>
+      <span id="status-dot" class="connecting"></span>
+      <span class="title" data-i18n="app_title">云端 AI 远程运维助手</span>
+      <span id="status-text" data-i18n="status_connecting">正在连接...</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <button id="auto-approve-btn" title="Tier 2 自动审批：开启后鼠标/键盘等交互操作无需弹窗确认" onclick="toggleAutoApprove()">T2 Auto OFF</button>
+      <select id="lang-switcher">
+        <option value="zh-CN">简</option>
+        <option value="zh-TW">繁</option>
+        <option value="en">EN</option>
+      </select>
+      <button id="export-btn" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;display:none;" data-i18n="export_btn">导出对话</button>
+      <div id="room-display"></div>
+    </div>
+  </div>
+
+  <div id="messages"></div>
+
+  <div id="input-area">
+    <textarea id="input-box" data-i18n-placeholder="input_placeholder" placeholder="描述你的电脑问题，例如：帮我检查系统有没有异常" rows="1"></textarea>
+    <button id="send-btn" disabled data-i18n="send_btn">发送</button>
+  </div>
+</div>
+
+<!-- Connect Dialog -->
+<div id="connect-overlay">
+  <div id="connect-dialog">
+    <h2 data-i18n="dialog_title">[+] 加入远程诊断</h2>
+    <p data-i18n="dialog_subtitle">输入 6 位房间码，或创建一个新房间</p>
+    <input id="room-input" type="text" maxlength="6" placeholder="ABC-DEF" autocomplete="off">
+    <button id="join-btn" data-i18n="dialog_join">加入房间</button>
+    <p class="hint"><a id="create-room-link" data-i18n="dialog_create">创建新房间</a></p>
+    <hr style="border-color: var(--border); margin: 16px 0;">
+    <p style="font-size: 12px; color: var(--text2); text-align: left; line-height: 1.8;" data-i18n-html="dialog_instructions"></p>
+    <a href="/static/bridge.exe" download style="display: inline-block; padding: 10px 20px; background: var(--surface2); color: var(--info); border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; border: 1px solid var(--border);" data-i18n="dialog_download">
+      [v] 下载 Windows 桥接器 (bridge.exe, 22MB)
+    </a>
+  </div>
+</div>
+
+<!-- Approval Dialog -->
+<div id="approval-overlay">
+  <div id="approval-dialog">
+    <h3 data-i18n="approval_title">审批请求 — 工具调用需要你的授权</h3>
+    <p style="font-size:13px;color:var(--text2);" data-i18n="approval_desc">AI 想要执行以下 Tier <span id="approval-tier"></span> 操作：</p>
+    <div class="tool-info">
+      <strong id="approval-tool" style="color:var(--info);"></strong>
+      <div class="args-display" id="approval-args" style="margin-top: 8px;"></div>
+    </div>
+    <p class="timer" id="approval-timer"></p>
+    <div class="btn-row">
+      <button class="btn-deny" onclick="respondApproval(false)" data-i18n="approval_deny">拒绝</button>
+      <button class="btn-approve" onclick="respondApproval(true)" data-i18n="approval_approve">同意执行</button>
+    </div>
+    <textarea class="deny-reason" id="deny-reason" data-i18n-placeholder="approval_reason_placeholder" placeholder="拒绝理由（可选）"></textarea>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// i18n
+// ============================================================
+const I18N = {
+  'zh-CN': {
+    app_title: '云端 AI 远程运维助手',
+    status_connecting: '正在连接...',
+    status_disconnected: '未连接',
+    status_waiting_bridge: '等待桥接器',
+    status_bridge_ok: '桥接器已连接 [OK]',
+    status_bridge_wait: '等待桥接器 [--]',
+    status_connection_lost: '与服务器的连接已断开',
+    export_btn: '导出对话',
+    send_btn: '发送',
+    input_placeholder: '描述你的电脑问题，例如：帮我检查系统有没有异常',
+    room_prefix: '房间: ',
+    dialog_title: '[+] 加入远程诊断',
+    dialog_subtitle: '输入 6 位房间码，或创建一个新房间',
+    dialog_join: '加入房间',
+    dialog_create: '创建新房间',
+    dialog_instructions: '<strong>使用说明：</strong><br>'
+      + '1. 下载下方 <strong>bridge.exe</strong>（Windows 桥接器）<br>'
+      + '2. 在需要诊断的 Windows 电脑上双击运行 bridge.exe<br>'
+      + '3. 输入上面创建的房间码完成配对<br>'
+      + '4. 在聊天框中用自然语言描述你的电脑问题即可<br>'
+      + '<br><strong>功能：</strong>49 个诊断工具 — 截图、进程监控、网络测试、事件日志、OCR 等。<br>'
+      + '<br><strong>安全：</strong>Tier 1 只读（安全）。Tier 2/3 交互工具会弹出审批确认。',
+    dialog_download: '[v] 下载 Windows 桥接器 (bridge.exe, 22MB)',
+    msg_connected: '已连接到服务器',
+    msg_ws_failed: 'WebSocket 连接失败',
+    tool_running: '[...] 执行中...',
+    tool_done: '[OK] 完成',
+    tool_error: '[X] 出错',
+    tool_denied: '[X] 已拒绝',
+    tool_waiting: '等待结果...',
+    tool_tier3: 'Tier 3: 危险操作 — 需审批',
+    tool_tier2: 'Tier 2: 交互操作',
+    approval_title: '审批请求 — 工具调用需要你的授权',
+    approval_desc: 'AI 想要执行以下 Tier ',
+    approval_deny: '拒绝',
+    approval_approve: '同意执行',
+    approval_reason_placeholder: '拒绝理由（可选）',
+    auto_approve_title: '自动通过 Tier 2 审批',
+    auto_approve_enabled: 'T2 Auto: ON',
+    auto_approve_disabled: 'T2 Auto: OFF',
+    export_title: '云端 AI 远程运维助手 — 诊断报告',
+    export_time: '导出时间',
+    export_room: '房间',
+    export_bridge: '桥接器状态',
+    export_connected: '已连接',
+    export_disconnected: '未连接',
+    export_user: '用户',
+    export_ai: 'AI 分析',
+    export_tool: '工具',
+    export_error: '错误',
+    export_system: '系统',
+    alert_room_code: '请输入 6 位房间码',
+    alert_create_fail: '创建房间失败: ',
+  },
+  'zh-TW': {
+    app_title: '雲端 AI 遠程運維助手',
+    status_connecting: '正在連線...',
+    status_disconnected: '未連線',
+    status_waiting_bridge: '等待橋接器',
+    status_bridge_ok: '橋接器已連線 [OK]',
+    status_bridge_wait: '等待橋接器 [--]',
+    status_connection_lost: '與伺服器的連線已中斷',
+    export_btn: '匯出對話',
+    send_btn: '傳送',
+    input_placeholder: '描述你的電腦問題，例如：幫我檢查系統有沒有異常',
+    room_prefix: '房間: ',
+    dialog_title: '[+] 加入遠程診斷',
+    dialog_subtitle: '輸入 6 位房間碼，或建立一個新房間',
+    dialog_join: '加入房間',
+    dialog_create: '建立新房間',
+    dialog_instructions: '<strong>使用說明：</strong><br>'
+      + '1. 下載下方 <strong>bridge.exe</strong>（Windows 橋接器）<br>'
+      + '2. 在需要診斷的 Windows 電腦上雙擊執行 bridge.exe<br>'
+      + '3. 輸入上面建立的房間碼完成配對<br>'
+      + '4. 在聊天框中用自然語言描述你的電腦問題即可<br>'
+      + '<br><strong>功能：</strong>49 個診斷工具 — 截圖、處理程序監控、網路測試、事件記錄、OCR 等。<br>'
+      + '<br><strong>安全：</strong>Tier 1 僅讀取（安全）。Tier 2/3 互動工具會彈出審批確認。',
+    dialog_download: '[v] 下載 Windows 橋接器 (bridge.exe, 22MB)',
+    msg_connected: '已連線到伺服器',
+    msg_ws_failed: 'WebSocket 連線失敗',
+    tool_running: '[...] 執行中...',
+    tool_done: '[OK] 完成',
+    tool_error: '[X] 出錯',
+    tool_denied: '[X] 已拒絕',
+    tool_waiting: '等待結果...',
+    tool_tier3: 'Tier 3: 危險操作 — 需審批',
+    tool_tier2: 'Tier 2: 互動操作',
+    approval_title: '審批請求 — 工具呼叫需要你的授權',
+    approval_desc: 'AI 想要執行以下 Tier ',
+    approval_deny: '拒絕',
+    approval_approve: '同意執行',
+    approval_reason_placeholder: '拒絕理由（可選）',
+    auto_approve_title: '自動通過 Tier 2 審批',
+    auto_approve_enabled: 'T2 Auto: ON',
+    auto_approve_disabled: 'T2 Auto: OFF',
+    export_title: '雲端 AI 遠程運維助手 — 診斷報告',
+    export_time: '匯出時間',
+    export_room: '房間',
+    export_bridge: '橋接器狀態',
+    export_connected: '已連線',
+    export_disconnected: '未連線',
+    export_user: '使用者',
+    export_ai: 'AI 分析',
+    export_tool: '工具',
+    export_error: '錯誤',
+    export_system: '系統',
+    alert_room_code: '請輸入 6 位房間碼',
+    alert_create_fail: '建立房間失敗: ',
+  },
+  'en': {
+    app_title: 'Cloud AI Remote Diagnostics',
+    status_connecting: 'Connecting...',
+    status_disconnected: 'Disconnected',
+    status_waiting_bridge: 'Waiting for bridge',
+    status_bridge_ok: 'Bridge connected [OK]',
+    status_bridge_wait: 'Waiting for bridge [--]',
+    status_connection_lost: 'Connection to server lost',
+    export_btn: 'Export',
+    send_btn: 'Send',
+    input_placeholder: 'Describe your PC problem, e.g.: Check my system for issues',
+    room_prefix: 'Room: ',
+    dialog_title: '[+] Join Remote Diagnostics',
+    dialog_subtitle: 'Enter a 6-digit room code, or create a new room',
+    dialog_join: 'Join Room',
+    dialog_create: 'Create New Room',
+    dialog_instructions: '<strong>Instructions:</strong><br>'
+      + '1. Download <strong>bridge.exe</strong> (Windows Bridge) below<br>'
+      + '2. Run bridge.exe on the Windows PC to be diagnosed<br>'
+      + '3. Enter the room code created above to pair<br>'
+      + '4. Describe your PC problem in natural language<br>'
+      + '<br><strong>Features:</strong> 49 diagnostic tools — screenshots, process monitoring, network tests, event logs, OCR, etc.<br>'
+      + '<br><strong>Safety:</strong> Tier 1 read-only (safe). Tier 2/3 interactive tools require approval via a popup dialog.',
+    dialog_download: '[v] Download Windows Bridge (bridge.exe, 22MB)',
+    msg_connected: 'Connected to server',
+    msg_ws_failed: 'WebSocket connection failed',
+    tool_running: '[...] Running...',
+    tool_done: '[OK] Done',
+    tool_error: '[X] Error',
+    tool_denied: '[X] Denied',
+    tool_waiting: 'Waiting for result...',
+    tool_tier3: 'Tier 3: Destructive — requires approval',
+    tool_tier2: 'Tier 2: Interactive — user awareness needed',
+    approval_title: 'Approval Required — Tool call needs your authorization',
+    approval_desc: 'AI wants to execute this Tier ',
+    approval_deny: 'Deny',
+    approval_approve: 'Approve',
+    approval_reason_placeholder: 'Reason for denial (optional)',
+    auto_approve_title: 'Auto-approve Tier 2',
+    auto_approve_enabled: 'T2 Auto: ON',
+    auto_approve_disabled: 'T2 Auto: OFF',
+    export_title: 'Cloud AI Remote Diagnostics — Report',
+    export_time: 'Export time',
+    export_room: 'Room',
+    export_bridge: 'Bridge status',
+    export_connected: 'Connected',
+    export_disconnected: 'Disconnected',
+    export_user: 'User',
+    export_ai: 'AI Analysis',
+    export_tool: 'Tool',
+    export_error: 'Error',
+    export_system: 'System',
+    alert_room_code: 'Please enter a 6-digit room code',
+    alert_create_fail: 'Failed to create room: ',
+  }
+};
+
+let currentLang = localStorage.getItem('bridge_ui_lang') || 'zh-CN';
+function t(key) { return I18N[currentLang]?.[key] || I18N['zh-CN'][key] || key; }
+
+function applyLang(lang) {
+  currentLang = lang; localStorage.setItem('bridge_ui_lang', lang);
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  document.getElementById('lang-switcher').value = lang;
+  document.title = t('app_title');
+  if (roomCode) document.getElementById('room-display').textContent = t('room_prefix') + roomCode;
+}
+
+// ============================================================
+// State
+// ============================================================
+let ws = null;
+let roomCode = null;
+let bridgeConnected = false;
+let pendingApprovalId = null;
+let approvalTimerInterval = null;
+let approvalDeadline = 0;
+let autoApproveT2 = localStorage.getItem('auto_approve_t2') === 'true';
+
+const messagesEl = document.getElementById('messages');
+const inputBox = document.getElementById('input-box');
+const sendBtn = document.getElementById('send-btn');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+const roomDisplay = document.getElementById('room-display');
+const overlay = document.getElementById('connect-overlay');
+const roomInput = document.getElementById('room-input');
+const joinBtn = document.getElementById('join-btn');
+const createRoomLink = document.getElementById('create-room-link');
+const exportBtn = document.getElementById('export-btn');
+const langSwitcher = document.getElementById('lang-switcher');
+const approvalOverlay = document.getElementById('approval-overlay');
+const autoApproveBtn = document.getElementById('auto-approve-btn');
+
+// ============================================================
+// Connection
+// ============================================================
+function setStatus(state) {
+  statusDot.className = state;
+  if (state === 'online') {
+    statusText.textContent = bridgeConnected ? t('status_bridge_ok') : t('status_waiting_bridge');
+    if (!bridgeConnected) statusDot.className = 'connecting';
+  } else if (state === 'offline') {
+    statusText.textContent = t('status_disconnected');
+  } else if (state === 'connecting') {
+    statusText.textContent = t('status_connecting');
+  }
+}
+
+function updateBridgeStatus(connected) {
+  bridgeConnected = connected;
+  setStatus(connected ? 'online' : ws ? 'online' : 'offline');
+  statusDot.className = connected ? 'online' : 'connecting';
+  statusText.textContent = connected ? t('status_bridge_ok') : t('status_bridge_wait');
+  sendBtn.disabled = !connected;
+  autoApproveBtn.style.display = connected ? 'inline-block' : 'none';
+  updateAutoApproveBtnState();
+}
+
+function updateAutoApproveBtnState() {
+  if (autoApproveT2) {
+    autoApproveBtn.className = 'enabled';
+    autoApproveBtn.textContent = 'T2 Auto ON';
+  } else {
+    autoApproveBtn.className = '';
+    autoApproveBtn.textContent = 'T2 Auto OFF';
+  }
+}
+
+function toggleAutoApprove() {
+  autoApproveT2 = !autoApproveT2;
+  localStorage.setItem('auto_approve_t2', autoApproveT2);
+  updateAutoApproveBtnState();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'auto_approve_toggle', enabled: autoApproveT2 }));
+  }
+}
+
+function connect(room) {
+  roomCode = room;
+  roomDisplay.textContent = t('room_prefix') + room;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = proto + '//' + location.host + '/ws/browser/' + room;
+  setStatus('connecting');
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    overlay.style.display = 'none';
+    exportBtn.style.display = 'inline-block';
+    addSystemMsg(t('msg_connected'));
+    // Sync auto-approve state with server
+    ws.send(JSON.stringify({ type: 'auto_approve_toggle', enabled: autoApproveT2 }));
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    handleMessage(msg);
+  };
+
+  ws.onclose = () => {
+    setStatus('offline'); sendBtn.disabled = true;
+    addSystemMsg(t('status_connection_lost'));
+  };
+
+  ws.onerror = () => { addErrorMsg(t('msg_ws_failed')); };
+}
+
+// ============================================================
+// Message handler
+// ============================================================
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'status':
+      if (msg.bridge_connected !== undefined) updateBridgeStatus(msg.bridge_connected);
+      addSystemMsg(msg.content);
+      break;
+    case 'tool_start':
+      addToolCard(msg.tool, msg.args, msg.tier);
+      break;
+    case 'tool_result':
+      updateToolResult(msg.tool, msg.content, msg.denied);
+      break;
+    case 'approval_required':
+      showApprovalDialog(msg);
+      break;
+    case 'ai_message':
+      addAiMessage(msg.content);
+      break;
+    case 'ai_done':
+      sendBtn.disabled = false; inputBox.focus();
+      break;
+    case 'error':
+      addErrorMsg(msg.content); sendBtn.disabled = false;
+      break;
+    case 'pong': break;
+    default:
+      console.log('Unknown message type:', msg.type, msg);
+  }
+}
+
+// ============================================================
+// Approval dialog
+// ============================================================
+function showApprovalDialog(msg) {
+  pendingApprovalId = msg.id;
+  approvalDeadline = Date.now() + (msg.timeout || 300) * 1000;
+
+  document.getElementById('approval-tool').textContent = msg.tool;
+  document.getElementById('approval-tier').textContent = 'T' + (msg.tier || 2);
+  const tierSpan = document.getElementById('approval-tier');
+  tierSpan.style.color = msg.tier === 3 ? 'var(--error)' : 'var(--warn)';
+
+  const argsEl = document.getElementById('approval-args');
+  argsEl.textContent = JSON.stringify(msg.args || {}, null, 2);
+
+  document.getElementById('deny-reason').style.display = 'none';
+  document.getElementById('deny-reason').value = '';
+
+  approvalOverlay.style.display = 'flex';
+  document.getElementById('approval-title').textContent = t('approval_title');
+  document.getElementById('approval-desc').innerHTML = (t('approval_desc') + (msg.tier || 2) + ' ' + t('tool_tier' + (msg.tier || 2)) + ':');
+
+  // Flash the page title to get user attention
+  let originalTitle = document.title;
+  let count = 0;
+  const flashInterval = setInterval(function() {
+    document.title = (count % 2 === 0) ? '[!!!] ' + t('approval_title') : originalTitle;
+    count++;
+    if (count > 20 || pendingApprovalId === null) {
+      clearInterval(flashInterval);
+      document.title = originalTitle;
+    }
+  }, 500);
+
+  // Store for cleanup
+  approvalOverlay._flashInterval = flashInterval;
+  approvalOverlay._originalTitle = originalTitle;
+
+  updateApprovalTimer();
+  approvalTimerInterval = setInterval(updateApprovalTimer, 1000);
+
+  // Show deny reason when hovering over deny button
+  const denyBtn = document.querySelector('.btn-deny');
+  denyBtn.onmouseenter = () => { document.getElementById('deny-reason').style.display = 'block'; };
+}
+
+function updateApprovalTimer() {
+  const remaining = Math.max(0, Math.round((approvalDeadline - Date.now()) / 1000));
+  const timer = document.getElementById('approval-timer');
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+  timer.textContent = (currentLang === 'zh-CN' ? '剩余时间: ' :
+                       currentLang === 'zh-TW' ? '剩餘時間: ' : 'Time remaining: ')
+                     + mins + ':' + (secs < 10 ? '0' : '') + secs;
+
+  if (remaining <= 10) timer.style.color = 'var(--error)';
+  if (remaining <= 0) {
+    clearInterval(approvalTimerInterval);
+    const id = pendingApprovalId;
+    approvalOverlay.style.display = 'none';
+    pendingApprovalId = null;
+    // Auto-deny on timeout
+    if (ws && ws.readyState === WebSocket.OPEN && id) {
+      ws.send(JSON.stringify({ type: 'approval_response', id: id, approved: false, reason: 'approval_timeout' }));
+    }
+  }
+}
+
+function respondApproval(approved) {
+  clearInterval(approvalTimerInterval);
+  // Stop the title flash
+  if (approvalOverlay._flashInterval) {
+    clearInterval(approvalOverlay._flashInterval);
+    document.title = approvalOverlay._originalTitle || document.title;
+  }
+  let reason = '';
+  if (!approved) {
+    reason = document.getElementById('deny-reason').value.trim();
+  }
+  const id = pendingApprovalId;
+  approvalOverlay.style.display = 'none';
+  pendingApprovalId = null;
+  if (ws && ws.readyState === WebSocket.OPEN && id) {
+    ws.send(JSON.stringify({
+      type: 'approval_response',
+      id: id,
+      approved: approved,
+      reason: reason,
+    }));
+  } else {
+    console.log('Cannot send approval: ws=' + (ws ? ws.readyState : 'null') + ' id=' + id);
+  }
+}
+
+// Deny reason input enter key
+document.getElementById('deny-reason').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && e.shiftKey) {
+    e.preventDefault();
+    respondApproval(false);
+  }
+});
+
+// ============================================================
+// Message rendering
+// ============================================================
+function addSystemMsg(text) {
+  const el = document.createElement('div'); el.className = 'msg system';
+  el.textContent = text; messagesEl.appendChild(el); scrollBottom();
+}
+
+function addErrorMsg(text) {
+  const el = document.createElement('div'); el.className = 'msg error';
+  el.textContent = '[!] ' + text; messagesEl.appendChild(el); scrollBottom();
+}
+
+function addAiMessage(content) {
+  const el = document.createElement('div'); el.className = 'msg ai';
+  el.innerHTML = renderMarkdown(content); messagesEl.appendChild(el); scrollBottom();
+}
+
+function addUserMessage(text) {
+  const el = document.createElement('div'); el.className = 'msg user';
+  el.textContent = text; messagesEl.appendChild(el); scrollBottom();
+}
+
+function renderMarkdown(md) {
+  let html = md.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/\n\n/g, '<br><br>'); html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+const TIER3 = ['Shell','App','PlaySound','FileWrite','FileUpload','KillProcess','RegWrite','ServiceStart','ServiceStop','TaskCreate','TaskDelete','SetClipboard','LockScreen'];
+const TIER2 = ['Click','Type','Move','Scroll','Shortcut','FocusWindow','MinimizeAll','Scrape','CancelTask','ReconnectSession'];
+
+function getTierBadge(toolName, tier) {
+  let t = tier || 1;
+  if (!tier) {
+    if (TIER3.includes(toolName)) t = 3;
+    else if (TIER2.includes(toolName)) t = 2;
+  }
+  if (t === 3) return '<span class="tier-badge t3" title="' + t('tool_tier3') + '">T3</span>';
+  if (t === 2) return '<span class="tier-badge t2" title="' + t('tool_tier2') + '">T2</span>';
+  return '';
+}
+
+function addToolCard(toolName, args, tier) {
+  const el = document.createElement('div');
+  el.className = 'msg tool'; el.dataset.tool = toolName;
+  const argsText = args && Object.keys(args).length > 0 ? JSON.stringify(args) : '';
+  const badge = getTierBadge(toolName, tier);
+  el.innerHTML = '<div class="tool-header" onclick="this.parentElement.querySelector(\'.tool-body\').classList.toggle(\'open\')">'
+    + '<span class="icon">[*]</span>' + badge
+    + '<span class="name">' + toolName + '</span>'
+    + '<span class="args" style="font-size:11px;color:var(--text2)">' + argsText + '</span>'
+    + '<span class="status tool-status running">' + t('tool_running') + '</span>'
+    + '</div><div class="tool-body"><pre>' + t('tool_waiting') + '</pre></div>';
+  messagesEl.appendChild(el); scrollBottom();
+}
+
+function updateToolResult(toolName, content, denied) {
+  const cards = messagesEl.querySelectorAll('.msg.tool');
+  let card = null;
+  for (let i = cards.length - 1; i >= 0; i--) {
+    if (cards[i].dataset.tool === toolName) { card = cards[i]; break; }
+  }
+  if (!card) return;
+  const statusEl = card.querySelector('.tool-status');
+  const body = card.querySelector('.tool-body');
+  const pre = body.querySelector('pre');
+  pre.textContent = content;
+
+  if (denied || content.includes('[approval_denied]')) {
+    statusEl.textContent = t('tool_denied');
+    statusEl.className = 'status tool-status denied';
+  } else {
+    const isErr = content.includes('[error]') || content.includes('[timeout]')
+      || content.includes('[exception]') || content.includes('[stderr]');
+    if (isErr) {
+      statusEl.textContent = t('tool_error');
+      statusEl.className = 'status tool-status error';
+    } else {
+      statusEl.textContent = t('tool_done');
+      statusEl.className = 'status tool-status done';
+    }
+  }
+}
+
+function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+// ============================================================
+// User actions
+// ============================================================
+function sendMessage() {
+  const text = inputBox.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN || !bridgeConnected) return;
+  addUserMessage(text);
+  ws.send(JSON.stringify({ type: 'chat', content: text }));
+  inputBox.value = ''; inputBox.style.height = 'auto'; sendBtn.disabled = true;
+}
+
+sendBtn.addEventListener('click', sendMessage);
+inputBox.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+inputBox.addEventListener('input', () => {
+  inputBox.style.height = 'auto';
+  inputBox.style.height = Math.min(inputBox.scrollHeight, 120) + 'px';
+});
+
+joinBtn.addEventListener('click', () => {
+  let code = roomInput.value.trim().toUpperCase();
+  if (code.length === 6) { connect(code); }
+  else { alert(t('alert_room_code')); }
+});
+roomInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBtn.click(); });
+createRoomLink.addEventListener('click', async () => {
+  try {
+    const resp = await fetch('/api/rooms', { method: 'POST' });
+    const data = await resp.json();
+    roomInput.value = data.room_code; connect(data.room_code);
+  } catch (err) { alert(t('alert_create_fail') + err.message); }
+});
+
+langSwitcher.addEventListener('change', () => { applyLang(langSwitcher.value); });
+
+// ============================================================
+// Export
+// ============================================================
+exportBtn.addEventListener('click', () => {
+  const lines = [];
+  const now = new Date().toLocaleString(currentLang === 'en' ? 'en-US' : 'zh-CN');
+  lines.push(t('export_title')); lines.push(t('export_time') + ': ' + now);
+  lines.push(t('export_room') + ': ' + roomCode);
+  lines.push(t('export_bridge') + ': ' + (bridgeConnected ? t('export_connected') : t('export_disconnected')));
+  lines.push('='.repeat(50)); lines.push('');
+  const children = messagesEl.children;
+  for (const el of children) {
+    if (el.classList.contains('msg')) {
+      if (el.classList.contains('user')) { lines.push('[' + t('export_user') + '] ' + el.textContent.trim()); }
+      else if (el.classList.contains('ai')) { lines.push('[' + t('export_ai') + ']'); lines.push(el.textContent.trim()); lines.push(''); }
+      else if (el.classList.contains('tool')) {
+        const name = el.querySelector('.name')?.textContent || '';
+        const status = el.querySelector('.tool-status')?.textContent || '';
+        const body = el.querySelector('pre')?.textContent || '';
+        lines.push('--- ' + t('export_tool') + ': ' + name + ' (' + status + ') ---');
+        lines.push(body.trim()); lines.push('---'); lines.push('');
+      } else if (el.classList.contains('error')) { lines.push('[' + t('export_error') + '] ' + el.textContent.trim()); }
+    } else if (el.classList.contains('system')) { lines.push('[' + t('export_system') + '] ' + el.textContent.trim()); }
+  }
+  const text = lines.join('\n');
+  const blob = new Blob([text], { type:'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'diagnostic_report_' + roomCode + '_' + new Date().toISOString().slice(0,10) + '.txt';
+  a.click(); URL.revokeObjectURL(url);
+});
+
+// ============================================================
+// Init
+// ============================================================
+langSwitcher.value = currentLang;
+applyLang(currentLang);
+updateAutoApproveBtnState();
+overlay.style.display = 'flex';
+roomInput.focus();
+</script>
+</body>
+</html>
