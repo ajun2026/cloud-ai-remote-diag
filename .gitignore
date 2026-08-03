@@ -1,27 +1,25 @@
 # Python
 __pycache__/
 *.py[cod]
-*.egg-info/
-dist/
-build/
-*.spec
-
-# Environment
-.env
 venv/
 .venv/
 
-# IDE
-.vscode/
-.idea/
+# Logs & data
+logs/
+*.log
+*.db
 
-# Logs
-logs/*.log
-logs/*.db
+# Env / secrets
+.env
+.env.*
 
 # OS
 .DS_Store
-Thumbs.db
 
-# Temp
-*.zip
+# PyInstaller temp
+*.tmp
+
+# Compiled binaries (source is in bridge.py)
+static/*.exe
+static/*.exe.tmp
+static/bridge-linux-*
