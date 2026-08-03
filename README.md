@@ -10,6 +10,7 @@ A cloud-based AI remote diagnostics system for Windows computers. Users describe
 > **Live Demo:** http://106.54.193.9:8000  
 > **Admin Dashboard:** http://106.54.193.9:8000/admin （默认账号：admin / admin）
 > **Update Log:** 详见 [CHANGELOG.md](CHANGELOG.md)
+> **Project Evolution:** 项目演进史（Python → Go 重写原因、架构变化）详见 [HISTORY.md](HISTORY.md)
 
 ---
 
