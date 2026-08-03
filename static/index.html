@@ -21,8 +21,9 @@
   }
 
   #app {
-    width: 100%; max-width: 800px; height: 100vh;
+    width: 100%; max-width: 1400px; height: 100vh;
     display: flex; flex-direction: column; background: var(--surface);
+    border-left: 1px solid var(--border); border-right: 1px solid var(--border);
   }
 
   /* ====== Header ====== */
@@ -63,12 +64,12 @@
 
   /* ====== Messages ====== */
   #messages {
-    flex: 1; overflow-y: auto; padding: 16px;
+    flex: 1; overflow-y: auto; padding: 20px 28px;
     display: flex; flex-direction: column; gap: 12px;
   }
 
   .msg {
-    max-width: 85%; padding: 10px 14px; border-radius: 12px;
+    max-width: 78%; padding: 10px 14px; border-radius: 12px;
     line-height: 1.6; font-size: 14px; word-break: break-word;
     display: flex; align-items: flex-start; gap: 8px;
   }
@@ -79,6 +80,7 @@
   .msg.ai {
     align-self: flex-start; background: var(--surface2);
     border: 1px solid var(--border); border-bottom-left-radius: 4px;
+    max-width: 920px;
   }
   .msg.ai .msg-time { order: 0; }
   .msg.ai h1, .msg.ai h2, .msg.ai h3 { margin: 8px 0 4px; font-size: 15px; }
@@ -151,7 +153,7 @@
   #approval-dialog .btn-row { display: flex; gap: 10px; margin-top: 16px; }
   #approval-dialog button {
     flex: 1; padding: 14px; border: none; border-radius: 8px;
-    font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 8px;
+    font-size: 16px; font-weight: 700; cursor: pointer;
   }
   #approval-dialog .btn-deny { background: rgba(248,113,113,0.3); color: var(--error); border: 1px solid var(--error); }
   #approval-dialog .btn-deny:hover { background: rgba(248,113,113,0.5); }
@@ -165,8 +167,8 @@
 
   /* ====== Input ====== */
   #input-area {
-    padding: 12px 16px; border-top: 1px solid var(--border);
-    display: flex; gap: 8px; flex-shrink: 0; background: var(--surface);
+    padding: 14px 28px; border-top: 1px solid var(--border);
+    display: flex; gap: 10px; flex-shrink: 0; background: var(--surface);
   }
   #input-box {
     flex: 1; padding: 10px 14px; border: 1px solid var(--border);
@@ -190,7 +192,7 @@
   }
   #connect-dialog {
     background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-    padding: 32px; width: 400px; max-width: 95vw; text-align: center;
+    padding: 28px 32px; width: 560px; max-width: 94vw; text-align: center;
   }
   #connect-dialog h2 { margin-bottom: 8px; }
   #connect-dialog p { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
@@ -201,14 +203,139 @@
     font-family: monospace; outline: none; text-transform: uppercase;
   }
   #connect-dialog input:focus { border-color: var(--info); }
-  #connect-dialog button {
-    width: 100%; margin-top: 14px; padding: 12px; border: none;
-    border-radius: 10px; background: var(--accent); color: #fff;
-    font-size: 15px; font-weight: 600; cursor: pointer;
+  #connect-dialog .action-row {
+    display: flex; gap: 10px; margin-top: 16px;
   }
-  #connect-dialog button:hover { opacity: 0.85; }
+  #connect-dialog .action-row button {
+    flex: 1; padding: 14px; border: none; border-radius: 10px;
+    font-size: 15px; font-weight: 700; cursor: pointer;
+  }
+  #join-btn { background: var(--accent); color: #fff; }
+  #join-btn:hover { opacity: 0.85; }
+  #create-room-link {
+    background: var(--surface2); color: var(--info);
+    border: 1px solid var(--info) !important; font-weight: 600;
+  }
+  #create-room-link:hover { background: rgba(96,165,250,0.15); }
   #connect-dialog .hint { margin-top: 12px; font-size: 12px; color: var(--text2); }
   #connect-dialog .hint a { color: var(--info); cursor: pointer; text-decoration: underline; }
+
+  /* Close button for connect dialog */
+  #connect-dialog { position: relative; }
+  .dialog-close {
+    position: absolute; top: 14px; right: 14px;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text2); font-size: 16px; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .dialog-close:hover { color: var(--error); border-color: var(--error); background: rgba(248,113,113,0.12); }
+
+  /* ====== Download Section ====== */
+  .dl-section { margin-top: 14px; text-align: left; }
+  .dl-title { font-size: 13px; font-weight: 600; color: var(--info); margin: 12px 0 6px; }
+  .dl-btn {
+    display: block; text-align: center; padding: 10px;
+    background: var(--surface2); color: var(--info);
+    border-radius: 8px; text-decoration: none; font-size: 13px;
+    font-weight: 600; border: 1px solid var(--border);
+  }
+  .dl-btn:hover { border-color: var(--info); }
+  .dl-arch-row { display: flex; gap: 6px; }
+  .dl-arch-btn {
+    flex: 1; text-align: center; padding: 8px 4px;
+    background: var(--bg); color: var(--text2);
+    border-radius: 6px; text-decoration: none; font-size: 12px;
+    font-weight: 600; border: 1px solid var(--border);
+  }
+  .dl-arch-btn:hover { border-color: var(--info); color: var(--info); }
+  .dl-cmd {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; font-size: 11px;
+    font-family: monospace; color: var(--text2); margin: 8px 0;
+    word-break: break-all;
+  }
+  .dl-copy { float: right; font-size: 11px; color: var(--info); cursor: pointer; margin-left: 8px; }
+  .dl-copy:hover { text-decoration: underline; }
+  .dl-toggle {
+    display: block; font-size: 12px; color: var(--info);
+    cursor: pointer; text-decoration: underline; margin-top: 6px;
+  }
+  .dl-help {
+    margin-top: 8px; font-size: 12px; color: var(--text2);
+    line-height: 1.7; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; display: none;
+  }
+  .dl-help code { background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+  .dl-help table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 11px; }
+  .dl-help th, .dl-help td { border: 1px solid var(--border); padding: 4px 6px; text-align: left; }
+  .dl-help th { background: var(--surface2); color: var(--info); }
+  /* Linux guide: step cards (2-column on wide dialog) */
+  .dl-guide { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .dl-guide-head { font-size: 13px; font-weight: 700; color: var(--info); margin-bottom: 2px; grid-column: 1 / -1; }
+  .dl-step {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .dl-step.wide { grid-column: 1 / -1; }
+  .dl-guide-foot { grid-column: 1 / -1; }
+  .dl-step-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .dl-step-title .num {
+    display: inline-block; min-width: 18px; height: 18px; line-height: 18px;
+    text-align: center; background: var(--accent); color: #fff;
+    border-radius: 50%; font-size: 11px; font-weight: 700; margin-right: 6px;
+  }
+  .dl-cmd-block {
+    display: block; background: rgba(0,0,0,0.45); color: var(--info);
+    padding: 8px 10px; border-radius: 6px; font-family: monospace;
+    font-size: 11px; white-space: pre-wrap; word-break: break-all; line-height: 1.5;
+    margin: 4px 0;
+  }
+  .dl-step-note { font-size: 11px; color: var(--text2); margin-top: 6px; }
+  .dl-guide-foot { font-size: 11px; color: var(--text2); border-top: 1px dashed var(--border); padding-top: 8px; margin-top: 2px; line-height: 1.7; }
+  #connect-dialog { max-height: 92vh; overflow-y: auto; }
+
+  /* ====== Responsive: mobile / narrow screens ====== */
+  @media (max-width: 720px) {
+    #header { flex-wrap: wrap; gap: 6px 10px; padding: 10px 14px; }
+    #header .title { font-size: 14px; }
+    #messages { padding: 14px 12px; }
+    #input-area { padding: 10px 12px; }
+    .msg { max-width: 94%; }
+    .msg.ai { max-width: 100%; }
+    #connect-dialog { padding: 20px 16px; width: 100%; max-width: 96vw; }
+    #approval-dialog { padding: 18px 16px; width: 100%; max-width: 96vw; }
+    .dl-guide { grid-template-columns: 1fr; }
+    .dl-step.wide { grid-column: auto; }
+    .dl-arch-row { flex-wrap: wrap; }
+    .dl-arch-btn { flex: 1 1 45%; }
+    .tool-header { flex-wrap: wrap; }
+    .tool-header .args { width: 100%; order: 3; }
+    .tool-body pre { max-height: 220px; }
+    #room-display { font-size: 12px; letter-spacing: 1px; padding: 3px 8px; }
+  }
+
+  /* ====== Client download panel (collapsible) ====== */
+  .client-panel { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .client-toggle {
+    display: block; text-align: center; font-size: 12px; color: var(--info);
+    cursor: pointer; padding: 8px; border-radius: 8px;
+    border: 1px dashed var(--border); background: rgba(15,52,96,0.3);
+  }
+  .client-toggle:hover { border-color: var(--info); }
+  .client-body { display: none; margin-top: 12px; text-align: left; }
+  .dl-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .dl-tab {
+    flex: 1; padding: 8px; text-align: center; font-size: 13px; font-weight: 600;
+    background: var(--bg); color: var(--text2); border: 1px solid var(--border);
+    border-radius: 8px; cursor: pointer;
+  }
+  .dl-tab.active { background: var(--surface2); color: var(--info); border-color: var(--info); }
+  .dl-tab-panel { display: none; }
+  .dl-tab-panel.active { display: block; }
+  .dl-note { font-size: 11px; color: var(--text2); line-height: 1.6; margin-top: 8px; }
 
   /* ====== Scrollbar ====== */
   #messages::-webkit-scrollbar { width: 6px; }
@@ -233,6 +360,7 @@
         <option value="en">EN</option>
       </select>
       <button id="export-btn" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;display:none;" data-i18n="export_btn">导出对话</button>
+      <button id="reconnect-btn" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;display:none;" data-i18n="reconnect_btn">重新连接</button>
       <div id="room-display"></div>
     </div>
   </div>
@@ -248,16 +376,47 @@
 <!-- Connect Dialog -->
 <div id="connect-overlay">
   <div id="connect-dialog">
+    <button class="dialog-close" id="close-connect-btn" title="关闭" aria-label="关闭">✕</button>
     <h2 data-i18n="dialog_title">[+] 加入远程诊断</h2>
     <p data-i18n="dialog_subtitle">输入 6 位房间码，或创建一个新房间</p>
-    <input id="room-input" type="text" maxlength="6" placeholder="ABC-DEF" autocomplete="off">
-    <button id="join-btn" data-i18n="dialog_join">加入房间</button>
-    <p class="hint"><a id="create-room-link" data-i18n="dialog_create">创建新房间</a></p>
-    <hr style="border-color: var(--border); margin: 16px 0;">
-    <p style="font-size: 12px; color: var(--text2); text-align: left; line-height: 1.8;" data-i18n-html="dialog_instructions"></p>
-    <a href="/static/bridge-win64.exe" download style="display: inline-block; padding: 10px 20px; background: var(--surface2); color: var(--info); border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; border: 1px solid var(--border);" data-i18n="dialog_download">
-      [v] 下载 Windows 桥接器 (bridge-win64.exe, 4.8MB)
-    </a>
+    <input id="room-input" type="text" maxlength="6" placeholder="AB12CD" autocomplete="off">
+    <div class="action-row">
+      <button id="join-btn" data-i18n="dialog_join">加入房间</button>
+      <button id="create-room-link" data-i18n="dialog_create">创建新房间</button>
+    </div>
+
+    <div class="client-panel">
+      <span class="client-toggle" onclick="toggleClientPanel()" data-i18n="client_toggle">[+] 首次使用？下载桥接器客户端</span>
+      <div class="client-body" id="client-body">
+        <div class="dl-tabs">
+          <div class="dl-tab active" data-tab="win" onclick="switchDlTab('win')">Windows</div>
+          <div class="dl-tab" data-tab="linux" onclick="switchDlTab('linux')">Linux</div>
+        </div>
+
+        <!-- Windows panel -->
+        <div class="dl-tab-panel active" id="dl-panel-win">
+          <a href="/static/bridge-win64.exe" download class="dl-btn" data-i18n="dialog_download">
+            [v] 下载 Windows 桥接器 (bridge-win64.exe, 4.8MB)
+          </a>
+          <div class="dl-note" data-i18n-html="dl_win_note"></div>
+        </div>
+
+        <!-- Linux panel -->
+        <div class="dl-tab-panel" id="dl-panel-linux">
+          <div class="dl-arch-row">
+            <a href="/static/bridge-linux-amd64" download class="dl-arch-btn" title="x86_64 / Ubuntu / UOS / KOS / RedHat">x86_64</a>
+            <a href="/static/bridge-linux-arm64" download class="dl-arch-btn" title="ARM64 / 飞腾 / 鲲鹏">ARM64</a>
+            <a href="/static/bridge-linux-loong64" download class="dl-arch-btn" title="LoongArch / 龙芯">龙芯</a>
+          </div>
+          <div class="dl-cmd">
+            <span class="dl-copy" onclick="copyLinuxCmd(this)" data-i18n="dl_copy">复制</span>
+            <span id="linux-cmd-text">curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span>
+          </div>
+          <a class="dl-toggle" onclick="toggleLinuxHelp()" data-i18n="dl_linux_toggle">[+] Linux 安装教程</a>
+          <div class="dl-help" id="linux-help" data-i18n-html="dl_linux_help"></div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -318,6 +477,7 @@ const I18N = {
     status_bridge_wait: '等待桥接器 [--]',
     status_connection_lost: '与服务器的连接已断开',
     export_btn: '导出对话',
+    reconnect_btn: '重新连接',
     send_btn: '发送',
     input_placeholder: '描述你的电脑问题，例如：帮我检查系统有没有异常',
     room_prefix: '房间: ',
@@ -333,6 +493,31 @@ const I18N = {
       + '<br><strong>功能：</strong>49 个诊断工具 — 截图、进程监控、网络测试、事件日志、OCR 等。<br>'
       + '<br><strong>安全：</strong>Tier 1 只读（安全）。Tier 2/3 交互工具会弹出审批确认。',
     dialog_download: '[v] 下载 Windows 桥接器 (bridge-win64.exe, 4.8MB)',
+    client_toggle: '[+] 首次使用？下载桥接器客户端',
+    dl_win_note: '<strong>使用步骤：</strong><br>'
+      + '1. 下载 bridge-win64.exe<br>'
+      + '2. 双击运行，输入上方房间码<br>'
+      + '3. 回到聊天框描述你的电脑问题即可',
+    dl_copy: '复制',
+    dl_linux_toggle: '[+] Linux 安装教程',
+    dl_linux_help: '<div class="dl-guide">'
+      + '<div class="dl-guide-head">Linux 安装教程</div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">1</span>查看你的 CPU 架构</div>'
+      + '<span class="dl-cmd-block">uname -m</span>'
+      + '<table><tr><th>输出</th><th>选择版本</th></tr>'
+      + '<tr><td>x86_64</td><td>x86_64</td></tr>'
+      + '<tr><td>aarch64</td><td>ARM64</td></tr>'
+      + '<tr><td>loongarch64</td><td>龙芯</td></tr></table></div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">2</span>方式一：一键安装（自动识别架构）</div>'
+      + '<span class="dl-cmd-block">curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span></div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">3</span>方式二：手动安装（以 x86_64 为例）</div>'
+      + '<span class="dl-cmd-block">wget http://106.54.193.9:8000/static/bridge-linux-amd64\nchmod +x bridge-linux-amd64\n./bridge-linux-amd64</span>'
+      + '<div class="dl-step-note">按上方按钮下载对应架构的版本即可</div></div>'
+      + '<div class="dl-step"><div class="dl-step-title"><span class="num">4</span>输入房间码</div>'
+      + '<span class="dl-cmd-block">启动后输入上方房间码，回车即连接</span></div>'
+      + '<div class="dl-guide-foot"><strong>支持系统：</strong>Ubuntu / UOS 统信 / KOS 麒麟 / RedHat / CentOS（安装方式相同）<br>'
+      + '<strong>说明：</strong>一次性使用，重启后手动启动即可，无需常驻后台。</div>'
+      + '</div>',
     msg_connected: '已连接到服务器',
     msg_ws_failed: 'WebSocket 连接失败',
     tool_running: '[...] 执行中...',
@@ -342,6 +527,7 @@ const I18N = {
     tool_waiting: '等待结果...',
     tool_tier3: 'Tier 3: 危险操作 — 需审批',
     tool_tier2: 'Tier 2: 交互操作',
+    tool_tier1: 'Tier 1: 只读操作',
     approval_title: '审批请求 — 工具调用需要你的授权',
     approval_desc: 'AI 想要执行以下 Tier ',
     approval_deny: '拒绝',
@@ -373,6 +559,7 @@ const I18N = {
     status_bridge_wait: '等待橋接器 [--]',
     status_connection_lost: '與伺服器的連線已中斷',
     export_btn: '匯出對話',
+    reconnect_btn: '重新連線',
     send_btn: '傳送',
     input_placeholder: '描述你的電腦問題，例如：幫我檢查系統有沒有異常',
     room_prefix: '房間: ',
@@ -388,6 +575,31 @@ const I18N = {
       + '<br><strong>功能：</strong>49 個診斷工具 — 截圖、處理程序監控、網路測試、事件記錄、OCR 等。<br>'
       + '<br><strong>安全：</strong>Tier 1 僅讀取（安全）。Tier 2/3 互動工具會彈出審批確認。',
     dialog_download: '[v] 下載 Windows 橋接器 (bridge-win64.exe, 4.8MB)',
+    client_toggle: '[+] 首次使用？下載橋接器客戶端',
+    dl_win_note: '<strong>使用步驟：</strong><br>'
+      + '1. 下載 bridge-win64.exe<br>'
+      + '2. 雙擊執行，輸入上方房間碼<br>'
+      + '3. 回到聊天框描述你的電腦問題即可',
+    dl_copy: '複製',
+    dl_linux_toggle: '[+] Linux 安裝教學',
+    dl_linux_help: '<div class="dl-guide">'
+      + '<div class="dl-guide-head">Linux 安裝教學</div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">1</span>查看你的 CPU 架構</div>'
+      + '<span class="dl-cmd-block">uname -m</span>'
+      + '<table><tr><th>輸出</th><th>選擇版本</th></tr>'
+      + '<tr><td>x86_64</td><td>x86_64</td></tr>'
+      + '<tr><td>aarch64</td><td>ARM64</td></tr>'
+      + '<tr><td>loongarch64</td><td>龍芯</td></tr></table></div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">2</span>方式一：一鍵安裝（自動識別架構）</div>'
+      + '<span class="dl-cmd-block">curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span></div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">3</span>方式二：手動安裝（以 x86_64 為例）</div>'
+      + '<span class="dl-cmd-block">wget http://106.54.193.9:8000/static/bridge-linux-amd64\nchmod +x bridge-linux-amd64\n./bridge-linux-amd64</span>'
+      + '<div class="dl-step-note">按上方按鈕下載對應架構的版本即可</div></div>'
+      + '<div class="dl-step"><div class="dl-step-title"><span class="num">4</span>輸入房間碼</div>'
+      + '<span class="dl-cmd-block">啟動後輸入上方房間碼，回車即連接</span></div>'
+      + '<div class="dl-guide-foot"><strong>支援系統：</strong>Ubuntu / UOS 統信 / KOS 麒麟 / RedHat / CentOS（安裝方式相同）<br>'
+      + '<strong>說明：</strong>一次性使用，重啟後手動啟動即可，無需常駐後台。</div>'
+      + '</div>',
     msg_connected: '已連線到伺服器',
     msg_ws_failed: 'WebSocket 連線失敗',
     tool_running: '[...] 執行中...',
@@ -397,6 +609,7 @@ const I18N = {
     tool_waiting: '等待結果...',
     tool_tier3: 'Tier 3: 危險操作 — 需審批',
     tool_tier2: 'Tier 2: 互動操作',
+    tool_tier1: 'Tier 1: 唯讀操作',
     approval_title: '審批請求 — 工具呼叫需要你的授權',
     approval_desc: 'AI 想要執行以下 Tier ',
     approval_deny: '拒絕',
@@ -428,6 +641,7 @@ const I18N = {
     status_bridge_wait: 'Waiting for bridge [--]',
     status_connection_lost: 'Connection to server lost',
     export_btn: 'Export',
+    reconnect_btn: 'Reconnect',
     send_btn: 'Send',
     input_placeholder: 'Describe your PC problem, e.g.: Check my system for issues',
     room_prefix: 'Room: ',
@@ -443,6 +657,31 @@ const I18N = {
       + '<br><strong>Features:</strong> 49 diagnostic tools — screenshots, process monitoring, network tests, event logs, OCR, etc.<br>'
       + '<br><strong>Safety:</strong> Tier 1 read-only (safe). Tier 2/3 interactive tools require approval via a popup dialog.',
     dialog_download: '[v] Download Windows Bridge (bridge-win64.exe, 4.8MB)',
+    client_toggle: '[+] First time? Download the bridge client',
+    dl_win_note: '<strong>How to use:</strong><br>'
+      + '1. Download bridge-win64.exe<br>'
+      + '2. Run it and enter the room code above<br>'
+      + '3. Back in the chat, describe your PC issue',
+    dl_copy: 'Copy',
+    dl_linux_toggle: '[+] Linux Install Guide',
+    dl_linux_help: '<div class="dl-guide">'
+      + '<div class="dl-guide-head">Linux Install Guide</div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">1</span>Check your CPU architecture</div>'
+      + '<span class="dl-cmd-block">uname -m</span>'
+      + '<table><tr><th>Output</th><th>Download</th></tr>'
+      + '<tr><td>x86_64</td><td>x86_64 build</td></tr>'
+      + '<tr><td>aarch64</td><td>ARM64 build</td></tr>'
+      + '<tr><td>loongarch64</td><td>LoongArch build</td></tr></table></div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">2</span>Option A: One-command install (auto-detect arch)</div>'
+      + '<span class="dl-cmd-block">curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span></div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">3</span>Option B: Manual install (x86_64 example)</div>'
+      + '<span class="dl-cmd-block">wget http://106.54.193.9:8000/static/bridge-linux-amd64\nchmod +x bridge-linux-amd64\n./bridge-linux-amd64</span>'
+      + '<div class="dl-step-note">Or use the architecture buttons above to download the right build</div></div>'
+      + '<div class="dl-step"><div class="dl-step-title"><span class="num">4</span>Enter the room code</div>'
+      + '<span class="dl-cmd-block">After launching, enter the room code above and press Enter</span></div>'
+      + '<div class="dl-guide-foot"><strong>Supported systems:</strong> Ubuntu / UOS / KOS / RedHat / CentOS (same steps)<br>'
+      + '<strong>Note:</strong> for one-time use. After reboot, run it manually again. No background service needed.</div>'
+      + '</div>',
     msg_connected: 'Connected to server',
     msg_ws_failed: 'WebSocket connection failed',
     tool_running: '[...] Running...',
@@ -452,6 +691,7 @@ const I18N = {
     tool_waiting: 'Waiting for result...',
     tool_tier3: 'Tier 3: Destructive — requires approval',
     tool_tier2: 'Tier 2: Interactive — user awareness needed',
+    tool_tier1: 'Tier 1: Read-only',
     approval_title: 'Approval Required — Tool call needs your authorization',
     approval_desc: 'AI wants to execute this Tier ',
     approval_deny: 'Deny',
@@ -495,6 +735,64 @@ function applyLang(lang) {
 }
 
 // ============================================================
+// Client download panel
+// ============================================================
+function toggleClientPanel() {
+  const body = document.getElementById('client-body');
+  const toggle = document.querySelector('.client-toggle');
+  if (!body) return;
+  if (body.style.display === 'block') {
+    body.style.display = 'none';
+    toggle.textContent = t('client_toggle');
+  } else {
+    body.style.display = 'block';
+    toggle.textContent = '[-] ' + (currentLang === 'en' ? 'First time? Download the bridge client' : (currentLang === 'zh-TW' ? '首次使用？下載橋接器客戶端' : '首次使用？下载桥接器客户端'));
+  }
+}
+
+function switchDlTab(tab) {
+  document.querySelectorAll('.dl-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+  document.getElementById('dl-panel-win').classList.toggle('active', tab === 'win');
+  document.getElementById('dl-panel-linux').classList.toggle('active', tab === 'linux');
+}
+
+// ============================================================
+// Linux download helpers
+// ============================================================
+function toggleLinuxHelp() {
+  const help = document.getElementById('linux-help');
+  const toggle = document.querySelector('.dl-toggle');
+  if (!help) return;
+  if (help.style.display === 'block') {
+    help.style.display = 'none';
+    toggle.textContent = t('dl_linux_toggle');
+  } else {
+    help.style.display = 'block';
+    toggle.textContent = '[-] ' + (currentLang === 'en' ? 'Linux Install Guide' : (currentLang === 'zh-TW' ? 'Linux 安裝教學' : 'Linux 安装教程'));
+  }
+}
+
+function copyLinuxCmd(el) {
+  const txt = document.getElementById('linux-cmd-text');
+  if (!txt) return;
+  const text = txt.textContent.trim();
+  const done = () => { el.textContent = t('dl_copy') + ' ✓'; setTimeout(() => { el.textContent = t('dl_copy'); }, 1500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) {}
+  document.body.removeChild(ta);
+}
+
+// ============================================================
 // State
 // ============================================================
 let ws = null;
@@ -504,6 +802,8 @@ let pendingApprovalId = null;
 let approvalTimerInterval = null;
 let approvalDeadline = 0;
 let autoApproveT2 = localStorage.getItem('auto_approve_t2') === 'true';
+let reconnectAttempts = 0;
+let reconnectTimer = null;
 
 const messagesEl = document.getElementById('messages');
 const inputBox = document.getElementById('input-box');
@@ -548,10 +848,10 @@ function updateBridgeStatus(connected) {
 function updateAutoApproveBtnState() {
   if (autoApproveT2) {
     autoApproveBtn.className = 'enabled';
-    autoApproveBtn.textContent = 'T2 Auto ON';
+    autoApproveBtn.textContent = t('auto_approve_enabled');
   } else {
     autoApproveBtn.className = '';
-    autoApproveBtn.textContent = 'T2 Auto OFF';
+    autoApproveBtn.textContent = t('auto_approve_disabled');
   }
 }
 
@@ -573,7 +873,9 @@ function connect(room) {
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
+    reconnectAttempts = 0;
     overlay.style.display = 'none';
+    document.getElementById('reconnect-btn').style.display = 'none';
     exportBtn.style.display = 'inline-block';
     addSystemMsg(t('msg_connected'));
     // Sync auto-approve state with server
@@ -581,16 +883,38 @@ function connect(room) {
   };
 
   ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
+    let msg;
+    try {
+      msg = JSON.parse(event.data);
+    } catch (e) {
+      console.error('Bad WS message:', event.data);
+      return;
+    }
     handleMessage(msg);
   };
 
   ws.onclose = () => {
     setStatus('offline'); sendBtn.disabled = true;
     addSystemMsg(t('status_connection_lost'));
+    scheduleReconnect();
   };
 
   ws.onerror = () => { addErrorMsg(t('msg_ws_failed')); };
+}
+
+// 自动重连：指数退避，最多 5 次
+function scheduleReconnect() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (reconnectAttempts >= 5 || !roomCode || !ws || ws.readyState !== WebSocket.CLOSED) return;
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 15000);
+  reconnectAttempts++;
+  addSystemMsg('[' + reconnectAttempts + '/5] ' + (currentLang === 'en' ? 'Auto-reconnecting in ' : '自动重连中，') + (delay / 1000) + 's');
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (!roomCode) return;
+    addSystemMsg(t('status_connecting'));
+    connect(roomCode);
+  }, delay);
 }
 
 // ============================================================
@@ -773,16 +1097,32 @@ function addUserMessage(text) {
 
 function renderMarkdown(md) {
   let html = md.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+  // 保护代码块：占位符避免内部被后续 markdown 规则污染
+  const codeBlocks = [];
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
+    codeBlocks.push('<pre><code>' + code + '</code></pre>');
+    return '%%CODEBLOCK' + (codeBlocks.length - 1) + '%%';
+  });
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  // 无序列表：连续 - 行 → <ul><li>...</li></ul>
+  html = html.replace(/(?:^[-*] .+(?:\n|$))+/gm, function(m) {
+    const items = m.trim().split('\n')
+      .map(l => '<li>' + l.replace(/^[-*]\s+/, '') + '</li>').join('');
+    return '<ul>' + items + '</ul>';
+  });
+  // 有序列表：连续数字行 → <ol><li>...</li></ol>
+  html = html.replace(/(?:^\d+\. .+(?:\n|$))+/gm, function(m) {
+    const items = m.trim().split('\n')
+      .map(l => '<li>' + l.replace(/^\d+\.\s+/, '') + '</li>').join('');
+    return '<ol>' + items + '</ol>';
+  });
   html = html.replace(/\n\n/g, '<br><br>'); html = html.replace(/\n/g, '<br>');
+  // 还原代码块（内部换行保持原样）
+  html = html.replace(/%%CODEBLOCK(\d+)%%/g, function(m, i) { return codeBlocks[+i]; });
   return html;
 }
 
@@ -807,10 +1147,10 @@ function addToolCard(toolName, args, tier) {
   const badge = getTierBadge(toolName, tier);
   el.innerHTML = '<div class="tool-header" onclick="this.parentElement.querySelector(\'.tool-body\').classList.toggle(\'open\')">'
     + '<span class="icon">[*]</span>' + badge
-    + '<span class="name">' + toolName + '</span>'
-    + '<span class="args" style="font-size:11px;color:var(--text2)">' + argsText + '</span>'
-    + '<span class="status tool-status running">' + t('tool_running') + '</span>'
-    + '</div><div class="tool-body"><pre>' + t('tool_waiting') + '</pre></div>';
+    + '<span class="name">' + escapeHtml(toolName) + '</span>'
+    + '<span class="args" style="font-size:11px;color:var(--text2)">' + escapeHtml(argsText) + '</span>'
+    + '<span class="status tool-status running">' + escapeHtml(t('tool_running')) + '</span>'
+    + '</div><div class="tool-body"><pre>' + escapeHtml(t('tool_waiting')) + '</pre></div>';
   messagesEl.appendChild(el); scrollBottom();
 }
 
@@ -843,6 +1183,12 @@ function updateToolResult(toolName, content, denied) {
 }
 
 function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
 // ============================================================
 // User actions
@@ -880,6 +1226,19 @@ createRoomLink.addEventListener('click', async () => {
 
 langSwitcher.addEventListener('change', () => { applyLang(langSwitcher.value); });
 
+// Close / reopen connect dialog
+document.getElementById('close-connect-btn').addEventListener('click', () => {
+  overlay.style.display = 'none';
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    document.getElementById('reconnect-btn').style.display = 'inline-block';
+  }
+});
+document.getElementById('reconnect-btn').addEventListener('click', () => {
+  document.getElementById('reconnect-btn').style.display = 'none';
+  overlay.style.display = 'flex';
+  roomInput.focus();
+});
+
 // ============================================================
 // Export
 // ============================================================
@@ -892,17 +1251,16 @@ exportBtn.addEventListener('click', () => {
   lines.push('='.repeat(50)); lines.push('');
   const children = messagesEl.children;
   for (const el of children) {
-    if (el.classList.contains('msg')) {
-      if (el.classList.contains('user')) { lines.push('[' + t('export_user') + '] ' + el.textContent.trim()); }
-      else if (el.classList.contains('ai')) { lines.push('[' + t('export_ai') + ']'); lines.push(el.textContent.trim()); lines.push(''); }
-      else if (el.classList.contains('tool')) {
-        const name = el.querySelector('.name')?.textContent || '';
-        const status = el.querySelector('.tool-status')?.textContent || '';
-        const body = el.querySelector('pre')?.textContent || '';
-        lines.push('--- ' + t('export_tool') + ': ' + name + ' (' + status + ') ---');
-        lines.push(body.trim()); lines.push('---'); lines.push('');
-      } else if (el.classList.contains('error')) { lines.push('[' + t('export_error') + '] ' + el.textContent.trim()); }
-    } else if (el.classList.contains('system')) { lines.push('[' + t('export_system') + '] ' + el.textContent.trim()); }
+    if (el.classList.contains('user')) { lines.push('[' + t('export_user') + '] ' + el.textContent.trim()); }
+    else if (el.classList.contains('ai')) { lines.push('[' + t('export_ai') + ']'); lines.push(el.textContent.trim()); lines.push(''); }
+    else if (el.classList.contains('tool')) {
+      const name = el.querySelector('.name')?.textContent || '';
+      const status = el.querySelector('.tool-status')?.textContent || '';
+      const body = el.querySelector('pre')?.textContent || '';
+      lines.push('--- ' + t('export_tool') + ': ' + name + ' (' + status + ') ---');
+      lines.push(body.trim()); lines.push('---'); lines.push('');
+    } else if (el.classList.contains('error')) { lines.push('[' + t('export_error') + '] ' + el.textContent.trim()); }
+    else if (el.classList.contains('system')) { lines.push('[' + t('export_system') + '] ' + el.textContent.trim()); }
   }
   const text = lines.join('\n');
   const blob = new Blob([text], { type:'text/plain;charset=utf-8' });
