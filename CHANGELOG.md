@@ -154,3 +154,35 @@ document.getElementById('tab-' + name.replace('.','')).className = 'btn-primary'
 
 - 服务器 WebSocket 推送改用 `safe_send` 封装，避免连接中断时异常
 - 其他若干稳定性改进
+
+
+## v0.5.0 — 2026-08-03（管道化重写：Go bridge + 平台感知）
+
+### 一、Go 管道化桥接器（bridge/ 目录，全新）
+
+- 用 Go 重写桥接器：单文件静态编译，Windows 4.8MB / Linux 4.7MB（旧 pyinstaller 版 22MB，-78%）
+- 设计铁律：**单一职责命令管道**——不内置任何业务工具，能力全部通过执行命令实现
+- 协议 v2：`command` 直接下发命令字符串（平台感知 shell），替代旧 tool/args 映射
+- 文件通道：`file_download`（拉取客户机日志包）/ `file_upload`（推送工具/脚本），256KB 分块
+- 透明可审计：每条命令写入 `~/.clouddiag/bridge.log`（时间/shell/exit code/命令/结果摘要）
+- 心跳 25s、断线自动重连（2s→30s 指数退避）、超时杀进程树、普通权限运行
+
+### 二、服务器端适配（server.py）
+
+- **平台感知**：identify 上报 platform，服务器自动识别 bridge_mode（v1 旧版 / v2 go-pipe）与目标平台（windows/linux/darwin）
+- **工具收缩**：25 个桌面操控工具默认隐藏（ENABLE_DESKTOP_TOOLS=0），TOOLS 46→26
+- **命令模板库**：V2_COMMAND_TEMPLATES 双平台 18 个工具模板（systeminfo/事件日志/进程/服务/网络等），Linux 用 bash、Windows 用 PowerShell
+- **平台提示词**：SYSTEM_PROMPT_WINDOWS / LINUX / MACOS 三套，按目标平台动态注入
+- **命令分级跨平台**：classify_command 补充 Linux 规则（uname/lscpu=只读，apt install/systemctl restart=修改，高危命令=fork bomb=危险拦截）
+- **v1 兼容**：旧 python bridge 仍可用（tool/args 协议），平滑过渡
+
+### 三、已验证（本机联调）
+
+- Linux bridge 真实连接 → AI 诊断（GetSystemInfo 走 bash 模板）✅
+- Tier 3 审批链路（mkdir 真实执行）✅
+- 文件下载通道（1MB 文件 4 块完整拼接）✅
+- 命令分级 25/25 测试用例通过 ✅
+
+### 四、Linux 诊断支持
+
+架构天然支持：同协议、同 AI，仅命令模板与提示词按平台切换。Go 交叉编译一行命令出 Linux 版。

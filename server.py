@@ -4,6 +4,7 @@ FastAPI + WebSocket + Agent Core
 Features: 49 tools, Tier 2/3 approval, SQLite chat history, admin dashboard
 """
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -192,6 +193,10 @@ _READONLY_RE = [
     r"^\s*get-\w+",
     r"^\s*test-\w+",
     r"^\s*[a-z]:\\",  # path listing
+    # Linux read-only
+    r"^\s*(uname|lscpu|free|df|lsblk|blkid|lsusb|lspci|dmidecode|smartctl|journalctl|dmesg|ps|top|htop|ss|ip|ifconfig|netstat|route|uptime|whoami|hostname|cat(?!\s*>)|ls|find|du|mount|lsof|vmstat|iostat|id|groups|last|w|date|pwd|sysctl|stat|file|which|whereis|uname -a)\b",
+    r"^\s*systemctl\s+(status|list-units|show|is-active|is-enabled)\b",
+    r"^\s*fdisk\s+-l\b",
 ]
 _MODIFY_RE = [
     r"^\s*(set|new|remove|copy|move|rename|start|stop|restart|restart-computer|stop-computer|install|uninstall|update|write|clear|flush|disable|enable|invoke|kill|taskkill|shutdown|format|del|rd|mkdir|rmdir|xcopy|robocopy|wmic|diskpart|takeown|icacls|cacls|attrib|reg\s+add|reg\s+delete|sc\s+(start|stop|config|delete)|net\s+(start|stop|user|localgroup|share))\b",
@@ -206,6 +211,18 @@ _MODIFY_RE = [
     r"^\s*clear-\w+",
     r"^\s*invoke-\w+",
     r"^\s*add-\w+",
+    # Linux modify
+    r"^\s*(apt|apt-get|aptitude|dnf|yum|zypper|pacman|apk)\s+(install|remove|purge|autoremove|update|upgrade|dist-upgrade)\b",
+    r"^\s*pip\d?\s+(install|uninstall)\b",
+    r"^\s*(kill|pkill|killall)\b",
+    r"^\s*(rm|mv|cp|mkdir|rmdir|touch|chmod|chown|ln|tar|unzip|zip|gzip|gunzip|curl\s+-o|wget\s+-O)\b",
+    r"^\s*systemctl\s+(start|stop|restart|reload|enable|disable|mask|set-default|daemon-reload)\b",
+    r"^\s*service\s+\S+\s+(start|stop|restart|reload)\b",
+    r"^\s*(useradd|usermod|userdel|passwd|groupadd|groupdel|chsh)\b",
+    r"^\s*(iptables|ufw|firewall-cmd|nft|sed\s+-i|awk\s+-i)\b",
+    r"^\s*(mount|umount|reboot|poweroff|shutdown|halt|swapoff|swapon)\b",
+    r"^\s*(echo|printf|tee)\s+.*[>]",  # 写文件重定向
+    r"^\s*cat\s+>",
 ]
 _DANGEROUS_RE = [
     r"\bformat\s+[a-z]:",
@@ -226,6 +243,20 @@ _DANGEROUS_RE = [
     r"\bremove-\w+\b.*\b-recurse\b",
     # destructive verbs hidden after a pipe: Get-Process | Stop-Process etc.
     r"\|\s*(stop|kill|remove|clear|set|new|invoke|disable|enable|format-volume)-\w+",
+    # Linux destructive
+    r"rm\s+-(rf|fr)\s*(\s|/|\*)+",        # rm -rf / 或 /* 等
+    r"\bmkfs(\.\w+)?\s+",                  # 创建文件系统
+    r"\bdd\s+.*\bof=/dev/",                # dd 写裸设备
+    r"\bshred\s",                          # 粉碎
+    r"\bwipefs\s",                         # 擦除文件系统
+    r"\bparted\s+\S+\s+(mklabel|rm|mkpart)\b",
+    r"\bfdisk\s+(?!-l\b)",                 # fdisk 非只读操作
+    r"\bgdisk\s",
+    r"\bmkswap\s+/dev/",
+    r"\bchmod\s+-R\s+[0-7]{3,4}\s+/\b",
+    r"\bchown\s+-R\s+\S+\s+/\b",
+    r"echo\s+[^|]*>\s*/dev/sd",
+    r":\(\)\s*\{[^}]*\|[^}]*&",            # fork bomb
 ]
 
 
@@ -328,7 +359,107 @@ TOOLS = [
     {"type":"function","function":{"name":"GetRunningTasks","description":"List all running and pending tasks.","parameters":{"type":"object","properties":{},"required":[]}}},
 ]
 
-SYSTEM_PROMPT = """You are a professional Windows remote diagnostics assistant. You remotely execute diagnostic commands via a bridge program installed on the user's PC to help troubleshoot computer issues.
+# ============================================================
+# v2 管道化配置（go-pipe bridge）
+# ============================================================
+# 桌面操控类工具：管道化设计下默认隐藏（行为面收敛，杀软友好）。
+# 如需恢复，设 ENABLE_DESKTOP_TOOLS=1 重新加载即可（旧 python bridge 仍需要它们）。
+ENABLE_DESKTOP_TOOLS = os.getenv("ENABLE_DESKTOP_TOOLS", "0") == "1"
+DESKTOP_TOOLS = {
+    "Snapshot", "AnnotatedSnapshot", "GetClipboard", "SetClipboard",
+    "Click", "Type", "Move", "Scroll", "Shortcut", "Wait",
+    "FocusWindow", "MinimizeAll", "App", "ReconnectSession",
+    "Notification", "PlaySound", "LockScreen", "OCR", "ScreenRecord", "Scrape",
+    "TaskCreate", "TaskDelete", "CancelTask", "GetTaskStatus", "GetRunningTasks",
+}
+if not ENABLE_DESKTOP_TOOLS:
+    TOOLS = [t for t in TOOLS if t["function"]["name"] not in DESKTOP_TOOLS]
+
+# v2 工具 → 命令模板（Windows: PowerShell / CMD；Linux: bash）
+# 模板中的 {arg} 占位符取自工具参数；timeout 为默认秒数。
+V2_COMMAND_TEMPLATES = {
+    "windows": {
+        "run_systeminfo":   ("systeminfo", 90),
+        "run_dxdiag":       ("dxdiag /whql:off /t \"%TEMP%\\dxdiag.txt\" 2>nul & type \"%TEMP%\\dxdiag.txt\"", 150),
+        "read_event_log":   ("Get-WinEvent -LogName System -MaxEvents {max_events} -ErrorAction SilentlyContinue | Select-Object -First {max_events} TimeCreated,Id,LevelDisplayName,ProviderName,Message | Format-Table -AutoSize -Wrap", 90),
+        "run_powershell":   ("{command}", 60),
+        "RunCommand":       ("{command}", 60),
+        "Shell":            ("{command}", 60),
+        "Shutdown":         ("shutdown /s /t 0", 30),
+        "GetSystemInfo":    ("systeminfo", 90),
+        "ListProcesses":    ("Get-Process | Sort-Object WS -Descending | Select-Object -First {limit} Id,ProcessName,@{n='CPU(s)';e={$_.CPU}},@{n='Mem(MB)';e={[math]::Round($_.WS/1MB,1)}} | Format-Table -AutoSize", 60),
+        "KillProcess":      ("Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue; if ('{name}' -ne '') {{ Stop-Process -Name '{name}' -Force -ErrorAction SilentlyContinue }}", 30),
+        "FileRead":         ("Get-Content -Raw -Path '{path}' -ErrorAction SilentlyContinue", 60),
+        "FileList":         ("Get-ChildItem -Force -Path '{path}' -ErrorAction SilentlyContinue | Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize", 60),
+        "FileSearch":       ("Get-ChildItem -Path '{path}' -Recurse -Filter '{pattern}' -ErrorAction SilentlyContinue | Select-Object -First {limit} FullName,Length | Format-Table -AutoSize", 120),
+        "RegRead":          ("Get-ItemProperty -Path '{key}' -ErrorAction SilentlyContinue | Select-Object '{value_name}' | Format-List", 30),
+        "ServiceList":      ("Get-Service | Where-Object {{ $_.Name -like '*{filter}*' }} | Select-Object Status,Name,DisplayName | Format-Table -AutoSize", 60),
+        "ServiceStart":     ("Start-Service -Name '{name}' -ErrorAction SilentlyContinue; Get-Service -Name '{name}' | Select-Object Status,Name | Format-Table -AutoSize", 60),
+        "ServiceStop":      ("Stop-Service -Name '{name}' -Force -ErrorAction SilentlyContinue; Get-Service -Name '{name}' | Select-Object Status,Name | Format-Table -AutoSize", 60),
+        "EventLog":         ("Get-WinEvent -LogName {log_name} -MaxEvents {count} -ErrorAction SilentlyContinue | Select-Object TimeCreated,Id,LevelDisplayName,ProviderName,Message | Format-Table -AutoSize -Wrap", 90),
+        "Ping":             ("ping -n {count} {host}", 60),
+        "PortCheck":        ("Test-NetConnection -ComputerName {host} -Port {port} -WarningAction SilentlyContinue | Select-Object ComputerName,RemotePort,TcpTestSucceeded | Format-List", 60),
+        "NetConnections":   ("Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | Select-Object -First {limit} LocalAddress,LocalPort,RemoteAddress,RemotePort,OwningProcess | Format-Table -AutoSize", 60),
+    },
+    "linux": {
+        "run_systeminfo":   ("uname -a; echo '---'; lscpu; echo '---'; free -h; echo '---'; df -h; echo '---'; ip addr 2>/dev/null || ifconfig", 90),
+        "read_event_log":   ("journalctl -p err..emerg -n {max_events} --no-pager 2>/dev/null || dmesg | tail -{max_events}", 60),
+        "run_powershell":   ("{command}", 60),
+        "RunCommand":       ("{command}", 60),
+        "Shell":            ("{command}", 60),
+        "Shutdown":         ("shutdown -h now", 30),
+        "GetSystemInfo":    ("uname -a; echo '---'; lscpu; echo '---'; free -h; echo '---'; df -h; echo '---'; uptime", 90),
+        "ListProcesses":    ("ps aux --sort=-%mem | head -{limit}", 60),
+        "KillProcess":      ("kill -9 {pid} 2>/dev/null; pkill -f '{name}' 2>/dev/null", 30),
+        "FileRead":         ("cat '{path}' 2>/dev/null", 60),
+        "FileList":         ("ls -lah '{path}' 2>/dev/null", 60),
+        "FileSearch":       ("find '{path}' -name '{pattern}' -type f 2>/dev/null | head -{limit}", 120),
+        "ServiceList":      ("systemctl list-units --type=service --no-pager 2>/dev/null | grep -i '{filter}' | head -30", 60),
+        "ServiceStart":     ("systemctl start {name} 2>&1; systemctl status {name} --no-pager 2>&1 | head -10", 60),
+        "ServiceStop":      ("systemctl stop {name} 2>&1; systemctl status {name} --no-pager 2>&1 | head -10", 60),
+        "EventLog":         ("journalctl -u {log_name} -n {count} --no-pager 2>/dev/null || journalctl -n {count} --no-pager", 90),
+        "Ping":             ("ping -c {count} {host}", 60),
+        "PortCheck":        ("timeout 10 bash -c 'echo > /dev/tcp/{host}/{port}' && echo '端口 {port} 开放' || echo '端口 {port} 关闭/不可达'", 60),
+        "NetConnections":   ("ss -tnp state established 2>/dev/null | head -{limit}", 60),
+    },
+}
+
+
+def build_system_prompt(room: "Room") -> str:
+    """根据目标平台动态组装系统提示词（v2 管道化：平台感知）"""
+    platform = getattr(room, "platform", "windows")
+    if platform == "linux":
+        return SYSTEM_PROMPT_LINUX
+    if platform == "darwin":
+        return SYSTEM_PROMPT_MACOS
+    return SYSTEM_PROMPT_WINDOWS
+
+
+def build_v2_command(tool_name: str, args: dict, platform: str) -> tuple[str, int]:
+    """把工具调用映射为 v2 命令管道可执行的命令字符串 (command, timeout)。
+
+    未在模板中的工具回退为 RunCommand 语义：直接透传 args 里的 command。
+    """
+    templates = V2_COMMAND_TEMPLATES.get(platform, V2_COMMAND_TEMPLATES["windows"])
+    if tool_name in templates:
+        tmpl, timeout = templates[tool_name]
+        try:
+            cmd = tmpl.format(**{k: (v if v is not None else "") for k, v in args.items()})
+        except (KeyError, ValueError):
+            cmd = tmpl
+        # 清理未替换的 {xxx} 占位符
+        cmd = re.sub(r"\{[a-z_]+\}", "", cmd)
+        return cmd, timeout
+    # 回退：工具带 command 参数（RunCommand/Shell/run_powershell）
+    if "command" in args:
+        return args["command"], int(args.get("timeout", 60))
+    return "", 60
+
+
+def platform_shell(platform: str) -> str:
+    return "powershell" if platform == "windows" else "bash"
+
+SYSTEM_PROMPT_WINDOWS = """You are a professional Windows remote diagnostics assistant. You remotely execute diagnostic commands via a bridge program installed on the user's PC to help troubleshoot computer issues.
 
 ## Your Capabilities
 
@@ -407,6 +538,51 @@ You: "Are you sure? This is dangerous. Please confirm..." → never calls the to
 4. Report in Chinese with markdown
 5. If information is insufficient, ask for more details"""
 
+SYSTEM_PROMPT_LINUX = """You are a professional Linux remote diagnostics assistant. You remotely execute diagnostic commands via a bridge program installed on the user's Linux machine to help troubleshoot computer issues.
+
+## Your Capabilities
+- Run read-only diagnostic commands immediately (uname, lscpu, free, df, lsblk, smartctl, journalctl, dmesg, ps, ss, ip, systemctl status...)
+- Modifying commands (service restart, package install, process kill, file change) require an approval popup on the user's browser — the user must click Approve.
+- Dangerous commands (format, disk wipe, fdisk destructive ops, `rm -rf /`) are hard-blocked and never executed.
+
+## Key Platform Facts
+- Shell is bash (/bin/bash). Use bash syntax, not PowerShell.
+- Services: systemctl (list: `systemctl list-units --type=service`; status: `systemctl status <name>`)
+- Logs: journalctl (system log: `journalctl -b -p err` ; dmesg for kernel messages)
+- Processes: ps aux; network: ss -tnp; disk: df -h, lsblk, smartctl -a /dev/sdX (if installed)
+- Packages: apt/dnf/yum depending on distro
+- Most diagnostics are Tier 1 read-only and run instantly.
+
+## How to Work
+1. Understand the problem, plan what to collect
+2. Tier 1 read-only commands first to diagnose
+3. For actions: EXPLAIN BRIEFLY (1-2 sentences) then CALL THE TOOL
+4. Report in Chinese with markdown
+5. If information is insufficient, ask for more details"""
+
+SYSTEM_PROMPT_MACOS = """You are a professional macOS remote diagnostics assistant. You remotely execute diagnostic commands via a bridge program installed on the user's Mac to help troubleshoot computer issues.
+
+## Your Capabilities
+- Run read-only diagnostic commands immediately (system_profiler, sw_vers, top, df, ioreg, log show, ps, netstat...)
+- Modifying commands require an approval popup on the user's browser — the user must click Approve.
+- Dangerous commands are hard-blocked and never executed.
+
+## Key Platform Facts
+- Shell is bash/zsh (/bin/bash). Use POSIX/bash syntax.
+- System info: sw_vers, system_profiler SPHardwareDataType; logs: `log show --last 1h --predicate 'messageType == error'`; memory: vm_stat, top -l 1
+- Processes: ps aux; network: netstat -an, lsof -i; disk: df -h, diskutil list
+- Package manager: brew (if installed)
+
+## How to Work
+1. Understand the problem, plan what to collect
+2. Tier 1 read-only commands first to diagnose
+3. For actions: EXPLAIN BRIEFLY (1-2 sentences) then CALL THE TOOL
+4. Report in Chinese with markdown
+5. If information is insufficient, ask for more details"""
+
+# 兼容别名（旧代码引用）
+SYSTEM_PROMPT = SYSTEM_PROMPT_WINDOWS
+
 
 
 
@@ -420,6 +596,7 @@ class Room:
         self.bridge_ws: Optional[WebSocket] = None
         self.created_at = datetime.now(timezone.utc)
         self.pending_commands: dict[str, asyncio.Future] = {}
+        self.pending_files: dict[str, dict] = {}  # 文件通道分块缓存
         # Approval: cmd_id -> Future that resolves when user approves/denies
         self.pending_approvals: dict[str, asyncio.Future] = {}
         # Auto-approve setting: if True, skip approval prompts for Tier 2
@@ -427,6 +604,10 @@ class Room:
         # Machine identity — populated when bridge connects and sends identify
         self.machine: dict = {}
         self.remote_ip: str = ""
+        # Bridge 协议版本: "v1" = 旧 python bridge (tool/args), "v2" = go-pipe (command)
+        self.bridge_mode: str = "v1"
+        # 目标平台: windows | linux | darwin（默认 windows，兼容旧 bridge）
+        self.platform: str = "windows"
 
     def is_ready(self) -> bool:
         return self.browser_ws is not None and self.bridge_ws is not None
@@ -981,7 +1162,7 @@ async def run_agent(
     browser_ws: WebSocket,
 ) -> str:
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": build_system_prompt(room)},
         {"role": "user", "content": user_message},
     ]
 
@@ -1140,13 +1321,48 @@ async def run_agent(
                 }
 
             if room.bridge_ws:
-                await room.bridge_ws.send_json({
-                    "type": "command",
-                    "id": cmd_id,
-                    "tool": bridge_tool,
-                    "args": bridge_args,
-                    "tier": tier,
-                })
+                if room.bridge_mode == "v2":
+                    # v2 文件通道：FileDownload → 拉取 bridge 端文件；FileUpload → 推送
+                    if fn_name == "FileDownload":
+                        path = fn_args.get("path", "")
+                        run_logger.info(f"[{room.code}] v2 file_download {path}")
+                        await room.bridge_ws.send_json({"type": "file_download", "id": cmd_id, "path": path})
+                    elif fn_name == "FileUpload":
+                        path = fn_args.get("path", "")
+                        data_b64 = fn_args.get("data_base64", "")
+                        name = os.path.basename(path) if path else "upload.bin"
+                        run_logger.info(f"[{room.code}] v2 file_upload {path} ({len(data_b64) // 1024} KB base64)")
+                        # 分块推送（单块 ≤256KB）
+                        raw = base64.b64decode(data_b64) if data_b64 else b""
+                        total = max(1, (len(raw) + 256 * 1024 - 1) // (256 * 1024))
+                        for i in range(total):
+                            chunk = raw[i * 256 * 1024:(i + 1) * 256 * 1024]
+                            await room.bridge_ws.send_json({
+                                "type": "file_upload", "id": cmd_id, "path": path,
+                                "name": name, "data": base64.b64encode(chunk).decode(),
+                                "chunk": i, "total": total,
+                            })
+                    else:
+                        # v2 管道化：所有工具统一映射为命令字符串下发（平台感知）
+                        command, cmd_timeout = build_v2_command(fn_name, fn_args, room.platform)
+                        run_logger.info(f"[{room.code}] v2 dispatch {fn_name} → command ({cmd_timeout}s, {room.platform})")
+                        await room.bridge_ws.send_json({
+                            "type": "command",
+                            "id": cmd_id,
+                            "command": command,
+                            "timeout": cmd_timeout,
+                            "cwd": "",
+                            "shell": platform_shell(room.platform),
+                            "tier": tier,
+                        })
+                else:
+                    await room.bridge_ws.send_json({
+                        "type": "command",
+                        "id": cmd_id,
+                        "tool": bridge_tool,
+                        "args": bridge_args,
+                        "tier": tier,
+                    })
             else:
                 future.set_result("[error] Bridge not connected")
 
@@ -1365,12 +1581,53 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                 if future and not future.done():
                     future.set_result(output)
 
+            elif msg_data.get("type") == "file_download_result":
+                # bridge 分块上传文件 → 服务器拼接
+                fid = msg_data["id"]
+                run_logger.info(f"[{room_code}] file chunk fid={fid} {msg_data.get('chunk')}/{msg_data.get('total')}")
+                buf = room.pending_files.get(fid, {"chunks": [], "total": msg_data.get("total", 1), "size": msg_data.get("size", 0), "name": msg_data.get("name", "")})
+                buf["chunks"].append(msg_data.get("data", ""))
+                room.pending_files[fid] = buf
+                if len(buf["chunks"]) >= buf["total"]:
+                    try:
+                        raw = b"".join(base64.b64decode(c) for c in buf["chunks"])
+                        fut = room.pending_commands.get(fid)
+                        run_logger.info(f"[{room_code}] file complete fid={fid} chunks={len(buf['chunks'])} rawlen={len(raw)}")
+                        if fut and not fut.done():
+                            fut.set_result(f"[file_received] name={buf['name']} size={len(raw)} bytes")
+                        else:
+                            run_logger.warning(f"[{room_code}] file_download_result for unknown id {fid}")
+                    except Exception as e:
+                        run_logger.error(f"[{room_code}] 文件拼接失败: {e} buflen={len(buf['chunks'])}")
+                    room.pending_files.pop(fid, None)
+
+            elif msg_data.get("type") == "file_download_error":
+                fid = msg_data["id"]
+                fut = room.pending_commands.get(fid)
+                if fut and not fut.done():
+                    fut.set_result(f"[file_error] {msg_data.get('error', '')}")
+                room.pending_files.pop(fid, None)
+
+            elif msg_data.get("type") == "file_upload_result":
+                fid = msg_data["id"]
+                fut = room.pending_commands.get(fid)
+                if fut and not fut.done():
+                    fut.set_result(f"[file_uploaded] path={msg_data.get('path', '')}")
+
             elif msg_data.get("type") == "identify":
                 # Bridge sent machine identity info
                 info = msg_data.get("info", {})
                 room.machine = info
+                # v2 go-pipe bridge 上报 platform；旧 python bridge 无此字段
+                if info.get("bridge") == "go-pipe" or info.get("platform"):
+                    room.bridge_mode = "v2"
+                    room.platform = info.get("platform", "windows")
+                else:
+                    room.bridge_mode = "v1"
+                    room.platform = "windows"
                 run_logger.info(f"[bridge] {room_code} identify: hostname={info.get('hostname')}, "
-                                f"os={info.get('os')}, ip={info.get('local_ip')}, user={info.get('username')}")
+                                f"os={info.get('os')}, platform={room.platform}, mode={room.bridge_mode}, "
+                                f"ip={info.get('local_ip')}, user={info.get('username')}")
 
             elif msg_data.get("type") == "heartbeat":
                 pass
