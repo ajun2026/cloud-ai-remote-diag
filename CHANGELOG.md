@@ -133,3 +133,24 @@ document.getElementById('tab-' + name.replace('.','')).className = 'btn-primary'
 2. 登录后历史房间列表每行有「删除」按钮，可删除聊天记录
 3. 「服务器日志」标签页可正常加载 server.log / chat.log / bridge.log
 4. 在聊天页让 AI 执行危险操作（如关闭飞书），应弹出红色审批框，点击「同意执行」后操作生效
+
+## v0.4.0 — 2026-08-03（RunCommand 通用命令层 + 命令风险分级）
+
+### 一、新增 RunCommand 通用命令层
+
+- 服务器端新增通用命令执行工具 `RunCommand`，AI 可直接下发任意 PowerShell/CMD 命令
+- 新增 `classify_command()` 命令风险分级器，将命令分为三类：
+  - **Tier 1**：只读命令（get/select/systeminfo/ipconfig/tasklist 等）→ 自动执行
+  - **Tier 3**：修改命令（set/remove/restart/install/kill 等）→ 需用户审批弹窗确认
+  - **Tier -1**：危险命令（format/diskpart/reg delete 等）→ 硬拦截，永不执行
+- 命令风险分级覆盖 PowerShell 与 CMD 常见指令，正则匹配首词
+
+### 二、新增 Windows bridge.exe
+
+- 本机编译的 Windows 桥接器可执行文件（22MB），随仓库分发，免去用户手动配 Python 环境
+- 用户 Windows 端直接运行 bridge.exe 即可连接云端服务器
+
+### 三、稳定性修复
+
+- 服务器 WebSocket 推送改用 `safe_send` 封装，避免连接中断时异常
+- 其他若干稳定性改进

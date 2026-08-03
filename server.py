@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -179,10 +180,83 @@ def get_server_stats() -> dict:
 init_db()
 
 # ============================================================
+# Command risk classifier — for the generic RunCommand tool
+# ============================================================
+# Returns (tier, category, reason):
+#   tier 1  → read-only, auto-execute
+#   tier 3  → modifying, requires user approval popup
+#   tier -1 → dangerous, hard-blocked (never executed)
+_READONLY_RE = [
+    r"^\s*(get|select|where|sort|group|measure|format-table|ft|fl|out-string|convertto-json|convertto-csv|compare-object|find)\b",
+    r"^\s*(systeminfo|ipconfig|tasklist|dir|type|whoami|netstat|ping|tracert|nslookup|hostname|ver|vol|tree|findstr|reg\s+query|sc\s+query|schtasks\s+/query|driverquery|gpresult|msinfo32)\b",
+    r"^\s*get-\w+",
+    r"^\s*test-\w+",
+    r"^\s*[a-z]:\\",  # path listing
+]
+_MODIFY_RE = [
+    r"^\s*(set|new|remove|copy|move|rename|start|stop|restart|restart-computer|stop-computer|install|uninstall|update|write|clear|flush|disable|enable|invoke|kill|taskkill|shutdown|format|del|rd|mkdir|rmdir|xcopy|robocopy|wmic|diskpart|takeown|icacls|cacls|attrib|reg\s+add|reg\s+delete|sc\s+(start|stop|config|delete)|net\s+(start|stop|user|localgroup|share))\b",
+    r"^\s*set-\w+",
+    r"^\s*new-\w+",
+    r"^\s*remove-\w+",
+    r"^\s*stop-\w+",
+    r"^\s*start-\w+",
+    r"^\s*restart-\w+",
+    r"^\s*disable-\w+",
+    r"^\s*enable-\w+",
+    r"^\s*clear-\w+",
+    r"^\s*invoke-\w+",
+    r"^\s*add-\w+",
+]
+_DANGEROUS_RE = [
+    r"\bformat\s+[a-z]:",
+    r"\bdiskpart\b",
+    r"\bformat-volume\b",
+    r"\bclear-eventlog\b",
+    r"\bremove-item\b.*\b(recurse|force)\b",
+    r"\bdel\b.*\s/s\b",
+    r"\brd\b.*\s/s\b",
+    r"\breg\s+delete\b",
+    r"\bsc\s+delete\b",
+    r"\bwmic\b.*\bdelete\b",
+    r"\btakeown\b",
+    r"\bicacls\b.*\b/grant\b",
+    r"\bnet\s+user\b",
+    r"\bnet\s+localgroup\b",
+    r"\bbcdedit\b.*\b/delete\b",
+    r"\bremove-\w+\b.*\b-recurse\b",
+    # destructive verbs hidden after a pipe: Get-Process | Stop-Process etc.
+    r"\|\s*(stop|kill|remove|clear|set|new|invoke|disable|enable|format-volume)-\w+",
+]
+
+
+def classify_command(command: str) -> tuple[int, str, str]:
+    """Classify a PowerShell command's risk. Returns (tier, category, reason)."""
+    cmd = (command or "").strip()
+    if not cmd:
+        return 3, "empty", "空命令"
+    low = cmd.lower()
+    # 1) dangerous → hard block
+    for pat in _DANGEROUS_RE:
+        if re.search(pat, low):
+            return -1, "dangerous", f"高危命令已被系统拦截: 匹配规则 {pat!r}"
+    # 2) read-only → auto
+    for pat in _READONLY_RE:
+        if re.match(pat, low):
+            return 1, "readonly", "只读命令，自动执行"
+    # 3) modify → approval
+    for pat in _MODIFY_RE:
+        if re.match(pat, low):
+            return 3, "modify", "修改类命令，需用户批准"
+    # 4) unknown → conservative: require approval
+    return 3, "unknown", "无法识别的命令，默认需用户批准"
+
+
+# ============================================================
 # Tool definitions — 3 tiers
 # ============================================================
 TOOL_TIERS = {
     "run_systeminfo": 1, "run_dxdiag": 1, "read_event_log": 1, "run_powershell": 1,
+    "RunCommand": 3,  # dynamic tier — overridden by classify_command at runtime
     "GetSystemInfo": 1, "Snapshot": 1, "AnnotatedSnapshot": 1, "GetClipboard": 1,
     "ListProcesses": 1, "FileList": 1, "FileSearch": 1, "FileRead": 1,
     "FileDownload": 1, "RegRead": 1, "ServiceList": 1, "TaskList": 1,
@@ -197,6 +271,7 @@ TOOL_TIERS = {
     "Shell": 3, "App": 3, "PlaySound": 3, "FileWrite": 3, "FileUpload": 3,
     "KillProcess": 3, "RegWrite": 3, "ServiceStart": 3, "ServiceStop": 3,
     "TaskCreate": 3, "TaskDelete": 3, "SetClipboard": 3, "LockScreen": 3,
+    "Shutdown": 3,
 }
 
 TOOLS = [
@@ -222,6 +297,8 @@ TOOLS = [
     {"type":"function","function":{"name":"Notification","description":"Show a Windows toast notification.","parameters":{"type":"object","properties":{"title":{"type":"string","default":"Bridge Alert"},"message":{"type":"string","default":""}},"required":[]}}},
     {"type":"function","function":{"name":"PlaySound","description":"Play audio file (.wav/.mp3/.ogg). [Tier 3]","parameters":{"type":"object","properties":{"path":{"type":"string","default":""},"url":{"type":"string","default":""}},"required":[]}}},
     {"type":"function","function":{"name":"LockScreen","description":"Lock the Windows workstation. [Tier 3]","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"Shutdown","description":"Shut down the Windows PC immediately. [Tier 3 — system power off]","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"RunCommand","description":"Execute an arbitrary PowerShell command on the remote PC. Use this for ANY request not covered by the other tools — e.g. querying driver details, temperature, startup items, BIOS info, power plan, disk health, or performing a system change the user asked for. The system auto-classifies the command: read-only commands run immediately; modifying commands show an approval popup; dangerous commands (format/diskpart/registry delete etc.) are blocked.","parameters":{"type":"object","properties":{"command":{"type":"string","description":"PowerShell command to execute (e.g. 'Get-Temperature', 'shutdown /s /t 0', 'Get-Service | Where-Object Status -eq Running')"}},"required":["command"]}}},
     {"type":"function","function":{"name":"ListProcesses","description":"List running processes with CPU/memory usage.","parameters":{"type":"object","properties":{"filter":{"type":"string","default":""},"sort_by":{"type":"string","enum":["cpu","memory","name"],"default":"memory"},"limit":{"type":"integer","default":30}},"required":[]}}},
     {"type":"function","function":{"name":"KillProcess","description":"Kill a process by PID or name. [Tier 3 — destructive]","parameters":{"type":"object","properties":{"pid":{"type":"integer","default":0},"name":{"type":"string","default":""}},"required":[]}}},
     {"type":"function","function":{"name":"FileRead","description":"Read file content. Returns base64 for binary.","parameters":{"type":"object","properties":{"path":{"type":"string"},"encoding":{"type":"string","default":"utf-8"}},"required":["path"]}}},
@@ -275,12 +352,13 @@ You have access to 49 tools across 3 tiers:
 
 ### Tier 3 — System Modification (requires explicit user approval)
 - **Shell**: Shell (arbitrary PowerShell), App (launch apps)
+- **System**: Shutdown (shut down the PC), LockScreen (lock workstation)
 - **Files**: FileWrite, FileUpload
 - **Processes**: KillProcess
 - **Registry**: RegWrite
 - **Services**: ServiceStart, ServiceStop
 - **Tasks**: TaskCreate, TaskDelete
-- **Other**: SetClipboard, LockScreen, PlaySound
+- **Other**: SetClipboard, PlaySound
 
 ## IMPORTANT Rules for Actions
 When the user asks you to do something (close a program, delete a file, etc.):
@@ -289,11 +367,34 @@ When the user asks you to do something (close a program, delete a file, etc.):
 3. The system shows an approval popup — that IS the confirmation
 4. If the tool returns [approval_denied], tell the user "The operation was denied"
 
+## RunCommand — the general-purpose tool (use for anything not covered)
+The **RunCommand** tool executes an arbitrary PowerShell command on the user's PC. Use it whenever:
+- The user asks for something not covered by the dedicated tools (temperature, BIOS version, startup items, power plan, driver details, disk health, Windows update status, etc.)
+- You need to run a diagnostic that has no dedicated tool
+
+The system automatically classifies each command:
+- **Read-only** (Get-*, Select-*, systeminfo, ipconfig, tasklist, dir, reg query, etc.) → executes immediately, no popup
+- **Modifying** (shutdown, Set-*, New-*, Remove-Item, Start-Service, reg add, etc.) → approval popup appears
+- **Dangerous** (format, diskpart, reg delete, Remove-Item -Recurse, net user, etc.) → **blocked, will never execute**
+
+Examples:
+- "帮我查一下 CPU 温度" → RunCommand(command="Get-Temperature") — auto-runs
+- "看启动项" → RunCommand(command="Get-CimInstance Win32_StartupCommand") — auto-runs
+- "查看电源计划" → RunCommand(command="powercfg /getactivescheme") — auto-runs
+- "修改电源计划为高性能" → RunCommand(command="powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c") — approval popup
+- "清理临时文件" → RunCommand(command="Remove-Item $env:TEMP\\* -Recurse -Force") — approval popup (or blocked if -Recurse+Force matches)
+
+Do NOT call RunCommand for things the dedicated tools already handle (file read/write, registry read, event log, process list, etc.) — use the dedicated tool instead.
+
 Example flow:
 User: "Close Feishu"
 You: call ListProcesses(filter="Feishu") first → see 9 processes
 You: "Feishu has 9 processes, closing them now." → call KillProcess(name="Feishu")
   → Approval popup appears → user clicks Approve → done!
+
+User: "帮我关机" / "shut down the PC"
+You: call Shutdown() immediately → approval popup appears → user approves → PC shuts down
+  Do NOT just reply with text saying you will shut down — actually call the Shutdown tool.
 
 NOT this:
 User: "Close Feishu"
@@ -898,16 +999,29 @@ async def run_agent(
             "tool_choice": "auto",
         }
 
-        resp = await http_client.post(
-            f"{OPENAI_BASE_URL}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        # Call model API with retry on transient network errors
+        data = None
+        for attempt in range(3):
+            try:
+                resp = await http_client.post(
+                    f"{OPENAI_BASE_URL}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {OPENAI_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                break
+            except (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException) as e:
+                run_logger.warning(f"[{room.code}] API call attempt {attempt+1} failed: {e}")
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(2 * (attempt + 1))
+
+        if data is None:
+            raise RuntimeError("Model API returned no response after retries")
 
         choice = data["choices"][0]
         msg = choice["message"]
@@ -926,12 +1040,39 @@ async def run_agent(
             tc_id = tc["id"]
             tier = TOOL_TIERS.get(fn_name, 1)
 
+            # RunCommand: dynamic tier based on command classification
+            cmd_class_reason = ""
+            if fn_name == "RunCommand":
+                tier, cmd_cat, cmd_class_reason = classify_command(fn_args.get("command", ""))
+                run_logger.info(f"[{room.code}] RunCommand classified as tier={tier} ({cmd_cat}): {cmd_class_reason}")
+
             await browser_ws.send_json({
                 "type": "tool_start",
                 "tool": fn_name,
                 "args": fn_args,
                 "tier": tier,
             })
+
+            # === DANGEROUS: hard block, never executed ===
+            if tier < 0:
+                result = f"[blocked] {cmd_class_reason}: {fn_args.get('command', '')[:200]}"
+                save_approval(room.code, fn_name, fn_args, 3, -1)
+                save_message(room.code, "tool", result, fn_name, 3)
+                run_logger.warning(f"[{room.code}] Blocked dangerous RunCommand: {fn_args.get('command', '')[:120]}")
+
+                await browser_ws.send_json({
+                    "type": "tool_result",
+                    "tool": fn_name,
+                    "content": result[:3000],
+                    "tier": 3,
+                    "denied": True,
+                })
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": result,
+                })
+                continue
 
             # === APPROVAL CHECK for Tier 2/3 ===
             if tier >= 2:
@@ -984,12 +1125,26 @@ async def run_agent(
             future: asyncio.Future = asyncio.get_event_loop().create_future()
             room.pending_commands[cmd_id] = future
 
+            # Map tool names bridge doesn't know to bridge's Shell command
+            bridge_tool = fn_name
+            bridge_args = fn_args
+            if fn_name == "Shutdown":
+                bridge_tool = "Shell"
+                bridge_args = {"command": "shutdown /s /t 0", "timeout": 30, "cwd": ""}
+            elif fn_name == "RunCommand":
+                bridge_tool = "Shell"
+                bridge_args = {
+                    "command": fn_args.get("command", ""),
+                    "timeout": int(fn_args.get("timeout", 60)),
+                    "cwd": fn_args.get("cwd", ""),
+                }
+
             if room.bridge_ws:
                 await room.bridge_ws.send_json({
                     "type": "command",
                     "id": cmd_id,
-                    "tool": fn_name,
-                    "args": fn_args,
+                    "tool": bridge_tool,
+                    "args": bridge_args,
                     "tier": tier,
                 })
             else:
@@ -1098,31 +1253,37 @@ async def ws_browser(websocket: WebSocket, room_code: str):
 
                 # 后台任务运行 agent，主循环保持活跃以便接收 approval_response
                 async def agent_runner(user_message, room, http_client, websocket):
+                    async def safe_send(payload: dict):
+                        try:
+                            await websocket.send_json(payload)
+                        except Exception as e:
+                            run_logger.warning(f"[{room_code}] browser send failed (client gone?): {e}")
+
                     try:
                         answer = await asyncio.wait_for(
                             run_agent(user_message, room, http_client, websocket),
                             timeout=300.0  # 5 minute total timeout for agent
                         )
                         chat_logger.info(f"[{room_code}] AI: {answer[:500]}")
-                        await websocket.send_json({
+                        await safe_send({
                             "type": "ai_message",
                             "content": answer,
                         })
-                        await websocket.send_json({"type": "ai_done"})
+                        await safe_send({"type": "ai_done"})
                     except asyncio.TimeoutError:
                         run_logger.error(f"[{room_code}] Agent timed out after 5 minutes")
-                        await websocket.send_json({
+                        await safe_send({
                             "type": "error",
                             "content": "Request timed out. Please try again with a simpler question.",
                         })
                     except httpx.HTTPStatusError as e:
-                        await websocket.send_json({
+                        await safe_send({
                             "type": "error",
                             "content": f"AI API call failed ({e.response.status_code}). Please check API configuration.",
                         })
                     except Exception as e:
                         run_logger.exception(f"Agent error in room {room_code}")
-                        await websocket.send_json({
+                        await safe_send({
                             "type": "error",
                             "content": f"Agent error: {str(e)}",
                         })
