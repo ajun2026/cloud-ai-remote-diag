@@ -10,6 +10,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -42,10 +43,43 @@ func main() {
 	flag.StringVar(&roomCode, "room", "", "房间码（必填）")
 	flag.Parse()
 
+	// 交互模式：双击运行 / 未提供房间码时，引导用户输入
+	// 而不是直接报错退出（避免"闪退"）
 	if roomCode == "" {
-		fmt.Fprintln(os.Stderr, "错误: 缺少房间码，用法: bridge -server ws://host:8000 -room 房间码")
-		os.Exit(2)
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Println("==============================================")
+		fmt.Println(" 云端AI远程运维助手 · 桥接器 v" + Version)
+		fmt.Println("----------------------------------------------")
+		fmt.Println(" 未检测到房间码，请输入连接信息：")
+		fmt.Println("")
+
+		if serverURL == "ws://localhost:8000" || flag.NFlag() == 0 {
+			fmt.Print(" 服务器地址 [回车默认 ws://106.54.193.9:8000]: ")
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimSpace(input)
+			if input != "" {
+				serverURL = input
+			} else {
+				serverURL = "ws://106.54.193.9:8000"
+			}
+		}
+
+		fmt.Print(" 房间码 (6位, 例如 MUJRWQ): ")
+		room, _ := reader.ReadString('\n')
+		room = strings.TrimSpace(strings.ToUpper(room))
+		if room == "" {
+			fmt.Fprintln(os.Stderr, "错误: 房间码不能为空")
+			fmt.Println("按回车键退出...")
+			_, _ = reader.ReadString('\n')
+			os.Exit(2)
+		}
+		roomCode = room
+		fmt.Println("----------------------------------------------")
+		fmt.Printf(" 即将连接服务器 %s · 房间 %s\n", serverURL, roomCode)
+		fmt.Println("==============================================")
+		fmt.Println("")
 	}
+
 	serverURL = strings.TrimRight(serverURL, "/")
 
 	logger := NewAuditLogger()

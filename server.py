@@ -1630,7 +1630,8 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                                 f"ip={info.get('local_ip')}, user={info.get('username')}")
 
             elif msg_data.get("type") == "heartbeat":
-                pass
+                # 必须回复，否则客户端 75s 读超时会断开重连（导致状态反复切换）
+                await websocket.send_json({"type": "pong"})
 
             elif msg_data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})

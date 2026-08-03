@@ -186,3 +186,32 @@ document.getElementById('tab-' + name.replace('.','')).className = 'btn-primary'
 ### 四、Linux 诊断支持
 
 架构天然支持：同协议、同 AI，仅命令模板与提示词按平台切换。Go 交叉编译一行命令出 Linux 版。
+
+
+## v0.6.0 — 2026-08-03（Windows 桥接器交互模式）
+
+### 一、修复：双击运行闪退
+
+**问题**：bridge 强制要求命令行参数 `-room`，缺少时直接报错退出（`os.Exit(2)`）。用户按页面指引双击运行 exe 时没有参数，窗口一闪而过，表现为"闪退"。
+
+**修改**（bridge/main.go）：
+- 未提供 `-room` 参数时进入**交互模式**：欢迎界面 → 引导输入服务器地址（回车默认 `ws://106.54.193.9:8000`）→ 输入 6 位房间码 → 自动连接
+- 房间码为空时提示错误并等待按键后再退出（不再瞬间关闭）
+- 命令行方式 `-server ws://... -room XXX` 完全兼容，不受影响
+
+### 二、修复：Bridge disconnected/connected 状态反复切换
+
+**问题**：客户端每 25s 发一次 `heartbeat`，但服务器收到后不回复（`pass`）；而客户端设置了 75s 读超时——75s 内收不到服务器任何消息就断开重连。于是每 ~75s 循环一次断连/重连，浏览器状态提示 `Bridge disconnected [--]` / `Bridge connected [OK]` 反复切换。
+
+**修改**：
+- 服务器（server.py）：收到 `heartbeat` 时回复 `{"type": "pong"}`，让客户端持续收到消息、重置读超时
+- 客户端（bridge/ws.go）：新增 `pong` 消息静默处理（仅用于重置读超时，不刷日志）
+
+**验证**：本机联调连续连接 112s 无断连（修复前 75s 必断），服务器日志无 left 记录。
+
+
+## v0.6.1 — 2026-08-03（心跳修复收尾）
+
+- 同步最新 server.py / index.html / Go 源码到仓库
+- index.html 下载链接改为 bridge-win64.exe（4.8MB），三语使用说明同步更新
+- Windows 桥接器版本号 v0.6.1

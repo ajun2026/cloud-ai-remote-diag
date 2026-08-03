@@ -164,6 +164,9 @@ func (c *Client) dispatch(msg map[string]interface{}) error {
 			c.send(conn, map[string]interface{}{"type": "pong"})
 		}
 
+	case "pong":
+		// 服务器对 heartbeat 的回复，静默处理（仅用于重置读超时）
+
 	case "command":
 		return c.handleCommand(msg)
 
