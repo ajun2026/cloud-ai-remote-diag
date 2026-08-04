@@ -375,6 +375,25 @@ DESKTOP_TOOLS = {
 if not ENABLE_DESKTOP_TOOLS:
     TOOLS = [t for t in TOOLS if t["function"]["name"] not in DESKTOP_TOOLS]
 
+# ============================================================
+# 平台感知：Linux / macOS 平台剔除 Windows 专用工具
+# 防止 AI 在 Linux 上调用 run_dxdiag / run_powershell / RegRead 等
+# Windows 命令，导致 bash 里跑 PowerShell 语法报错。
+# ============================================================
+WINDOWS_ONLY_TOOLS = {
+    "run_dxdiag",   # DirectX 诊断，仅 Windows
+    "run_powershell",  # PowerShell 语法，仅 Windows（Linux 用 bash）
+    "RegRead",      # 注册表，仅 Windows
+    "RegWrite",     # 注册表，仅 Windows
+    "GetClipboard", "SetClipboard",  # 剪贴板（桌面工具已过滤，双保险）
+}
+
+def get_tools_for_platform(platform: str) -> list:
+    """按目标平台过滤 TOOLS。Windows 返回全量；Linux/macOS 剔除 Windows 专用工具。"""
+    if platform == "windows":
+        return TOOLS
+    return [t for t in TOOLS if t["function"]["name"] not in WINDOWS_ONLY_TOOLS]
+
 # v2 工具 → 命令模板（Windows: PowerShell / CMD；Linux: bash）
 # 模板中的 {arg} 占位符取自工具参数；timeout 为默认秒数。
 V2_COMMAND_TEMPLATES = {
@@ -1176,7 +1195,7 @@ async def run_agent(
         payload = {
             "model": OPENAI_MODEL,
             "messages": messages,
-            "tools": TOOLS,
+            "tools": get_tools_for_platform(getattr(room, "platform", "windows")),
             "tool_choice": "auto",
         }
 

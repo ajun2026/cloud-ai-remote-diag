@@ -168,7 +168,15 @@ func (c *Client) dispatch(msg map[string]interface{}) error {
 		// 服务器对 heartbeat 的回复，静默处理（仅用于重置读超时）
 
 	case "command":
-		return c.handleCommand(msg)
+		// 异步执行命令：命令可能耗时 60~90s，同步执行会阻塞读循环，
+		// 导致心跳 pong 无人读 → 75s 读超时 → 连接被误断。
+		// 改为 goroutine 执行，读循环立即返回继续收消息。
+		go func() {
+			if err := c.handleCommand(msg); err != nil {
+				c.cfg.Logger.Warn("处理命令出错: %v", err)
+			}
+		}()
+		return nil
 
 	case "file_download":
 		return c.handleFileDownload(msg)
