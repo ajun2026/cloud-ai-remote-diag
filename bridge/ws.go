@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -29,16 +30,18 @@ func NewClient(cfg *Config) *Client {
 
 // Run 阻塞运行，内部自动重连
 func (c *Client) Run() {
-	backoff := 2 * time.Second
+	backoff := 3 * time.Second
+	attempt := 0
 	for {
 		if c.closed {
 			return
 		}
+		attempt++
 		err := c.connectAndServe()
 		if c.closed {
 			return
 		}
-		c.cfg.Logger.Warn("连接断开: %v，%s 后重连…", err, backoff)
+		c.cfg.Logger.Warn("连接断开 (第 %d 次): %v，%s 后重连…", attempt, err, backoff)
 		select {
 		case <-c.stop:
 			return
@@ -107,6 +110,14 @@ func (c *Client) connectAndServe() error {
 	for {
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
+			// 区分断开原因，便于诊断
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				c.cfg.Logger.Warn("连接被服务器正常关闭: %v", err)
+			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				c.cfg.Logger.Warn("读超时 (%s): 75s 内未收到服务器消息（心跳/命令响应），连接断开", time.Now().Format("15:04:05"))
+			} else {
+				c.cfg.Logger.Warn("连接异常断开: %v", err)
+			}
 			return err
 		}
 		conn.SetReadDeadline(time.Now().Add(75 * time.Second))

@@ -623,10 +623,32 @@ class Room:
         # Machine identity — populated when bridge connects and sends identify
         self.machine: dict = {}
         self.remote_ip: str = ""
+        # --- 诊断追踪字段（/api/diag 用）---
+        self.last_heartbeat: Optional[datetime] = None   # 最近一次 bridge 心跳
+        self.bridge_connect_count: int = 0               # bridge 连接次数（重连统计）
+        self.bridge_disconnect_count: int = 0            # bridge 断开次数
+        self.last_disconnect_reason: str = ""            # 最近一次断开原因
+        self.last_disconnect_at: Optional[datetime] = None
+        self.cmd_history: list[dict] = []                # 最近命令执行记录（环形，最多 20 条）
+        self._cmd_history_max = 20
         # Bridge 协议版本: "v1" = 旧 python bridge (tool/args), "v2" = go-pipe (command)
         self.bridge_mode: str = "v1"
         # 目标平台: windows | linux | darwin（默认 windows，兼容旧 bridge）
         self.platform: str = "windows"
+
+    def record_command(self, tool: str, command: str, timeout: int, platform: str, sent: bool):
+        """记录一次命令下发（用于诊断追溯）。"""
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "tool": tool,
+            "command": command[:200],
+            "timeout": timeout,
+            "platform": platform,
+            "sent": sent,  # True=已发送给 bridge, False=bridge 不在未发送
+        }
+        self.cmd_history.append(entry)
+        if len(self.cmd_history) > self._cmd_history_max:
+            self.cmd_history = self.cmd_history[-self._cmd_history_max:]
 
     def is_ready(self) -> bool:
         return self.browser_ws is not None and self.bridge_ws is not None
@@ -787,6 +809,44 @@ async def list_rooms(request: Request):
 # ============================================================
 # Admin API
 # ============================================================
+@app.get("/api/diag/{room_code}")
+async def diag_room(room_code: str):
+    """诊断接口：返回房间的完整健康状态，方便排查 bridge 断链等问题。
+
+    无需登录（只含房间级诊断信息，不含聊天内容）。
+    """
+    room = rooms.get(room_code.upper())
+    if not room:
+        return JSONResponse({"room_code": room_code.upper(), "exists": False,
+                             "error": "房间不存在或已过期（服务器重启后房间内存清空，需重新创建）"}, status_code=404)
+
+    now = datetime.now(timezone.utc)
+    hb_age = None
+    if room.last_heartbeat:
+        hb_age = round((now - room.last_heartbeat).total_seconds(), 1)
+
+    return {
+        "room_code": room.code,
+        "exists": True,
+        "created_at": room.created_at.isoformat(),
+        "bridge_connected": room.bridge_ws is not None,
+        "browser_connected": room.browser_ws is not None,
+        "platform": room.platform,
+        "bridge_mode": room.bridge_mode,
+        "machine": room.machine,
+        "remote_ip": room.remote_ip,
+        "last_heartbeat": room.last_heartbeat.isoformat() if room.last_heartbeat else None,
+        "heartbeat_age_s": hb_age,
+        "connect_count": room.bridge_connect_count,
+        "disconnect_count": room.bridge_disconnect_count,
+        "last_disconnect_reason": room.last_disconnect_reason,
+        "last_disconnect_at": room.last_disconnect_at.isoformat() if room.last_disconnect_at else None,
+        "pending_commands": len(room.pending_commands),
+        "pending_approvals": len(room.pending_approvals),
+        "cmd_history": room.cmd_history[-10:],  # 最近 10 条命令
+    }
+
+
 @app.get("/api/admin/stats")
 async def admin_stats(request: Request):
     """Return server stats for admin dashboard."""
@@ -1365,6 +1425,7 @@ async def run_agent(
                         # v2 管道化：所有工具统一映射为命令字符串下发（平台感知）
                         command, cmd_timeout = build_v2_command(fn_name, fn_args, room.platform)
                         run_logger.info(f"[{room.code}] v2 dispatch {fn_name} → command ({cmd_timeout}s, {room.platform})")
+                        room.record_command(fn_name, command, cmd_timeout, room.platform, sent=True)
                         await room.bridge_ws.send_json({
                             "type": "command",
                             "id": cmd_id,
@@ -1383,6 +1444,7 @@ async def run_agent(
                         "tier": tier,
                     })
             else:
+                room.record_command(fn_name, "", 0, room.platform, sent=False)
                 future.set_result("[error] Bridge not connected")
 
             try:
@@ -1568,9 +1630,13 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
         await websocket.close()
         return
 
+    reason = "unknown"  # 断开原因（finally 中记录，需在 try 前初始化）
+
     room.bridge_ws = websocket
     room.remote_ip = websocket.client.host if hasattr(websocket.client, 'host') else ""
-    run_logger.info(f"[bridge] joined room {room_code} (ip={room.remote_ip})")
+    room.bridge_connect_count += 1
+    room.last_heartbeat = datetime.now(timezone.utc)
+    run_logger.info(f"[bridge] joined room {room_code} (ip={room.remote_ip}, connect#{room.bridge_connect_count})")
 
     await websocket.send_json({
         "type": "status",
@@ -1650,15 +1716,23 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 
             elif msg_data.get("type") == "heartbeat":
                 # 必须回复，否则客户端 75s 读超时会断开重连（导致状态反复切换）
+                room.last_heartbeat = datetime.now(timezone.utc)
                 await websocket.send_json({"type": "pong"})
 
             elif msg_data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
 
-    except WebSocketDisconnect:
-        run_logger.info(f"[bridge] left room {room_code}")
+    except WebSocketDisconnect as e:
+        reason = f"websocket_disconnect code={e.code or 'unknown'}"
+        run_logger.info(f"[bridge] left room {room_code} ({reason})")
+    except Exception as e:
+        reason = f"error: {type(e).__name__}: {e}"
+        run_logger.warning(f"[bridge] ws_bridge exception in {room_code}: {reason}")
     finally:
         room.bridge_ws = None
+        room.bridge_disconnect_count += 1
+        room.last_disconnect_reason = reason
+        room.last_disconnect_at = datetime.now(timezone.utc)
         if room.browser_ws:
             try:
                 await room.browser_ws.send_json({
