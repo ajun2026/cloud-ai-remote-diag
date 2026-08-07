@@ -55,6 +55,20 @@ run_logger.addHandler(console)
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "sk-your-api-key-here")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "deepseek-chat")
+
+# ============================================================
+# Hermes 通道配置（并存切换：brain=hermes 时走 Hermes agent）
+#   AGENT_BRAIN: deepseek（默认，原逻辑）| hermes（Hermes api_server 自治 agent）
+#   前端 WebSocket 消息可带 "brain": "hermes" 按请求覆盖
+# ============================================================
+HERMES_BASE_URL = os.getenv("HERMES_BASE_URL", "http://127.0.0.1:8642/v1")
+HERMES_API_KEY = os.getenv("HERMES_API_KEY", "")
+HERMES_MODEL = os.getenv("HERMES_MODEL", "hermes-agent")
+AGENT_BRAIN = os.getenv("AGENT_BRAIN", "deepseek")  # deepseek | hermes
+
+# HTTP 桥接接口共享密钥（Hermes 通过 curl 调 /api/bridge/execute 时校验）
+BRIDGE_HTTP_SECRET = os.getenv("BRIDGE_HTTP_SECRET", "")
+
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
 SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
 
@@ -460,6 +474,18 @@ def build_v2_command(tool_name: str, args: dict, platform: str) -> tuple[str, in
     未在模板中的工具回退为 RunCommand 语义：直接透传 args 里的 command。
     """
     templates = V2_COMMAND_TEMPLATES.get(platform, V2_COMMAND_TEMPLATES["windows"])
+    # FileWrite 不在模板表中（参数是 path/content 而非 command），需特判：
+    # 内容转 base64 写入，避免引号/换行破坏 PowerShell 语法
+    if tool_name == "FileWrite":
+        path = (args.get("path") or "").replace("'", "''")
+        content = (args.get("content") or "").encode("utf-8")
+        b64 = base64.b64encode(content).decode("ascii")
+        if args.get("append"):
+            method = "[IO.File]::AppendAllBytes"
+        else:
+            method = "[IO.File]::WriteAllBytes"
+        return ("$b='{b64}';{method}('{path}',[Convert]::FromBase64String($b))"
+                .format(b64=b64, method=method, path=path)), 30
     if tool_name in templates:
         tmpl, timeout = templates[tool_name]
         try:
@@ -1234,6 +1260,85 @@ async def request_approval(room: Room, fn_name: str, fn_args: dict, tier: int,
         room.pending_approvals.pop(approval_id, None)
 
 
+async def execute_bridge_command(room: Room, fn_name: str, fn_args: dict, cmd_id: str, tier: int = 1) -> str:
+    """把工具调用发送到 bridge 并等待结果（供 agent 循环和 HTTP 桥共用）。
+
+    返回结果字符串。不处理审批（审批由调用方负责）。
+    """
+    future: asyncio.Future = asyncio.get_event_loop().create_future()
+    room.pending_commands[cmd_id] = future
+
+    # Map tool names bridge doesn't know to bridge's Shell command
+    bridge_tool = fn_name
+    bridge_args = fn_args
+    if fn_name == "Shutdown":
+        bridge_tool = "Shell"
+        bridge_args = {"command": "shutdown /s /t 0", "timeout": 30, "cwd": ""}
+    elif fn_name == "RunCommand":
+        bridge_tool = "Shell"
+        bridge_args = {
+            "command": fn_args.get("command", ""),
+            "timeout": int(fn_args.get("timeout", 60)),
+            "cwd": fn_args.get("cwd", ""),
+        }
+
+    if room.bridge_ws:
+        if room.bridge_mode == "v2":
+            # v2 文件通道：FileDownload → 拉取 bridge 端文件；FileUpload → 推送
+            if fn_name == "FileDownload":
+                path = fn_args.get("path", "")
+                run_logger.info(f"[{room.code}] v2 file_download {path}")
+                await room.bridge_ws.send_json({"type": "file_download", "id": cmd_id, "path": path})
+            elif fn_name == "FileUpload":
+                path = fn_args.get("path", "")
+                data_b64 = fn_args.get("data_base64", "")
+                name = os.path.basename(path) if path else "upload.bin"
+                run_logger.info(f"[{room.code}] v2 file_upload {path} ({len(data_b64) // 1024} KB base64)")
+                # 分块推送（单块 ≤256KB）
+                raw = base64.b64decode(data_b64) if data_b64 else b""
+                total = max(1, (len(raw) + 256 * 1024 - 1) // (256 * 1024))
+                for i in range(total):
+                    chunk = raw[i * 256 * 1024:(i + 1) * 256 * 1024]
+                    await room.bridge_ws.send_json({
+                        "type": "file_upload", "id": cmd_id, "path": path,
+                        "name": name, "data": base64.b64encode(chunk).decode(),
+                        "chunk": i, "total": total,
+                    })
+            else:
+                # v2 管道化：所有工具统一映射为命令字符串下发（平台感知）
+                command, cmd_timeout = build_v2_command(fn_name, fn_args, room.platform)
+                run_logger.info(f"[{room.code}] v2 dispatch {fn_name} → command ({cmd_timeout}s, {room.platform})")
+                room.record_command(fn_name, command, cmd_timeout, room.platform, sent=True)
+                await room.bridge_ws.send_json({
+                    "type": "command",
+                    "id": cmd_id,
+                    "command": command,
+                    "timeout": cmd_timeout,
+                    "cwd": "",
+                    "shell": platform_shell(room.platform),
+                    "tier": tier,
+                })
+        else:
+            await room.bridge_ws.send_json({
+                "type": "command",
+                "id": cmd_id,
+                "tool": bridge_tool,
+                "args": bridge_args,
+                "tier": tier,
+            })
+    else:
+        room.record_command(fn_name, "", 0, room.platform, sent=False)
+        future.set_result("[error] Bridge not connected")
+
+    try:
+        result = await asyncio.wait_for(future, timeout=120.0)
+    except asyncio.TimeoutError:
+        result = "[timeout] Command exceeded 120s"
+
+    room.pending_commands.pop(cmd_id, None)
+    return result
+
+
 async def run_agent(
     user_message: str,
     room: Room,
@@ -1382,77 +1487,7 @@ async def run_agent(
 
             # Execute the tool
             cmd_id = f"cmd_{loop_count}_{tc_id}"
-            future: asyncio.Future = asyncio.get_event_loop().create_future()
-            room.pending_commands[cmd_id] = future
-
-            # Map tool names bridge doesn't know to bridge's Shell command
-            bridge_tool = fn_name
-            bridge_args = fn_args
-            if fn_name == "Shutdown":
-                bridge_tool = "Shell"
-                bridge_args = {"command": "shutdown /s /t 0", "timeout": 30, "cwd": ""}
-            elif fn_name == "RunCommand":
-                bridge_tool = "Shell"
-                bridge_args = {
-                    "command": fn_args.get("command", ""),
-                    "timeout": int(fn_args.get("timeout", 60)),
-                    "cwd": fn_args.get("cwd", ""),
-                }
-
-            if room.bridge_ws:
-                if room.bridge_mode == "v2":
-                    # v2 文件通道：FileDownload → 拉取 bridge 端文件；FileUpload → 推送
-                    if fn_name == "FileDownload":
-                        path = fn_args.get("path", "")
-                        run_logger.info(f"[{room.code}] v2 file_download {path}")
-                        await room.bridge_ws.send_json({"type": "file_download", "id": cmd_id, "path": path})
-                    elif fn_name == "FileUpload":
-                        path = fn_args.get("path", "")
-                        data_b64 = fn_args.get("data_base64", "")
-                        name = os.path.basename(path) if path else "upload.bin"
-                        run_logger.info(f"[{room.code}] v2 file_upload {path} ({len(data_b64) // 1024} KB base64)")
-                        # 分块推送（单块 ≤256KB）
-                        raw = base64.b64decode(data_b64) if data_b64 else b""
-                        total = max(1, (len(raw) + 256 * 1024 - 1) // (256 * 1024))
-                        for i in range(total):
-                            chunk = raw[i * 256 * 1024:(i + 1) * 256 * 1024]
-                            await room.bridge_ws.send_json({
-                                "type": "file_upload", "id": cmd_id, "path": path,
-                                "name": name, "data": base64.b64encode(chunk).decode(),
-                                "chunk": i, "total": total,
-                            })
-                    else:
-                        # v2 管道化：所有工具统一映射为命令字符串下发（平台感知）
-                        command, cmd_timeout = build_v2_command(fn_name, fn_args, room.platform)
-                        run_logger.info(f"[{room.code}] v2 dispatch {fn_name} → command ({cmd_timeout}s, {room.platform})")
-                        room.record_command(fn_name, command, cmd_timeout, room.platform, sent=True)
-                        await room.bridge_ws.send_json({
-                            "type": "command",
-                            "id": cmd_id,
-                            "command": command,
-                            "timeout": cmd_timeout,
-                            "cwd": "",
-                            "shell": platform_shell(room.platform),
-                            "tier": tier,
-                        })
-                else:
-                    await room.bridge_ws.send_json({
-                        "type": "command",
-                        "id": cmd_id,
-                        "tool": bridge_tool,
-                        "args": bridge_args,
-                        "tier": tier,
-                    })
-            else:
-                room.record_command(fn_name, "", 0, room.platform, sent=False)
-                future.set_result("[error] Bridge not connected")
-
-            try:
-                result = await asyncio.wait_for(future, timeout=120.0)
-            except asyncio.TimeoutError:
-                result = "[timeout] Command exceeded 120s"
-
-            room.pending_commands.pop(cmd_id, None)
+            result = await execute_bridge_command(room, fn_name, fn_args, cmd_id, tier)
 
             save_message(room.code, "tool", result[:2000], fn_name, tier)
 
@@ -1488,6 +1523,181 @@ async def run_agent(
 
 
 # ============================================================
+# Hermes 通道（并存切换：brain=hermes）
+#   Hermes api_server 是自治 agent：它用自己的工具集在服务器上
+#   工作，并通过 HTTP 桥接接口（/api/bridge/execute）操作远程电脑。
+# ============================================================
+def build_hermes_bridge_guide(room: Room) -> str:
+    """构造给 Hermes 的桥接操作指南（注入 system prompt）。"""
+    platform = getattr(room, "platform", "windows")
+    secret = BRIDGE_HTTP_SECRET or "（未配置 BRIDGE_HTTP_SECRET）"
+    return f"""
+## 远程桥接操作指南（重要）
+
+你是"云端 AI 远程运维助手"的智能大脑。用户在浏览器里与你对话，目标电脑通过 bridge 程序连接本服务器。
+当前目标：房间码 {room.code}，平台 {platform}。桥接接口地址是 http://127.0.0.1:8000（本服务器本机）。
+
+### 🚫 安全红线（必须严格遵守，违反 = 越权）
+1. **禁止读取/修改本服务器上 /home/ubuntu/cab-server 目录的任何文件**（server.py、.env、static/ 等）——不要用 read_file/terminal 查看或改动它们。
+2. **禁止执行任何影响本服务器进程的命令**：pkill、kill、systemctl、service、nohup、python server.py、重启/停止/启动 cab-server 或 Hermes gateway。
+3. **禁止运行 python 导入 cab-server 的 server.py** 或直接调用其内部函数（如 build_v2_command、execute_bridge_command、rooms 等）。
+4. **唯一允许的服务器操作**：用 curl 调用下面的 HTTP 桥接接口来操作**目标电脑**（通过 bridge 转发）。任何诊断、查询、操作目标电脑的行为都必须走这个接口。
+5. 你在服务器上的一切 terminal 命令，只允许两类：① curl 调 HTTP 桥；② 用于理解问题的最小只读检查（如 curl http://127.0.0.1:8000/api/health）。
+
+### 如何操作目标电脑
+必须通过本服务器的 HTTP 桥接接口，用 curl 调用：
+
+POST http://127.0.0.1:8000/api/bridge/execute
+Header: X-Bridge-Secret: {secret}
+Header: Content-Type: application/json
+Body: {{"room_code": "{room.code}", "tool": "<工具名>", "args": {{...}}}}
+
+响应示例：
+{{"status": "ok", "tool": "GetSystemInfo", "tier": 1, "result": "..."}}
+{{"status": "denied", "tier": 3, "reason": "..."}}
+{{"status": "blocked", "reason": "..."}}
+
+### 常用工具（tier 1 只读立即执行；tier 2/3 自动弹审批窗给浏览器用户，接口会阻塞等待用户批准后返回）
+- Tier 1 只读：GetSystemInfo, run_systeminfo, run_dxdiag, ListProcesses, FileList, FileSearch, FileRead, FileDownload, RegRead, ServiceList, TaskList, EventLog, Ping, PortCheck, NetConnections, read_event_log, run_powershell
+- Tier 2 交互（需审批）：Click, Type, Move, Scroll, Shortcut, FocusWindow, MinimizeAll, Scrape
+- Tier 3 修改（需审批）：Shell, App, KillProcess, FileWrite, FileUpload, RegWrite, ServiceStart, ServiceStop, TaskCreate, TaskDelete, SetClipboard, LockScreen, Shutdown, PlaySound
+
+### RunCommand（最常用）
+传任意 PowerShell 命令，系统自动分类：
+- 只读命令（Get-*, Select-*, systeminfo, ipconfig, tasklist, reg query 等）→ 立即执行
+- 修改命令（shutdown, Set-*, New-*, Remove-Item, Start-Service, reg add 等）→ 弹审批窗
+- 危险命令（format, diskpart, reg delete, Remove-Item -Recurse, net user 等）→ 直接拦截
+
+例子：查 CPU 温度 → RunCommand(command="Get-Temperature")；看启动项 → RunCommand(command="Get-CimInstance Win32_StartupCommand")
+
+### 工作流程
+1. 先诊断：用 Tier 1 工具或 RunCommand 只读命令收集信息（必要时多次调用，逐步深入）
+2. 用户要求操作时：简要说明后用 curl 调用对应工具，等待接口返回（期间浏览器会弹审批窗给用户）
+3. 若工具返回 [approval_denied]，如实告知用户操作被拒绝
+4. 最终用中文 + markdown 给出结论和后续建议
+5. 信息不足时主动询问用户补充细节
+"""
+
+
+async def run_agent_hermes(
+    user_message: str,
+    room: Room,
+    http_client: httpx.AsyncClient,
+    browser_ws: WebSocket,
+) -> str:
+    """Hermes 通道：把用户消息交给本机 Hermes api_server（自治 agent）处理。
+
+    Hermes 用自己的工具集（terminal/web/file 等）工作，并通过
+    /api/bridge/execute HTTP 桥操作远程电脑。返回最终文本。
+    """
+    system_prompt = build_system_prompt(room) + "\n\n" + build_hermes_bridge_guide(room)
+    payload = {
+        "model": HERMES_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+    }
+    headers = {
+        "Authorization": f"Bearer {HERMES_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    run_logger.info(f"[{room.code}] Hermes channel start (model={HERMES_MODEL})")
+
+    data = None
+    for attempt in range(3):
+        try:
+            resp = await http_client.post(
+                f"{HERMES_BASE_URL}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=330.0,  # 覆盖客户端默认 120s：自治 agent + 审批等待可能较长
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            break
+        except (httpx.ReadError, httpx.ConnectError, httpx.TimeoutException) as e:
+            run_logger.warning(f"[{room.code}] Hermes API attempt {attempt+1} failed: {e}")
+            if attempt == 2:
+                raise
+            await asyncio.sleep(2 * (attempt + 1))
+
+    if data is None:
+        raise RuntimeError("Hermes API returned no response after retries")
+
+    content = data["choices"][0]["message"].get("content", "")
+    run_logger.info(f"[{room.code}] Hermes channel done ({len(content)} chars)")
+    save_message(room.code, "ai", content)
+    return content
+
+
+# ============================================================
+# HTTP 桥接接口 — 供 Hermes（或外部 agent）通过 HTTP 操作 bridge
+#   认证：X-Bridge-Secret header 必须等于 BRIDGE_HTTP_SECRET
+#   流程：校验 → tier 判定 → （tier≥2）审批弹窗 → 执行 → 返回结果
+# ============================================================
+@app.post("/api/bridge/execute")
+async def api_bridge_execute(request: Request):
+    secret = request.headers.get("X-Bridge-Secret", "")
+    if not BRIDGE_HTTP_SECRET or secret != BRIDGE_HTTP_SECRET:
+        return JSONResponse({"status": "error", "error": "unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"status": "error", "error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    fn_name = body.get("tool")
+    fn_args = body.get("args") or {}
+
+    room = rooms.get(room_code)
+    if not room:
+        return JSONResponse({"status": "error", "error": "room_not_found"}, status_code=404)
+    if not room.bridge_ws:
+        return JSONResponse({"status": "error", "error": "bridge_not_connected"}, status_code=409)
+    if fn_name not in TOOL_TIERS:
+        return JSONResponse({"status": "error", "error": f"unknown_tool: {fn_name}"}, status_code=400)
+
+    tier = TOOL_TIERS.get(fn_name, 1)
+
+    # RunCommand：动态 tier（命令分类）
+    if fn_name == "RunCommand":
+        tier, cmd_cat, reason = classify_command(fn_args.get("command", ""))
+        run_logger.info(f"[{room.code}] HTTP bridge RunCommand classified as tier={tier} ({cmd_cat})")
+        if tier < 0:
+            return JSONResponse({
+                "status": "blocked", "tier": -1, "reason": reason,
+                "result": f"[blocked] {reason}: {fn_args.get('command', '')[:200]}",
+            })
+
+    # 审批（Tier 2/3）
+    if tier >= 2:
+        if not room.browser_ws:
+            return JSONResponse({"status": "error", "error": "no_browser_for_approval"}, status_code=409)
+        if tier == 2 and room.auto_approve_tier2:
+            save_approval(room.code, fn_name, fn_args, tier, 1)
+            run_logger.info(f"[{room.code}] HTTP bridge auto-approved Tier 2: {fn_name}")
+        else:
+            approved, reason = await request_approval(room, fn_name, fn_args, tier, room.browser_ws)
+            if not approved:
+                save_approval(room.code, fn_name, fn_args, tier, -1)
+                run_logger.info(f"[{room.code}] HTTP bridge approval denied for {fn_name}")
+                return JSONResponse({"status": "denied", "tier": tier, "reason": reason})
+            save_approval(room.code, fn_name, fn_args, tier, 1)
+            run_logger.info(f"[{room.code}] HTTP bridge approval granted for {fn_name}")
+
+    # 执行
+    cmd_id = f"http_{int(time.time())}_{secrets.token_hex(3)}"
+    result = await execute_bridge_command(room, fn_name, fn_args, cmd_id, tier)
+    save_message(room.code, "tool", result[:2000], fn_name, tier)
+
+    run_logger.info(f"[{room.code}] HTTP bridge {fn_name} done (tier={tier}, {len(result)} chars)")
+    return JSONResponse({"status": "ok", "tool": fn_name, "tier": tier, "result": result})
+
+
+# ============================================================
 # WebSocket endpoints
 # ============================================================
 @app.websocket("/ws/browser/{room_code}")
@@ -1496,11 +1706,10 @@ async def ws_browser(websocket: WebSocket, room_code: str):
 
     room = rooms.get(room_code)
     if not room:
-        await websocket.send_json({
-            "type": "error", "content": "Room does not exist. Please refresh and create a new one."
-        })
-        await websocket.close()
-        return
+        # 服务重启后房间字典清空：自动重建，避免用户/桥接器需重新创建房间
+        room = Room(room_code)
+        rooms[room_code] = room
+        run_logger.info(f"Room auto-recreated (browser): {room_code}")
 
     room.browser_ws = websocket
     run_logger.info(f"[browser] joined room {room_code}")
@@ -1522,6 +1731,8 @@ async def ws_browser(websocket: WebSocket, room_code: str):
 
             if msg_data.get("type") == "chat":
                 user_message = msg_data["content"]
+                # brain: deepseek（默认）| hermes —— 消息级覆盖环境变量 AGENT_BRAIN
+                brain = msg_data.get("brain") or AGENT_BRAIN
                 save_message(room_code, "user", user_message)
                 chat_logger.info(f"[{room_code}] USER: {user_message[:500]}")
 
@@ -1533,7 +1744,7 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                     continue
 
                 # Send "analyzing" and log it
-                run_logger.info(f"[{room_code}] Starting agent for message: {user_message[:100]}")
+                run_logger.info(f"[{room_code}] Starting agent (brain={brain}) for message: {user_message[:100]}")
                 await websocket.send_json({
                     "type": "status",
                     "content": "Analyzing your request...",
@@ -1549,7 +1760,7 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                     continue
 
                 # 后台任务运行 agent，主循环保持活跃以便接收 approval_response
-                async def agent_runner(user_message, room, http_client, websocket):
+                async def agent_runner(user_message, room, http_client, websocket, brain):
                     async def safe_send(payload: dict):
                         try:
                             await websocket.send_json(payload)
@@ -1557,11 +1768,17 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                             run_logger.warning(f"[{room_code}] browser send failed (client gone?): {e}")
 
                     try:
-                        answer = await asyncio.wait_for(
-                            run_agent(user_message, room, http_client, websocket),
-                            timeout=300.0  # 5 minute total timeout for agent
-                        )
-                        chat_logger.info(f"[{room_code}] AI: {answer[:500]}")
+                        if brain == "hermes":
+                            answer = await asyncio.wait_for(
+                                run_agent_hermes(user_message, room, http_client, websocket),
+                                timeout=330.0  # Hermes 自治 agent 需要更长预算
+                            )
+                        else:
+                            answer = await asyncio.wait_for(
+                                run_agent(user_message, room, http_client, websocket),
+                                timeout=300.0  # 5 minute total timeout for agent
+                            )
+                        chat_logger.info(f"[{room_code}] AI ({brain}): {answer[:500]}")
                         await safe_send({
                             "type": "ai_message",
                             "content": answer,
@@ -1586,7 +1803,7 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                         })
 
                 agent_task = asyncio.create_task(
-                    agent_runner(user_message, room, http_client, websocket)
+                    agent_runner(user_message, room, http_client, websocket, brain)
                 )
 
             elif msg_data.get("type") == "approval_response":
@@ -1624,11 +1841,10 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 
     room = rooms.get(room_code)
     if not room:
-        await websocket.send_json({
-            "type": "error", "content": "Room does not exist. Please check the room code."
-        })
-        await websocket.close()
-        return
+        # 服务重启后房间字典清空：自动重建，避免用户/桥接器需重新创建房间
+        room = Room(room_code)
+        rooms[room_code] = room
+        run_logger.info(f"Room auto-recreated (bridge): {room_code}")
 
     reason = "unknown"  # 断开原因（finally 中记录，需在 try 前初始化）
 

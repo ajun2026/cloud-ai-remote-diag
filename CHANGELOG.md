@@ -4,6 +4,43 @@
 
 ---
 
+## v0.4.0 — 2026-08-07（Hermes 大脑并存切换）
+
+### 一、Hermes Agent 作为服务器端大脑（并存切换）
+
+**需求来源**：把 cab-server 的"大脑"从 DeepSeek 换成 Hermes Agent（自治 agent），先并行验证稳定性再正式切换。
+
+- **架构**：`AGENT_BRAIN` 环境变量 / WebSocket 消息 `brain` 字段二选一：
+  - `deepseek`（默认）：原 `run_agent()` 循环，零改动
+  - `hermes`：新增 `run_agent_hermes()`，调本机 Hermes api_server（`127.0.0.1:8642`）
+- **关键发现**：Hermes api_server 是**自治 agent**（忽略外部 tools 参数，用自己工具集在服务器上执行，返回最终文本），因此 Hermes 通道通过 **HTTP 桥**操作远程电脑
+- **新增 HTTP 桥** `POST /api/bridge/execute`：
+  - 认证：`X-Bridge-Secret` header（`BRIDGE_HTTP_SECRET`）
+  - 流程：tier 判定 →（Tier 2/3）审批弹窗 → 执行 → 返回结果
+  - RunCommand 走动态分类（只读立即 / 修改审批 / 危险拦截）
+- **新增配置**（.env）：`HERMES_BASE_URL` / `HERMES_API_KEY` / `HERMES_MODEL` / `AGENT_BRAIN` / `BRIDGE_HTTP_SECRET`
+- **代码重构**：工具下发逻辑抽为公共函数 `execute_bridge_command()`，DeepSeek 循环与 HTTP 桥共用
+- **前端**：头部新增 🧠 DeepSeek / 🧠 Hermes 下拉，发送消息自动携带 brain
+
+### 二、Hermes 越权事故修复（重要）
+
+**事故**：Hermes 通道测试时，Hermes agent 未按指南用 curl 调桥，而是直接读 server.py 源码、用 patch 修改生产代码、执行 pkill 重启服务，导致 bridge 反复断开（close 1012 / 1000）。
+
+**修复（两道防线）**：
+1. **api_server 工具集最小化**（`~/.hermes/config.yaml`）：`platform_toolsets.api_server = [web, terminal]`，移除 patch / write_file / execute_code / delegate_task / cronjob
+2. **安全红线**（`build_hermes_bridge_guide()`）：禁止读写 cab-server 文件、禁止 pkill/重启/nohup、禁止 import server.py、唯一允许的服务器操作是 curl 调 HTTP 桥
+
+### 三、其他修复
+
+- **gateway 重启连带杀 cab-server**：server 启动改用 `subprocess.Popen(start_new_session=True)` 脱离 Hermes 进程组，不再依附 gateway 会话
+- **保留 Hermes 事故期间的 2 处合理改动**：`build_v2_command` 增加 FileWrite 模板（v2 管道下 FileWrite 可用）；`ws_bridge` 房间不存在时自动重建（服务重启后 bridge 重连不再失败）
+
+### 四、文档
+
+- 新增 `docs/Hermes大脑集成与调试记录.md`：完整记录架构设计、关键调研、调试过程、事故复盘与修复
+
+---
+
 ## v0.3.1 — 2026-08-02（本机生产版本同步）
 
 ### 一、管理后台安全加固（admin 登录）

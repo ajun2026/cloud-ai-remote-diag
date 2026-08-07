@@ -210,13 +210,17 @@
     flex: 1; padding: 14px; border: none; border-radius: 10px;
     font-size: 15px; font-weight: 700; cursor: pointer;
   }
-  #join-btn { background: var(--accent); color: #fff; }
-  #join-btn:hover { opacity: 0.85; }
+  /* 方案A：创建房间=主按钮(实心亮蓝)，加入房间=次按钮(描边) */
   #create-room-link {
-    background: var(--surface2); color: var(--info);
+    background: var(--info); color: #0b1a2e;
+    border: 1px solid var(--info) !important; font-weight: 700;
+  }
+  #create-room-link:hover { background: #7cb4ff; }
+  #join-btn {
+    background: transparent; color: var(--info);
     border: 1px solid var(--info) !important; font-weight: 600;
   }
-  #create-room-link:hover { background: rgba(96,165,250,0.15); }
+  #join-btn:hover { background: rgba(96,165,250,0.15); }
   #connect-dialog .hint { margin-top: 12px; font-size: 12px; color: var(--text2); }
   #connect-dialog .hint a { color: var(--info); cursor: pointer; text-decoration: underline; }
 
@@ -354,6 +358,10 @@
     </div>
     <div style="display:flex;align-items:center;gap:8px;">
       <button id="auto-approve-btn" title="Tier 2 自动审批：开启后鼠标/键盘等交互操作无需弹窗确认" onclick="toggleAutoApprove()">T2 Auto OFF</button>
+      <select id="brain-select" title="选择 AI 大脑引擎（并存切换试点）" style="padding:4px 6px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;">
+        <option value="deepseek">🧠 DeepSeek</option>
+        <option value="hermes">🧠 Hermes</option>
+      </select>
       <select id="lang-switcher">
         <option value="zh-CN">简</option>
         <option value="zh-TW">繁</option>
@@ -381,8 +389,8 @@
     <p data-i18n="dialog_subtitle">输入 6 位房间码，或创建一个新房间</p>
     <input id="room-input" type="text" maxlength="6" placeholder="AB12CD" autocomplete="off">
     <div class="action-row">
-      <button id="join-btn" data-i18n="dialog_join">加入房间</button>
       <button id="create-room-link" data-i18n="dialog_create">创建新房间</button>
+      <button id="join-btn" data-i18n="dialog_join">加入房间</button>
     </div>
 
     <div class="client-panel">
@@ -808,6 +816,7 @@ let reconnectTimer = null;
 const messagesEl = document.getElementById('messages');
 const inputBox = document.getElementById('input-box');
 const sendBtn = document.getElementById('send-btn');
+const brainSelect = document.getElementById('brain-select');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const roomDisplay = document.getElementById('room-display');
@@ -1197,7 +1206,7 @@ function sendMessage() {
   const text = inputBox.value.trim();
   if (!text || !ws || ws.readyState !== WebSocket.OPEN || !bridgeConnected) return;
   addUserMessage(text);
-  ws.send(JSON.stringify({ type: 'chat', content: text }));
+  ws.send(JSON.stringify({ type: 'chat', content: text, brain: brainSelect.value }));
   inputBox.value = ''; inputBox.style.height = 'auto'; sendBtn.disabled = true;
 }
 

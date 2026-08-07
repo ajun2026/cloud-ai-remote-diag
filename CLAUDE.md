@@ -10,20 +10,30 @@
 浏览器 (Web UI)  ←→  云端 Server (server.py)  ←→  本地桥接器 (bridge.exe on Windows)
      ↑                        ↑                         ↑
   用户聊天界面            FastAPI + Agent核心          执行 systeminfo/dxdiag
-                         DeepSeek V4 Flash              事件日志/PowerShell
+                         大脑二选一（brain 参数）        事件日志/PowerShell
+                         ├─ DeepSeek（默认，tool-calling）
+                         └─ Hermes（自治 agent，经 HTTP 桥）
                          106.54.193.9:8000
 ```
+
+## Hermes 大脑并存切换（v0.4.0）
+
+- **切换方式**：WebSocket 消息带 `brain` 字段（前端 🧠 下拉）或环境变量 `AGENT_BRAIN=deepseek|hermes`
+- **DeepSeek 通道**：原 `run_agent()` 循环（tool-calling，直连 DeepSeek API）
+- **Hermes 通道**：`run_agent_hermes()` → 本机 Hermes api_server（`127.0.0.1:8642`，自治 agent）→ 用 curl 调 `POST /api/bridge/execute`（X-Bridge-Secret 认证）操作远程电脑
+- **⚠️ 安全红线（重要）**：Hermes api_server 的 `platform_toolsets` 已最小化（仅 web+terminal）；**任何 Hermes agent 都禁止读取/修改本目录文件、禁止 pkill/重启服务、禁止 import server.py**——详见 `docs/Hermes大脑集成与调试记录.md` 事故复盘
 
 ## 文件说明
 
 | 文件 | 角色 | 说明 |
 |:---|:---|:---|
-| `server.py` | 云端服务 | FastAPI + WebSocket + Agent 核心，调用 DeepSeek API |
+| `server.py` | 云端服务 | FastAPI + WebSocket + Agent 核心，大脑二选一（DeepSeek / Hermes 桥） |
 | `bridge.py` | 桥接器源码 | Python，连接服务器，接收命令并在 Windows 上执行 |
 | `dist/bridge.exe` | 桥接器成品 | PyInstaller 打包，8.8MB，单文件，客户双击即用 |
-| `static/index.html` | Web UI | 聊天界面，连接弹窗，导出对话，下载桥接器 |
+| `static/index.html` | Web UI | 聊天界面，连接弹窗，导出对话，大脑切换下拉，下载桥接器 |
 | `static/bridge.exe` | 下载用 | 用户在网页可直接下载 |
-| `.env` | 配置 | API Key、Base URL、模型名 |
+| `.env` | 配置 | API Key、Base URL、模型名、Hermes 通道配置 |
+| `docs/Hermes大脑集成与调试记录.md` | 文档 | Hermes 大脑集成架构、调试过程、事故复盘 |
 | `requirements.txt` | 依赖 | fastapi, uvicorn, websockets, httpx, python-dotenv |
 | `winremote-mcp-master.zip` | 待集成 | 含 45 个 Windows 工具的 MCP 项目，计划集成到桥接器 |
 
@@ -33,7 +43,7 @@
 - **进程管理：** 通过 SSH 操作
 - **项目路径：** `/home/ubuntu/cab-server/`
 - **Python 环境：** venv (`/home/ubuntu/cab-server/venv/`)
-- **重启命令：** `pkill -f server.py; cd /home/ubuntu/cab-server && nohup ./venv/bin/python server.py &>/home/ubuntu/cab-server/server.log & disown`
+- **重启命令：** `pkill -f server.py; cd /home/ubuntu/cab-server && python3 -c "import subprocess; subprocess.Popen(['./venv/bin/python','server.py'], start_new_session=True, stdout=open('server.log','a'), stderr=subprocess.STDOUT)"`（**必须脱离 Hermes 进程组**，否则 gateway 重启会连带杀掉；nohup 会被 Hermes 拦截）
 - **日志：** `logs/server.log`（运行日志） + `logs/chat.log`（对话记录）
 
 ## 当前 AI Agent 能力（49 个工具）
