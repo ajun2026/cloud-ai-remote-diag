@@ -4,24 +4,28 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Tools](https://img.shields.io/badge/Tools-49-orange.svg)](#tool-tiers)
+[![Go Bridge](https://img.shields.io/badge/Bridge-Go-blue.svg)](bridge/)
 
-A cloud-based AI remote diagnostics system for Windows computers. Users describe PC problems in natural language through a browser, and the cloud AI remotely executes diagnostic and repair commands via a lightweight Windows bridge program, then provides analysis reports.
+A cloud-based AI remote diagnostics system for Windows computers. Users describe PC problems in natural language through a browser, and the cloud AI remotely executes diagnostic and repair commands via a lightweight bridge program, then provides analysis reports.
 
 > **Live Demo:** http://106.54.193.9:8000  
 > **Admin Dashboard:** http://106.54.193.9:8000/admin （默认账号：admin / admin）
 > **Update Log:** 详见 [CHANGELOG.md](CHANGELOG.md)
 > **Project Evolution:** 项目演进史（Python → Go 重写原因、架构变化）详见 [HISTORY.md](HISTORY.md)
+> **Hermes 大脑集成记录:** [docs/Hermes大脑集成与调试记录.md](docs/Hermes大脑集成与调试记录.md)
 
 ---
 
 ## Architecture
 
 ```
-Browser (Web UI)  <-->  Cloud Server (server.py)  <-->  Windows Bridge (bridge.py / bridge.exe)
+Browser (Web UI)  <-->  Cloud Server (server.py)  <-->  Remote PC (Go bridge)
       |                        |                              |
-  Chat interface         FastAPI + AI Agent          Executes systeminfo/dxdiag/
-  3-language support     DeepSeek V4 Flash            PowerShell/process mgmt/
-  Approval dialog        106.54.193.9:8000            49 diagnostic tools
+  Chat interface         FastAPI + Agent Core           Executes systeminfo/dxdiag/
+  3-language support     Brain 二选一 (brain 参数)        PowerShell/process mgmt/
+  Approval dialog        ├─ DeepSeek（默认, tool-calling）  49 diagnostic tools
+  大脑切换下拉           └─ Hermes（可选, 自治 agent）     Linux/macOS/Windows
+                         106.54.193.9:8000
 ```
 
 ## Features
@@ -30,6 +34,12 @@ Browser (Web UI)  <-->  Cloud Server (server.py)  <-->  Windows Bridge (bridge.p
 - **Natural Language Interface** -- Describe your PC problem in plain language, AI plans and executes diagnostics
 - **49 Windows Tools** -- System info, screenshots, process monitoring, network tests, registry access, event logs, OCR, desktop control, and more
 - **Smart Analysis** -- AI collects data, analyzes results, and produces Chinese-language diagnostic reports with markdown formatting
+
+### Dual AI Brain (v0.4.0+)
+- **DeepSeek Brain (default)** -- Original tool-calling loop, zero-config, direct DeepSeek API
+- **Hermes Brain (optional)** -- Switch to Hermes Agent as the server-side brain via the 🧠 dropdown or `AGENT_BRAIN` env var; Hermes operates the remote PC through the HTTP bridge (`POST /api/bridge/execute`)
+- **Per-message switching** -- Each chat message carries a `brain` field, so you can A/B test both brains side by side
+- **Safety first** -- Hermes api_server toolsets are locked down to `web + terminal`; a "security red line" in its system prompt forbids touching server files/processes (see [集成记录](docs/Hermes大脑集成与调试记录.md))
 
 ### Safety and Approval System
 - **3-Tier Tool Classification** -- Tier 1 (read-only, safe), Tier 2 (interactive, awareness needed), Tier 3 (destructive, approval required)
@@ -154,20 +164,42 @@ python server.py
 # Server runs at http://localhost:8000
 ```
 
-### Bridge Setup (Windows)
+### Bridge Setup (Remote PC)
+
+Bridge 分两种：**Go 版（推荐，单文件免依赖）** 和 **Python 版（源码参考）**。
+
+**方式 A：Go 版 bridge（推荐）**
+
+Go 源码在 `bridge/` 目录，编译产物不入库（避免仓库膨胀），需自行编译：
 
 ```bash
-# Install bridge dependencies
-pip install psutil Pillow pyautogui pywin32 tabulate thefuzz
+# Windows 版
+cd bridge
+GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o bridge-win64.exe .
+cp bridge-win64.exe ../static/   # 放回 static/ 供网页下载
 
-# Run the bridge
-python bridge.py
-# Enter the 6-digit room code from the web UI
+# Linux 版（可选）
+GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o bridge-linux-amd64 .
 ```
 
-### Build bridge.exe
+编译后在需要诊断的电脑上运行：
+- Windows：双击 `bridge-win64.exe`（单文件，无需安装 Python）
+- Linux：`chmod +x bridge-linux-amd64 && ./bridge-linux-amd64`
+- 然后输入网页上的 6 位房间码即可连接
+
+> 注意：仓库不包含编译好的二进制（`.gitignore` 忽略 `static/*.exe` / `static/bridge-linux-*`）。部署新服务器后需按上面编译并放入 `static/`，否则网页"下载桥接器"会 404。
+
+**方式 B：Python 版 bridge（源码参考）**
 
 ```bash
+pip install psutil Pillow pyautogui pywin32 tabulate thefuzz
+python bridge.py   # 输入 6 位房间码
+```
+
+### Build bridge.exe (legacy Python bridge)
+
+```bash
+# 旧版 Python bridge 已由 Go 版取代（v0.5.0 起），仅保留源码参考
 pyinstaller --onefile --name bridge --console --clean bridge.py \
   --hidden-import psutil --hidden-import PIL --hidden-import PIL.ImageGrab \
   --hidden-import pyautogui --hidden-import win32api --hidden-import tabulate \
@@ -177,10 +209,10 @@ pyinstaller --onefile --name bridge --console --clean bridge.py \
 
 ## Configuration
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (template: `.env.example`):
 
 ```env
-# API Configuration
+# API Configuration (DeepSeek or any OpenAI-compatible API)
 OPENAI_BASE_URL=https://api.deepseek.com/v1
 OPENAI_API_KEY=sk-your-api-key-here
 OPENAI_MODEL=deepseek-chat
@@ -188,23 +220,40 @@ OPENAI_MODEL=deepseek-chat
 # Server Configuration
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8000
+
+# --- Hermes Brain (optional, default OFF) ---
+# 不配置以下项 = 纯 DeepSeek 大脑，行为等同旧版。
+# 启用后可在页面顶部 🧠 下拉按消息切换大脑。
+# HERMES_BASE_URL=http://127.0.0.1:8642/v1   # 本机 Hermes gateway api_server
+# HERMES_API_KEY=your-api-server-key
+# HERMES_MODEL=hermes-agent
+# AGENT_BRAIN=deepseek                        # 默认大脑: deepseek | hermes
+# BRIDGE_HTTP_SECRET=change-me-to-a-long-random-string   # HTTP 桥密钥（必改）
 ```
+
+> ⚠️ 启用 Hermes Brain 需要本机部署 Hermes Agent（gateway + api_server 端口 8642），
+> 且必须把 `~/.hermes/config.yaml` 的 `platform_toolsets.api_server` 限制为 `[web, terminal]`，
+> 否则 Hermes 作为自治 agent 可能越权操作服务器（事故详情见 [集成记录](docs/Hermes大脑集成与调试记录.md)）。
 
 ## Project Structure
 
 ```
 cloud-ai-remote-diag/
-  server.py              FastAPI + WebSocket + AI Agent core
-  bridge.py              Windows bridge (49 tools)
+  server.py              FastAPI + WebSocket + AI Agent core (Dual Brain)
+  bridge.py              Legacy Python bridge (source reference)
+  bridge/                Go bridge source (v0.5.0+, recommended)
   static/
-    index.html           Web UI (zh-CN/zh-TW/EN)
+    index.html           Web UI (zh-CN/zh-TW/EN) + brain switcher
+  docs/
+    Hermes大脑集成与调试记录.md   Hermes Brain integration & incident record
+  .env.example           Environment template (DeepSeek + optional Hermes)
   requirements.txt       Python dependencies
   CLAUDE.md              Project documentation (Chinese)
   logs/                  Runtime logs + SQLite DB (gitignored)
     server.log
     chat.log
     chat.db
-  dist/                  Built bridge.exe (gitignored)
+  dist/                  Built legacy bridge.exe (gitignored)
 ```
 
 ## API Endpoints
@@ -217,19 +266,38 @@ cloud-ai-remote-diag/
 | `/api/rooms` | POST | Create a new room (returns 6-digit code) |
 | `/api/history/{room}` | GET | Get chat history for a room |
 | `/api/rooms/list` | GET | List all rooms with message counts |
+| `/api/diag/{room}` | GET | Room health diagnostics (bridge status, heartbeat, cmd history) |
+| `/api/bridge/execute` | POST | **HTTP bridge** for Hermes brain — execute a tool on the remote PC (auth: `X-Bridge-Secret`) |
 | `/api/admin/stats` | GET | Server statistics (rooms, messages, approvals) |
 | `/api/admin/logs/{name}` | GET | View server/chat/bridge logs |
 | `/ws/browser/{room}` | WebSocket | Browser-side connection |
 | `/ws/bridge/{room}` | WebSocket | Bridge-side connection |
 
+### HTTP Bridge (`POST /api/bridge/execute`)
+
+```json
+// Header: X-Bridge-Secret: <BRIDGE_HTTP_SECRET>
+{"room_code": "ABC123", "tool": "RunCommand", "args": {"command": "Get-Temperature"}}
+```
+
+```json
+// Response
+{"status": "ok", "tool": "RunCommand", "tier": 1, "result": "..."}
+{"status": "denied", "tier": 3, "reason": "..."}
+{"status": "blocked", "reason": "dangerous command"}
+```
+
+Tier 1 直接执行；Tier 2/3 会向浏览器用户弹审批窗，接口阻塞等待批准后返回结果。
+
 ## WebSocket Protocol
 
 ### Browser to Server
 ```json
-{"type": "chat", "content": "My PC is running slow"}
+{"type": "chat", "content": "My PC is running slow", "brain": "deepseek"}
 {"type": "approval_response", "id": "approve_xxx", "approved": true}
 {"type": "auto_approve_toggle", "enabled": true}
 ```
+> `brain` 字段可选：`deepseek`（默认）或 `hermes`，按消息切换大脑；不传则用环境变量 `AGENT_BRAIN`。
 
 ### Server to Browser
 ```json
@@ -257,13 +325,14 @@ cloud-ai-remote-diag/
 |:---|:---|
 | **Server Framework** | FastAPI + Uvicorn |
 | **Real-time Communication** | WebSockets |
-| **AI Engine** | DeepSeek V4 Flash (OpenAI-compatible API) |
-| **Windows Bridge** | Python asyncio + subprocess + ctypes |
-| **Desktop Automation** | PyAutoGUI + PyWin32 + Pillow |
-| **System Monitoring** | psutil |
+| **AI Engine (default)** | DeepSeek (OpenAI-compatible API, tool-calling loop) |
+| **AI Engine (optional)** | Hermes Agent (autonomous agent via HTTP bridge) |
+| **Remote Bridge** | Go (single binary, v0.5.0+) / legacy Python asyncio |
+| **Desktop Automation** | Go native (legacy: PyAutoGUI + PyWin32 + Pillow) |
+| **System Monitoring** | psutil (legacy Python bridge) |
 | **Database** | SQLite (chat history + approvals) |
 | **Frontend** | Vanilla HTML/CSS/JS (zero dependencies) |
-| **Packaging** | PyInstaller (single .exe) |
+| **Packaging** | Go build (single binary, ~4.8MB) |
 
 ## License
 
@@ -277,4 +346,4 @@ MIT License
 
 ---
 
-**Status:** Production | **Version:** 0.3.0 | **Last Updated:** 2026-08-02
+**Status:** Production | **Version:** 0.4.0 (Hermes Brain) | **Last Updated:** 2026-08-07
