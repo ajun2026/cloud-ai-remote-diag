@@ -16,7 +16,7 @@
                          106.54.193.9:8000
 ```
 
-## Hermes 大脑并存切换（v0.4.0）
+## Hermes 大脑并存切换（v0.7.0）
 
 - **切换方式**：WebSocket 消息带 `brain` 字段（前端 🧠 下拉）或环境变量 `AGENT_BRAIN=deepseek|hermes`
 - **DeepSeek 通道**：原 `run_agent()` 循环（tool-calling，直连 DeepSeek API）

@@ -691,7 +691,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.3.0")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.7.0")
 
 # ============================================================
 # Admin authentication — simple session cookie
@@ -790,7 +790,7 @@ async def root():
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.3.0"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.7.0"}
 
 
 @app.post("/api/debug_log")
@@ -896,7 +896,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.3.0",
+        "version": "0.7.0",
     }
 
 
@@ -1076,7 +1076,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.3.0</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.7.0</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -1965,6 +1965,6 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.3.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.7.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info")

@@ -35,7 +35,7 @@ Browser (Web UI)  <-->  Cloud Server (server.py)  <-->  Remote PC (Go bridge)
 - **49 Windows Tools** -- System info, screenshots, process monitoring, network tests, registry access, event logs, OCR, desktop control, and more
 - **Smart Analysis** -- AI collects data, analyzes results, and produces Chinese-language diagnostic reports with markdown formatting
 
-### Dual AI Brain (v0.4.0+)
+### Dual AI Brain (v0.7.0+)
 - **DeepSeek Brain (default)** -- Original tool-calling loop, zero-config, direct DeepSeek API
 - **Hermes Brain (optional)** -- Switch to Hermes Agent as the server-side brain via the 🧠 dropdown or `AGENT_BRAIN` env var; Hermes operates the remote PC through the HTTP bridge (`POST /api/bridge/execute`)
 - **Per-message switching** -- Each chat message carries a `brain` field, so you can A/B test both brains side by side

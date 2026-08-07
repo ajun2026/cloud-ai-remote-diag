@@ -4,7 +4,9 @@
 
 ---
 
-## v0.4.0 — 2026-08-07（Hermes 大脑并存切换）
+---
+
+## v0.7.0 — 2026-08-07（Hermes 大脑并存切换）
 
 ### 一、Hermes Agent 作为服务器端大脑（并存切换）
 
@@ -38,6 +40,122 @@
 ### 四、文档
 
 - 新增 `docs/Hermes大脑集成与调试记录.md`：完整记录架构设计、关键调研、调试过程、事故复盘与修复
+
+---
+
+## v0.6.1 — 2026-08-03（心跳修复收尾）
+
+- 同步最新 server.py / index.html / Go 源码到仓库
+- index.html 下载链接改为 bridge-win64.exe（4.8MB），三语使用说明同步更新
+- Windows 桥接器版本号 v0.6.1
+
+---
+
+## v0.6.0 — 2026-08-03（Windows 桥接器交互模式）
+
+### 一、修复：双击运行闪退
+
+**问题**：bridge 强制要求命令行参数 `-room`，缺少时直接报错退出（`os.Exit(2)`）。用户按页面指引双击运行 exe 时没有参数，窗口一闪而过，表现为"闪退"。
+
+**修改**（bridge/main.go）：
+- 未提供 `-room` 参数时进入**交互模式**：欢迎界面 → 引导输入服务器地址（回车默认 `ws://106.54.193.9:8000`）→ 输入 6 位房间码 → 自动连接
+- 房间码为空时提示错误并等待按键后再退出（不再瞬间关闭）
+- 命令行方式 `-server ws://... -room XXX` 完全兼容，不受影响
+
+### 二、修复：Bridge disconnected/connected 状态反复切换
+
+**问题**：客户端每 25s 发一次 `heartbeat`，但服务器收到后不回复（`pass`）；而客户端设置了 75s 读超时——75s 内收不到服务器任何消息就断开重连。于是每 ~75s 循环一次断连/重连，浏览器状态提示 `Bridge disconnected [--]` / `Bridge connected [OK]` 反复切换。
+
+**修改**：
+- 服务器（server.py）：收到 `heartbeat` 时回复 `{"type": "pong"}`，让客户端持续收到消息、重置读超时
+- 客户端（bridge/ws.go）：新增 `pong` 消息静默处理（仅用于重置读超时，不刷日志）
+
+**验证**：本机联调连续连接 112s 无断连（修复前 75s 必断），服务器日志无 left 记录。
+
+---
+
+## v0.5.0 — 2026-08-03（管道化重写：Go bridge + 平台感知）
+
+### 一、Go 管道化桥接器（bridge/ 目录，全新）
+
+- 用 Go 重写桥接器：单文件静态编译，Windows 4.8MB / Linux 4.7MB（旧 pyinstaller 版 22MB，-78%）
+- 设计铁律：**单一职责命令管道**——不内置任何业务工具，能力全部通过执行命令实现
+- 协议 v2：`command` 直接下发命令字符串（平台感知 shell），替代旧 tool/args 映射
+- 文件通道：`file_download`（拉取客户机日志包）/ `file_upload`（推送工具/脚本），256KB 分块
+- 透明可审计：每条命令写入 `~/.clouddiag/bridge.log`（时间/shell/exit code/命令/结果摘要）
+- 心跳 25s、断线自动重连（2s→30s 指数退避）、超时杀进程树、普通权限运行
+
+### 二、服务器端适配（server.py）
+
+- **平台感知**：identify 上报 platform，服务器自动识别 bridge_mode（v1 旧版 / v2 go-pipe）与目标平台（windows/linux/darwin）
+- **工具收缩**：25 个桌面操控工具默认隐藏（ENABLE_DESKTOP_TOOLS=0），TOOLS 46→26
+- **命令模板库**：V2_COMMAND_TEMPLATES 双平台 18 个工具模板（systeminfo/事件日志/进程/服务/网络等），Linux 用 bash、Windows 用 PowerShell
+- **平台提示词**：SYSTEM_PROMPT_WINDOWS / LINUX / MACOS 三套，按目标平台动态注入
+- **命令分级跨平台**：classify_command 补充 Linux 规则（uname/lscpu=只读，apt install/systemctl restart=修改，高危命令=fork bomb=危险拦截）
+- **v1 兼容**：旧 python bridge 仍可用（tool/args 协议），平滑过渡
+
+### 三、已验证（本机联调）
+
+- Linux bridge 真实连接 → AI 诊断（GetSystemInfo 走 bash 模板）✅
+- Tier 3 审批链路（mkdir 真实执行）✅
+- 文件下载通道（1MB 文件 4 块完整拼接）✅
+- 命令分级 25/25 测试用例通过 ✅
+
+### 四、Linux 诊断支持
+
+架构天然支持：同协议、同 AI，仅命令模板与提示词按平台切换。Go 交叉编译一行命令出 Linux 版。
+
+---
+
+## v0.4.0 — 2026-08-03（RunCommand 通用命令层 + 命令风险分级）
+
+### 一、新增 RunCommand 通用命令层
+
+- 服务器端新增通用命令执行工具 `RunCommand`，AI 可直接下发任意 PowerShell/CMD 命令
+- 新增 `classify_command()` 命令风险分级器，将命令分为三类：
+  - **Tier 1**：只读命令（get/select/systeminfo/ipconfig/tasklist 等）→ 自动执行
+  - **Tier 3**：修改命令（set/remove/restart/install/kill 等）→ 需用户审批弹窗确认
+  - **Tier -1**：危险命令（format/diskpart/reg delete 等）→ 硬拦截，永不执行
+- 命令风险分级覆盖 PowerShell 与 CMD 常见指令，正则匹配首词
+
+### 二、新增 Windows bridge.exe
+
+- 本机编译的 Windows 桥接器可执行文件（22MB），随仓库分发，免去用户手动配 Python 环境
+- 用户 Windows 端直接运行 bridge.exe 即可连接云端服务器
+
+### 三、稳定性修复
+
+- 服务器 WebSocket 推送改用 `safe_send` 封装，避免连接中断时异常
+- 其他若干稳定性改进
+
+---
+
+## v0.3.2 — 2026-08-02（Agent 轮次限制优化）
+
+### 一、Agent 最大工具调用轮次 15 → 30
+
+**问题**：复杂任务（如安装 smartmontools）需要多轮工具调用（查进程 → 探测环境 → 尝试安装 → 失败重试 → 收集信息），原 `max_loops = 15` 不够用，触发英文兜底消息。
+
+**修改**：
+- `run_agent()` 中 `max_loops = 15` → `30`
+- 新增 `exec_summary` 列表，记录每轮执行摘要（工具名、参数、结果前 80 字符）
+
+### 二、兜底消息中文化 + 附执行摘要
+
+**修改**：轮次耗尽时不再返回英文 `Diagnosis exceeded the maximum step limit`，改为中文提示，并附上已执行步骤摘要：
+
+```
+我已经尝试了多种方式处理你的请求，但步骤较多、尚未完成。
+
+本次共执行了 N 个诊断/操作步骤：
+✅ 1. ListProcesses(...) → ...
+⚠️ 2. run_powershell(...) → ...
+
+建议：
+1. 将问题拆分为更小的步骤，分多次提问...
+2. 如果是安装/修改类操作，可先确认网络、权限是否正常；
+3. 告诉我你看到的具体报错或现象，我可以针对性地继续排查。
+```
 
 ---
 
@@ -141,114 +259,3 @@ document.getElementById('tab-' + name.replace('.','')).className = 'btn-primary'
 2. 登录后历史房间列表每行有「删除」按钮，可删除聊天记录
 3. 「服务器日志」标签页可正常加载 server.log / chat.log / bridge.log
 4. 在聊天页让 AI 执行危险操作（如关闭飞书），应弹出红色审批框，点击「同意执行」后操作生效
-
-## v0.3.2 — 2026-08-02（Agent 轮次限制优化）
-
-### 一、Agent 最大工具调用轮次 15 → 30
-
-**问题**：复杂任务（如安装 smartmontools）需要多轮工具调用（查进程 → 探测环境 → 尝试安装 → 失败重试 → 收集信息），原 `max_loops = 15` 不够用，触发英文兜底消息。
-
-**修改**：
-- `run_agent()` 中 `max_loops = 15` → `30`
-- 新增 `exec_summary` 列表，记录每轮执行摘要（工具名、参数、结果前 80 字符）
-
-### 二、兜底消息中文化 + 附执行摘要
-
-**修改**：轮次耗尽时不再返回英文 `Diagnosis exceeded the maximum step limit`，改为中文提示，并附上已执行步骤摘要：
-
-```
-我已经尝试了多种方式处理你的请求，但步骤较多、尚未完成。
-
-本次共执行了 N 个诊断/操作步骤：
-✅ 1. ListProcesses(...) → ...
-⚠️ 2. run_powershell(...) → ...
-
-建议：
-1. 将问题拆分为更小的步骤，分多次提问...
-2. 如果是安装/修改类操作，可先确认网络、权限是否正常；
-3. 告诉我你看到的具体报错或现象，我可以针对性地继续排查。
-```
-
----
-
-## v0.4.0 — 2026-08-03（RunCommand 通用命令层 + 命令风险分级）
-
-### 一、新增 RunCommand 通用命令层
-
-- 服务器端新增通用命令执行工具 `RunCommand`，AI 可直接下发任意 PowerShell/CMD 命令
-- 新增 `classify_command()` 命令风险分级器，将命令分为三类：
-  - **Tier 1**：只读命令（get/select/systeminfo/ipconfig/tasklist 等）→ 自动执行
-  - **Tier 3**：修改命令（set/remove/restart/install/kill 等）→ 需用户审批弹窗确认
-  - **Tier -1**：危险命令（format/diskpart/reg delete 等）→ 硬拦截，永不执行
-- 命令风险分级覆盖 PowerShell 与 CMD 常见指令，正则匹配首词
-
-### 二、新增 Windows bridge.exe
-
-- 本机编译的 Windows 桥接器可执行文件（22MB），随仓库分发，免去用户手动配 Python 环境
-- 用户 Windows 端直接运行 bridge.exe 即可连接云端服务器
-
-### 三、稳定性修复
-
-- 服务器 WebSocket 推送改用 `safe_send` 封装，避免连接中断时异常
-- 其他若干稳定性改进
-
-
-## v0.5.0 — 2026-08-03（管道化重写：Go bridge + 平台感知）
-
-### 一、Go 管道化桥接器（bridge/ 目录，全新）
-
-- 用 Go 重写桥接器：单文件静态编译，Windows 4.8MB / Linux 4.7MB（旧 pyinstaller 版 22MB，-78%）
-- 设计铁律：**单一职责命令管道**——不内置任何业务工具，能力全部通过执行命令实现
-- 协议 v2：`command` 直接下发命令字符串（平台感知 shell），替代旧 tool/args 映射
-- 文件通道：`file_download`（拉取客户机日志包）/ `file_upload`（推送工具/脚本），256KB 分块
-- 透明可审计：每条命令写入 `~/.clouddiag/bridge.log`（时间/shell/exit code/命令/结果摘要）
-- 心跳 25s、断线自动重连（2s→30s 指数退避）、超时杀进程树、普通权限运行
-
-### 二、服务器端适配（server.py）
-
-- **平台感知**：identify 上报 platform，服务器自动识别 bridge_mode（v1 旧版 / v2 go-pipe）与目标平台（windows/linux/darwin）
-- **工具收缩**：25 个桌面操控工具默认隐藏（ENABLE_DESKTOP_TOOLS=0），TOOLS 46→26
-- **命令模板库**：V2_COMMAND_TEMPLATES 双平台 18 个工具模板（systeminfo/事件日志/进程/服务/网络等），Linux 用 bash、Windows 用 PowerShell
-- **平台提示词**：SYSTEM_PROMPT_WINDOWS / LINUX / MACOS 三套，按目标平台动态注入
-- **命令分级跨平台**：classify_command 补充 Linux 规则（uname/lscpu=只读，apt install/systemctl restart=修改，高危命令=fork bomb=危险拦截）
-- **v1 兼容**：旧 python bridge 仍可用（tool/args 协议），平滑过渡
-
-### 三、已验证（本机联调）
-
-- Linux bridge 真实连接 → AI 诊断（GetSystemInfo 走 bash 模板）✅
-- Tier 3 审批链路（mkdir 真实执行）✅
-- 文件下载通道（1MB 文件 4 块完整拼接）✅
-- 命令分级 25/25 测试用例通过 ✅
-
-### 四、Linux 诊断支持
-
-架构天然支持：同协议、同 AI，仅命令模板与提示词按平台切换。Go 交叉编译一行命令出 Linux 版。
-
-
-## v0.6.0 — 2026-08-03（Windows 桥接器交互模式）
-
-### 一、修复：双击运行闪退
-
-**问题**：bridge 强制要求命令行参数 `-room`，缺少时直接报错退出（`os.Exit(2)`）。用户按页面指引双击运行 exe 时没有参数，窗口一闪而过，表现为"闪退"。
-
-**修改**（bridge/main.go）：
-- 未提供 `-room` 参数时进入**交互模式**：欢迎界面 → 引导输入服务器地址（回车默认 `ws://106.54.193.9:8000`）→ 输入 6 位房间码 → 自动连接
-- 房间码为空时提示错误并等待按键后再退出（不再瞬间关闭）
-- 命令行方式 `-server ws://... -room XXX` 完全兼容，不受影响
-
-### 二、修复：Bridge disconnected/connected 状态反复切换
-
-**问题**：客户端每 25s 发一次 `heartbeat`，但服务器收到后不回复（`pass`）；而客户端设置了 75s 读超时——75s 内收不到服务器任何消息就断开重连。于是每 ~75s 循环一次断连/重连，浏览器状态提示 `Bridge disconnected [--]` / `Bridge connected [OK]` 反复切换。
-
-**修改**：
-- 服务器（server.py）：收到 `heartbeat` 时回复 `{"type": "pong"}`，让客户端持续收到消息、重置读超时
-- 客户端（bridge/ws.go）：新增 `pong` 消息静默处理（仅用于重置读超时，不刷日志）
-
-**验证**：本机联调连续连接 112s 无断连（修复前 75s 必断），服务器日志无 left 记录。
-
-
-## v0.6.1 — 2026-08-03（心跳修复收尾）
-
-- 同步最新 server.py / index.html / Go 源码到仓库
-- index.html 下载链接改为 bridge-win64.exe（4.8MB），三语使用说明同步更新
-- Windows 桥接器版本号 v0.6.1
