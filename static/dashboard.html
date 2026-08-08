@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作台 — 云端 AI 远程运维助手</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
+    --border: #30363d; --text: #e6edf3; --text2: #9da7b3;
+    --info: #58a6ff; --success: #3fb950; --warn: #d29922; --error: #f85149;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: radial-gradient(1200px 500px at 50% -10%, #1c2a44 0%, var(--bg) 60%);
+    min-height: 100vh; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--text);
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 20px 24px 60px; }
+
+  /* ===== 头部 ===== */
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 22px;
+  }
+  .header .brand { display: flex; align-items: center; gap: 10px; }
+  .header .logo {
+    width: 34px; height: 34px; border-radius: 8px; background: linear-gradient(135deg, var(--info), #7c4dff);
+    display: flex; align-items: center; justify-content: center; font-size: 16px; color: #fff; font-weight: 700;
+  }
+  .header .title { font-size: 18px; font-weight: 600; }
+  .header .sub { font-size: 12px; color: var(--text2); }
+  .header .user-box { display: flex; align-items: center; gap: 10px; }
+  .header .user-tag {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
+    padding: 6px 14px; font-size: 13px; display: flex; align-items: center; gap: 6px;
+  }
+  .header .user-tag .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .btn-sm {
+    padding: 6px 12px; font-size: 12px; background: var(--surface2); color: var(--text2);
+    border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+  }
+  .btn-sm:hover { color: var(--text); border-color: var(--text2); }
+
+  /* ===== 三卡片 ===== */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; min-height: 210px; display: flex; flex-direction: column;
+  }
+  .card h3 { font-size: 15px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .card .icon { width: 26px; height: 26px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
+  .icon-create { background: rgba(88,166,255,.15); color: var(--info); }
+  .icon-join { background: rgba(63,185,80,.15); color: var(--success); }
+  .icon-dl { background: rgba(210,153,34,.15); color: var(--warn); }
+  .card .desc { font-size: 12px; color: var(--text2); margin-bottom: 14px; }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+  .field input {
+    width: 100%; padding: 8px 10px; background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; font-size: 13px; outline: none;
+  }
+  .field input:focus { border-color: var(--info); }
+  .btn-main {
+    width: 100%; padding: 9px; background: var(--info); color: #fff; border: none;
+    border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .btn-main:hover { filter: brightness(1.1); }
+  .btn-main:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-green { background: var(--success); }
+  .btn-amber { background: var(--warn); }
+  .dl-row { display: flex; flex-direction: column; gap: 8px; }
+  .dl-btn {
+    display: block; text-align: center; padding: 9px; font-size: 13px; text-decoration: none;
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .dl-btn:hover { border-color: var(--info); color: var(--info); }
+  .dl-note { font-size: 11px; color: var(--text2); line-height: 1.7; margin-top: 4px; }
+  .dl-cmd {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; font-size: 11px; color: var(--info); word-break: break-all;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .dl-copy { color: var(--text2); cursor: pointer; flex-shrink: 0; font-size: 11px; }
+  .dl-copy:hover { color: var(--text); }
+
+  /* 创建结果 */
+  .room-result {
+    display: none; margin-top: 10px; background: rgba(63,185,80,.08);
+    border: 1px solid rgba(63,185,80,.35); border-radius: 8px; padding: 12px;
+  }
+  .room-result .code {
+    font-size: 26px; font-weight: 700; letter-spacing: 4px; color: var(--success);
+    text-align: center; margin: 6px 0 10px; font-family: "Consolas", monospace;
+  }
+  .room-result .actions { display: flex; gap: 8px; }
+  .room-result .actions button, .room-result .actions a {
+    flex: 1; text-align: center; padding: 8px; font-size: 13px; border-radius: 6px; cursor: pointer;
+    text-decoration: none; border: 1px solid var(--border);
+  }
+  .btn-enter { background: var(--success); color: #fff; border: none !important; font-weight: 600; }
+  .btn-copy { background: var(--surface2); color: var(--text); }
+  .room-result .tip { font-size: 11px; color: var(--text2); margin-bottom: 4px; text-align: center; }
+
+  /* ===== 工单列表 ===== */
+  .section-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+  .section-title .count { font-size: 12px; color: var(--text2); font-weight: 400; }
+  .toolbar { display: flex; gap: 10px; margin-bottom: 12px; }
+  .toolbar input {
+    padding: 8px 12px; background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 13px; outline: none; width: 260px;
+  }
+  .toolbar input:focus { border-color: var(--info); }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 10px; overflow: hidden; }
+  th, td { padding: 11px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
+  th { background: var(--surface2); color: var(--text2); font-weight: 500; font-size: 12px; white-space: nowrap; }
+  tr:hover td { background: rgba(88,166,255,.04); }
+  td .mono { font-family: "Consolas", monospace; letter-spacing: 1px; }
+  .status { padding: 3px 10px; border-radius: 12px; font-size: 11px; white-space: nowrap; }
+  .status.on { background: rgba(63,185,80,.15); color: var(--success); }
+  .status.off { background: rgba(157,167,179,.12); color: var(--text2); }
+  .empty { text-align: center; color: var(--text2); padding: 36px 0; font-size: 13px; }
+
+  /* ===== 模态 ===== */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 100;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    width: 360px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px;
+  }
+  .modal h3 { font-size: 16px; margin-bottom: 18px; }
+  .modal .field input { padding: 9px 11px; }
+  .modal .btn-row { display: flex; gap: 10px; margin-top: 18px; }
+  .modal .btn-row .btn-main { flex: 1; }
+  .btn-ghost {
+    flex: 1; padding: 9px; background: var(--surface2); color: var(--text2); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 14px; cursor: pointer;
+  }
+  .modal .error { display: none; background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.4);
+    color: var(--error); font-size: 12px; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px; }
+  .modal .error.show { display: block; }
+  .modal .ok { display: none; background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.4);
+    color: var(--success); font-size: 12px; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px; }
+  .modal .ok.show { display: block; }
+
+  .toast {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 200;
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    padding: 10px 20px; border-radius: 8px; font-size: 13px; display: none; box-shadow: 0 6px 20px rgba(0,0,0,.4);
+  }
+  .toast.show { display: block; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="brand">
+      <div class="logo">AI</div>
+      <div>
+        <div class="title">云端 AI 远程运维助手</div>
+        <div class="sub">联想售后 · 电脑问题远程诊断工作台</div>
+      </div>
+    </div>
+    <div class="user-box">
+      <span class="user-tag"><span class="dot"></span><span id="user-name">未登录</span></span>
+      <button class="btn-sm" onclick="openPwdModal()">修改密码</button>
+      <button class="btn-sm" onclick="doLogout()">退出登录</button>
+    </div>
+  </div>
+
+  <div class="cards">
+
+    <!-- 创建房间 -->
+    <div class="card">
+      <h3><span class="icon icon-create">+</span>创建房间</h3>
+      <div class="desc">需绑定电脑 SN 与报修工单号</div>
+      <div class="field"><label>SN 序列号</label><input id="f-sn" placeholder="如 PC204XF3"></div>
+      <div class="field"><label>报修工单号</label><input id="f-ticket" placeholder="如 202608063200477002"></div>
+      <div class="field"><label>机器型号（选填）</label><input id="f-model" placeholder="如 ThinkPad X1 Carbon"></div>
+      <button class="btn-main" id="create-btn" onclick="createRoom()">创建房间</button>
+      <div class="room-result" id="room-result">
+        <div class="tip">房间创建成功，请让客户电脑运行桥接器并输入房间码</div>
+        <div class="code" id="room-code"></div>
+        <div class="actions">
+          <a class="btn-enter" id="room-enter" href="#">进入房间</a>
+          <button class="btn-copy" onclick="copyRoomCode()">复制房间码</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 加入房间 -->
+    <div class="card">
+      <h3><span class="icon icon-join">⇄</span>加入房间</h3>
+      <div class="desc">输入 8 位房间码进入已有诊断会话</div>
+      <div class="field"><label>房间码</label><input id="f-join" maxlength="8" placeholder="如 AB12CDEF" style="text-transform:uppercase;"></div>
+      <button class="btn-main btn-green" onclick="joinRoom()">进入对话</button>
+    </div>
+
+    <!-- 下载桥接器 -->
+    <div class="card">
+      <h3><span class="icon icon-dl">↓</span>下载桥接器</h3>
+      <div class="desc">在需要诊断的电脑上运行桥接器，输入房间码配对</div>
+      <div class="dl-row">
+        <a class="dl-btn" href="/static/bridge-win64.exe" download>Windows 桥接器 (bridge-win64.exe, 4.8MB)</a>
+        <a class="dl-btn" href="/static/bridge-linux-amd64" download>Linux x86_64 桥接器</a>
+        <div class="dl-cmd">
+          <span>curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span>
+          <span class="dl-copy" onclick="copyCmd(this)">复制</span>
+        </div>
+      </div>
+      <div class="dl-note">Linux 其他架构：ARM64 / 龙芯 请在管理端获取。运行后按提示输入服务器地址与房间码即可。</div>
+    </div>
+
+  </div>
+
+  <div class="section-title">我的工单 <span class="count" id="room-count">共 0 条</span></div>
+  <div class="toolbar">
+    <input id="search-input" placeholder="按 SN / 工单号 / 型号搜索" oninput="renderRooms()">
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>房间码</th><th>SN</th><th>型号</th><th>工单号</th><th>创建时间</th><th>最后活动</th><th>状态</th><th>操作</th>
+      </tr>
+    </thead>
+    <tbody id="room-tbody">
+      <tr><td colspan="8" class="empty">加载中...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 修改密码模态 -->
+<div class="modal-overlay" id="pwd-modal">
+  <div class="modal">
+    <h3>修改密码</h3>
+    <div class="error" id="pwd-error"></div>
+    <div class="ok" id="pwd-ok">密码修改成功</div>
+    <div class="field"><label>旧密码</label><input id="p-old" type="password"></div>
+    <div class="field"><label>新密码（至少 4 位）</label><input id="p-new" type="password"></div>
+    <div class="field"><label>确认新密码</label><input id="p-new2" type="password"></div>
+    <div class="btn-row">
+      <button class="btn-ghost" onclick="closePwdModal()">取消</button>
+      <button class="btn-main" onclick="changePwd()">确认修改</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let allRooms = [];
+const tbody = document.getElementById('room-tbody');
+
+// ===== 用户信息 / 登录校验 =====
+async function loadMe() {
+  try {
+    const resp = await fetch('/api/auth/me');
+    const data = await resp.json();
+    if (data.error) { location.href = '/login'; return; }
+    document.getElementById('user-name').textContent = '工号: ' + data.username;
+    if (data.role === 'admin') document.getElementById('user-name').textContent += ' (管理员)';
+  } catch (e) { location.href = '/login'; }
+}
+
+function doLogout() {
+  fetch('/api/auth/logout', { method: 'POST' }).finally(() => { location.href = '/login'; });
+}
+
+// ===== 创建房间 =====
+async function createRoom() {
+  const sn = document.getElementById('f-sn').value.trim();
+  const ticket = document.getElementById('f-ticket').value.trim();
+  const model = document.getElementById('f-model').value.trim();
+  if (!sn) { showToast('请填写 SN 序列号'); return; }
+  if (!ticket) { showToast('请填写报修工单号'); return; }
+  const btn = document.getElementById('create-btn');
+  btn.disabled = true; btn.textContent = '创建中...';
+  try {
+    const resp = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sn, ticket_no: ticket, machine_model: model }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showToast(data.error || '创建失败'); btn.disabled = false; btn.textContent = '创建房间'; return; }
+    const code = data.room_code;
+    document.getElementById('room-code').textContent = code;
+    document.getElementById('room-enter').href = '/chat?room=' + code;
+    document.getElementById('room-result').style.display = 'block';
+    document.getElementById('f-sn').value = '';
+    document.getElementById('f-ticket').value = '';
+    document.getElementById('f-model').value = '';
+    loadRooms();
+  } catch (e) {
+    showToast('网络错误: ' + e.message);
+  }
+  btn.disabled = false; btn.textContent = '创建房间';
+}
+
+function copyRoomCode() {
+  const code = document.getElementById('room-code').textContent;
+  navigator.clipboard.writeText(code).then(() => showToast('房间码已复制: ' + code));
+}
+
+// ===== 加入房间 =====
+async function joinRoom() {
+  const code = document.getElementById('f-join').value.trim().toUpperCase();
+  if (code.length !== 8) { showToast('请输入 8 位房间码'); return; }
+  try {
+    const resp = await fetch('/api/rooms/check/' + code);
+    const data = await resp.json();
+    if (!resp.ok) { showToast(data.error || '校验失败'); return; }
+    if (!data.exists) { showToast('房间不存在，请确认房间码或先创建房间'); return; }
+    location.href = '/chat?room=' + code;
+  } catch (e) { showToast('网络错误: ' + e.message); }
+}
+
+// ===== 工单列表 =====
+async function loadRooms() {
+  try {
+    const resp = await fetch('/api/my_rooms');
+    const data = await resp.json();
+    allRooms = data.rooms || [];
+    renderRooms();
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">加载失败: ' + e.message + '</td></tr>';
+  }
+}
+
+function renderRooms() {
+  const kw = document.getElementById('search-input').value.trim().toLowerCase();
+  const list = allRooms.filter(r => !kw
+    || r.sn.toLowerCase().includes(kw)
+    || r.ticket_no.toLowerCase().includes(kw)
+    || (r.machine_model || '').toLowerCase().includes(kw)
+    || r.room_code.toLowerCase().includes(kw));
+  document.getElementById('room-count').textContent = '共 ' + list.length + ' 条';
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">暂无工单记录，点击上方「创建房间」开始</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(r => {
+    const on = r.bridge_online;
+    const st = on ? '<span class="status on">连接中</span>' : '<span class="status off">已断开</span>';
+    return '<tr>'
+      + '<td class="mono">' + r.room_code + '</td>'
+      + '<td>' + r.sn + '</td>'
+      + '<td>' + (r.machine_model || '-') + '</td>'
+      + '<td>' + r.ticket_no + '</td>'
+      + '<td>' + (r.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
+      + '<td>' + (r.last_seen || '').replace('T', ' ').slice(0, 16) + '</td>'
+      + '<td>' + st + '</td>'
+      + '<td><a class="btn-sm" style="text-decoration:none;" href="/chat?room=' + r.room_code + '">进入对话</a></td>'
+      + '</tr>';
+  }).join('');
+}
+
+// ===== 修改密码 =====
+function openPwdModal() {
+  document.getElementById('pwd-error').className = 'error';
+  document.getElementById('pwd-ok').className = 'ok';
+  document.getElementById('p-old').value = '';
+  document.getElementById('p-new').value = '';
+  document.getElementById('p-new2').value = '';
+  document.getElementById('pwd-modal').classList.add('show');
+}
+function closePwdModal() { document.getElementById('pwd-modal').classList.remove('show'); }
+
+async function changePwd() {
+  const oldPw = document.getElementById('p-old').value;
+  const newPw = document.getElementById('p-new').value;
+  const newPw2 = document.getElementById('p-new2').value;
+  const errBox = document.getElementById('pwd-error');
+  const okBox = document.getElementById('pwd-ok');
+  errBox.className = 'error'; okBox.className = 'ok';
+  if (newPw !== newPw2) { errBox.textContent = '两次输入的新密码不一致'; errBox.className = 'error show'; return; }
+  if (newPw.length < 4) { errBox.textContent = '新密码至少 4 位'; errBox.className = 'error show'; return; }
+  try {
+    const resp = await fetch('/api/auth/change_password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { errBox.textContent = data.error || '修改失败'; errBox.className = 'error show'; return; }
+    okBox.className = 'ok show';
+    setTimeout(closePwdModal, 1200);
+  } catch (e) { errBox.textContent = '网络错误: ' + e.message; errBox.className = 'error show'; }
+}
+
+// ===== 工具 =====
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function copyCmd(el) {
+  const cmd = el.parentElement.querySelector('span').textContent;
+  navigator.clipboard.writeText(cmd).then(() => showToast('命令已复制'));
+}
+
+document.getElementById('f-join').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinRoom(); });
+document.getElementById('pwd-modal').addEventListener('click', (e) => { if (e.target.id === 'pwd-modal') closePwdModal(); });
+
+// ===== Init =====
+loadMe();
+loadRooms();
+</script>
+</body>
+</html>

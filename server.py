@@ -5,6 +5,8 @@ Features: 49 tools, Tier 2/3 approval, SQLite chat history, admin dashboard
 """
 import asyncio
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -19,7 +21,7 @@ from typing import Optional
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
@@ -57,14 +59,14 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "sk-your-api-key-here")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "deepseek-chat")
 
 # ============================================================
-# Hermes 通道配置（并存切换：brain=hermes 时走 Hermes agent）
-#   AGENT_BRAIN: deepseek（默认，原逻辑）| hermes（Hermes api_server 自治 agent）
+# Hermes 通道配置（Hermes 为默认大脑；老 DeepSeek 通道保留兜底）
+#   AGENT_BRAIN: hermes（默认）| deepseek（兜底，前端入口已隐藏）
 #   前端 WebSocket 消息可带 "brain": "hermes" 按请求覆盖
 # ============================================================
 HERMES_BASE_URL = os.getenv("HERMES_BASE_URL", "http://127.0.0.1:8642/v1")
 HERMES_API_KEY = os.getenv("HERMES_API_KEY", "")
 HERMES_MODEL = os.getenv("HERMES_MODEL", "hermes-agent")
-AGENT_BRAIN = os.getenv("AGENT_BRAIN", "deepseek")  # deepseek | hermes
+AGENT_BRAIN = os.getenv("AGENT_BRAIN", "hermes")  # hermes（默认）| deepseek（兜底）
 
 # HTTP 桥接接口共享密钥（Hermes 通过 curl 调 /api/bridge/execute 时校验）
 BRIDGE_HTTP_SECRET = os.getenv("BRIDGE_HTTP_SECRET", "")
@@ -110,8 +112,86 @@ def init_db():
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # 用户表（工号/密码/角色）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,       -- 工号（登录账号）
+            name TEXT NOT NULL DEFAULT '',        -- 姓名
+            password_hash TEXT NOT NULL,          -- 密码哈希（salt$hash）
+            role TEXT NOT NULL DEFAULT 'engineer', -- admin | engineer
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    # 房间业务信息表（房间码 + SN + 工单号 + 型号 + 工程师 + 创建时间）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS rooms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_code TEXT NOT NULL UNIQUE,
+            sn TEXT NOT NULL,
+            ticket_no TEXT NOT NULL,
+            machine_model TEXT DEFAULT '',
+            engineer_username TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_engineer ON rooms(engineer_username, created_at)")
     conn.commit()
     conn.close()
+    seed_users()
+
+
+def hash_password(pw: str) -> str:
+    """PBKDF2 密码哈希，格式 salt$hex。"""
+    salt = secrets.token_hex(8)
+    h = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
+    return f"{salt}${h}"
+
+
+def verify_password(pw: str, stored: str) -> bool:
+    try:
+        salt, h = stored.split("$", 1)
+        calc = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
+        return hmac.compare_digest(calc, h)
+    except Exception:
+        return False
+
+
+def seed_users():
+    """首次启动时创建初始账号：admin（来自环境变量）+ test1~test10。"""
+    try:
+        conn = _db_connect()
+        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if count > 0:
+            conn.close()
+            return
+        # 管理员：沿用环境变量 ADMIN_USERNAME / ADMIN_PASSWORD
+        admin_user = os.getenv("ADMIN_USERNAME", "admin")
+        admin_pw = os.getenv("ADMIN_PASSWORD", "admin")
+        conn.execute(
+            "INSERT INTO users (username, name, password_hash, role) VALUES (?, ?, ?, ?)",
+            (admin_user, "管理员", hash_password(admin_pw), "admin"),
+        )
+        for i in range(1, 11):
+            conn.execute(
+                "INSERT INTO users (username, name, password_hash, role) VALUES (?, ?, ?, ?)",
+                (f"test{i}", f"测试用户{i}", hash_password(f"test{i}"), "engineer"),
+            )
+        conn.commit()
+        conn.close()
+        run_logger.info("[seed] 初始账号已创建：admin + test1~test10")
+    except Exception as e:
+        run_logger.error(f"[seed] seed_users failed: {e}")
+
+
+def get_user(username: str) -> Optional[dict]:
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        conn.close()
+        return dict(row) if row else None
+    except Exception:
+        return None
 
 def save_message(room_code: str, role: str, content: str, tool_name: str = None, tier: int = None):
     try:
@@ -148,6 +228,21 @@ def get_room_messages(room_code: str, limit: int = 200) -> list[dict]:
         return [dict(r) for r in rows]
     except Exception:
         return []
+
+
+def get_recent_context(room_code: str, current_user_msg: str, max_msgs: int = 20, max_chars: int = 600) -> list[dict]:
+    """取该房间最近的 user/ai 对话作为模型上下文（排除刚保存的当前消息本身）。
+
+    - 默认最多 20 条、每条截断 600 字符，防止 token 爆炸
+    - 两个大脑（DeepSeek / Hermes）共用，保证"问了后面记得前面"
+    """
+    rows = get_room_messages(room_code, 200)
+    pairs = [r for r in rows if r["role"] in ("user", "ai")]
+    # 最后一条 user 消息刚被保存、还没回复——跳过，避免与本次 user_message 重复
+    if pairs and pairs[-1]["role"] == "user" and pairs[-1]["content"] == current_user_msg:
+        pairs = pairs[:-1]
+    ctx = [{"role": r["role"], "content": (r["content"] or "")[:max_chars]} for r in pairs]
+    return ctx[-max_msgs:]
 
 def get_all_rooms() -> list[dict]:
     try:
@@ -688,8 +783,9 @@ rooms: dict[str, Room] = {}
 
 
 def generate_room_code() -> str:
-    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    return "".join(secrets.choice(chars) for _ in range(6))
+    """生成 8 位房间码：大写字母+数字，去掉易混字符（O/0、I/1、L、Z/2、S/5），电话报读不易错。"""
+    chars = "ABCDEFGHJKMNPQRTUVWXY346789"
+    return "".join(secrets.choice(chars) for _ in range(8))
 
 
 # ============================================================
@@ -713,11 +809,14 @@ def _admin_token_valid(token: str) -> bool:
 
 
 def _require_admin(request: Request):
-    """Dependency: check admin session cookie."""
+    """Dependency: check admin session cookie (or user session with role=admin)."""
     token = request.cookies.get("admin_token", "")
-    if not token or not _admin_token_valid(token):
-        return False
-    return True
+    if token and _admin_token_valid(token):
+        return True
+    user = _require_user(request)
+    if user and user.get("role") == "admin":
+        return True
+    return False
 
 
 @app.post("/api/admin/login")
@@ -739,6 +838,80 @@ async def admin_logout(request: Request):
     resp = JSONResponse({"ok": True})
     resp.delete_cookie("admin_token")
     return resp
+
+
+# ============================================================
+# 用户认证（工程师账号）— users 表 + session cookie
+# ============================================================
+USER_SESSIONS: dict[str, dict] = {}   # token -> {username, role, exp}
+USER_SESSION_TTL = 12 * 3600            # 12 hours
+
+
+def _require_user(request: Request) -> Optional[dict]:
+    """校验 user_token cookie，返回 {username, role} 或 None。"""
+    token = request.cookies.get("user_token", "")
+    sess = USER_SESSIONS.get(token)
+    if not sess or sess.get("exp", 0) <= time.time():
+        return None
+    return {"username": sess["username"], "role": sess["role"]}
+
+
+def _set_user_cookie(resp, username: str, role: str):
+    token = secrets.token_hex(24)
+    USER_SESSIONS[token] = {"username": username, "role": role, "exp": time.time() + USER_SESSION_TTL}
+    resp.set_cookie("user_token", token, max_age=USER_SESSION_TTL, httponly=True, samesite="lax")
+
+
+@app.post("/api/auth/login")
+async def user_login(request: Request):
+    body = await request.json()
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    user = get_user(username)
+    if not user or not verify_password(password, user["password_hash"]):
+        return JSONResponse({"error": "用户名或密码错误"}, status_code=401)
+    resp = JSONResponse({"ok": True, "username": user["username"], "name": user["name"], "role": user["role"]})
+    _set_user_cookie(resp, user["username"], user["role"])
+    run_logger.info(f"[auth] {username} 登录成功")
+    return resp
+
+
+@app.post("/api/auth/logout")
+async def user_logout(request: Request):
+    token = request.cookies.get("user_token", "")
+    USER_SESSIONS.pop(token, None)
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("user_token")
+    return resp
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    return {"username": user["username"], "role": user["role"]}
+
+
+@app.post("/api/auth/change_password")
+async def change_password(request: Request):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    body = await request.json()
+    old_pw = body.get("old_password") or ""
+    new_pw = body.get("new_password") or ""
+    if len(new_pw) < 4:
+        return JSONResponse({"error": "新密码至少 4 位"}, status_code=400)
+    db_user = get_user(user["username"])
+    if not db_user or not verify_password(old_pw, db_user["password_hash"]):
+        return JSONResponse({"error": "旧密码不正确"}, status_code=400)
+    conn = _db_connect()
+    conn.execute("UPDATE users SET password_hash = ? WHERE username = ?", (hash_password(new_pw), user["username"]))
+    conn.commit()
+    conn.close()
+    run_logger.info(f"[auth] {user['username']} 修改了密码")
+    return {"ok": True}
 
 
 @app.post("/api/admin/delete_room")
@@ -782,14 +955,39 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
 @app.get("/")
-async def root():
-    html_path = static_dir / "index.html"
+async def root(request: Request):
+    """入口：未登录跳登录页，已登录跳工作台。"""
+    if not _require_user(request):
+        return RedirectResponse(url="/login")
+    return RedirectResponse(url="/dashboard")
+
+
+def _html_file(name: str, no_cache: bool = True) -> HTMLResponse:
+    """读取 static 下的页面文件。"""
+    html_path = static_dir / name
     if html_path.exists():
-        return HTMLResponse(
-            html_path.read_text(encoding="utf-8"),
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
-        )
-    return HTMLResponse("<h1>Please create static/index.html</h1>")
+        headers = {"Cache-Control": "no-cache, no-store, must-revalidate"} if no_cache else None
+        return HTMLResponse(html_path.read_text(encoding="utf-8"), headers=headers)
+    return HTMLResponse(f"<h1>Missing static/{name}</h1>")
+
+
+@app.get("/login")
+async def login_page():
+    return _html_file("login.html")
+
+
+@app.get("/dashboard")
+async def dashboard_page(request: Request):
+    if not _require_user(request):
+        return RedirectResponse(url="/login")
+    return _html_file("dashboard.html")
+
+
+@app.get("/chat")
+async def chat_page(request: Request):
+    if not _require_user(request):
+        return RedirectResponse(url="/login")
+    return _html_file("index.html")
 
 
 @app.get("/api/health")
@@ -809,11 +1007,104 @@ async def debug_log(request: Request):
 
 
 @app.post("/api/rooms")
-async def create_room():
-    code = generate_room_code()
+async def create_room(request: Request):
+    """创建房间：需登录，必填 SN + 工单号（型号选填），生成 8 位房间码并绑定业务信息。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    body = await request.json()
+    sn = (body.get("sn") or "").strip()
+    ticket_no = (body.get("ticket_no") or "").strip()
+    machine_model = (body.get("machine_model") or "").strip()
+    if not sn:
+        return JSONResponse({"error": "SN 序列号必填"}, status_code=400)
+    if not ticket_no:
+        return JSONResponse({"error": "工单号必填"}, status_code=400)
+    # 生成唯一 8 位房间码（内存 + 数据库双向查重）
+    code = None
+    for _ in range(50):
+        candidate = generate_room_code()
+        if candidate not in rooms and not room_record_exists(candidate):
+            code = candidate
+            break
+    if not code:
+        return JSONResponse({"error": "房间码生成失败，请重试"}, status_code=500)
     rooms[code] = Room(code)
-    run_logger.info(f"Room created: {code}")
-    return {"room_code": code}
+    try:
+        conn = _db_connect()
+        conn.execute(
+            "INSERT INTO rooms (room_code, sn, ticket_no, machine_model, engineer_username) VALUES (?, ?, ?, ?, ?)",
+            (code, sn, ticket_no, machine_model, user["username"]),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        rooms.pop(code, None)
+        run_logger.error(f"Room create DB error: {e}")
+        return JSONResponse({"error": f"创建失败: {e}"}, status_code=500)
+    run_logger.info(f"Room created: {code} by {user['username']} (SN={sn}, ticket={ticket_no})")
+    return {"room_code": code, "sn": sn, "ticket_no": ticket_no, "machine_model": machine_model}
+
+
+def room_record_exists(room_code: str) -> bool:
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT 1 FROM rooms WHERE room_code = ?", (room_code,)).fetchone()
+        conn.close()
+        return row is not None
+    except Exception:
+        return False
+
+
+@app.get("/api/my_rooms")
+async def my_rooms(request: Request):
+    """当前登录工程师的房间列表（含连接状态）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            "SELECT * FROM rooms WHERE engineer_username = ? ORDER BY created_at DESC LIMIT 100",
+            (user["username"],),
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"my_rooms query error: {e}")
+        rows = []
+    result = []
+    for r in rows:
+        d = dict(r)
+        room = rooms.get(d["room_code"])
+        bridge_online = bool(room and room.bridge_ws is not None)
+        browser_online = bool(room and room.browser_ws is not None)
+        last_seen = d["created_at"]
+        msgs = get_room_messages(d["room_code"], 1)
+        if msgs:
+            last_seen = msgs[-1]["created_at"]
+        result.append({
+            "room_code": d["room_code"],
+            "sn": d["sn"],
+            "ticket_no": d["ticket_no"],
+            "machine_model": d["machine_model"],
+            "engineer_username": d["engineer_username"],
+            "created_at": d["created_at"],
+            "last_seen": last_seen,
+            "bridge_online": bridge_online,
+            "browser_online": browser_online,
+            "status": "连接中" if bridge_online else "已断开",
+        })
+    return {"rooms": result}
+
+
+@app.get("/api/rooms/check/{room_code}")
+async def check_room(request: Request, room_code: str):
+    """校验房间码是否存在（工作台「加入房间」用）。"""
+    if not _require_user(request):
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    code = room_code.strip().upper()
+    exists = room_record_exists(code)
+    return {"room_code": code, "exists": exists}
 
 
 # ============================================================
@@ -821,8 +1112,8 @@ async def create_room():
 # ============================================================
 @app.get("/api/history/{room_code}")
 async def get_history(request: Request, room_code: str, limit: int = 200):
-    """Get chat history for a room from SQLite."""
-    if not _require_admin(request):
+    """Get chat history for a room from SQLite.（登录用户可访问）"""
+    if not _require_user(request):
         return JSONResponse({"error": "未授权"}, status_code=401)
     messages = get_room_messages(room_code, limit)
     return {"room_code": room_code, "messages": messages}
@@ -1351,6 +1642,7 @@ async def run_agent(
 ) -> str:
     messages = [
         {"role": "system", "content": build_system_prompt(room)},
+        *get_recent_context(room.code, user_message),
         {"role": "user", "content": user_message},
     ]
 
@@ -1604,6 +1896,7 @@ async def run_agent_hermes(
         "model": HERMES_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
+            *get_recent_context(room.code, user_message),
             {"role": "user", "content": user_message},
         ],
     }
@@ -1715,10 +2008,14 @@ async def ws_browser(websocket: WebSocket, room_code: str):
 
     room = rooms.get(room_code)
     if not room:
-        # 服务重启后房间字典清空：自动重建，避免用户/桥接器需重新创建房间
+        # 房间必须先在数据库中存在（工作台创建时绑定 SN/工单号）——防止绕过创建限制
+        if not room_record_exists(room_code):
+            await websocket.send_json({"type": "error", "content": "房间不存在。请先在工作台创建房间（需绑定 SN 与工单号），再让桥接器连接。"})
+            await websocket.close()
+            return
         room = Room(room_code)
         rooms[room_code] = room
-        run_logger.info(f"Room auto-recreated (browser): {room_code}")
+        run_logger.info(f"Room re-created from DB (browser): {room_code}")
 
     room.browser_ws = websocket
     run_logger.info(f"[browser] joined room {room_code}")
@@ -1850,10 +2147,14 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 
     room = rooms.get(room_code)
     if not room:
-        # 服务重启后房间字典清空：自动重建，避免用户/桥接器需重新创建房间
+        # 房间必须先在数据库中存在（工作台创建时绑定 SN/工单号）——防止绕过创建限制
+        if not room_record_exists(room_code):
+            await websocket.send_json({"type": "error", "content": "Room not found. Create it from the dashboard first (SN + ticket required)."})
+            await websocket.close()
+            return
         room = Room(room_code)
         rooms[room_code] = room
-        run_logger.info(f"Room auto-recreated (bridge): {room_code}")
+        run_logger.info(f"Room re-created from DB (bridge): {room_code}")
 
     reason = "unknown"  # 断开原因（finally 中记录，需在 try 前初始化）
 

@@ -358,10 +358,7 @@
     </div>
     <div style="display:flex;align-items:center;gap:8px;">
       <button id="auto-approve-btn" title="Tier 2 自动审批：开启后鼠标/键盘等交互操作无需弹窗确认" onclick="toggleAutoApprove()">T2 Auto OFF</button>
-      <select id="brain-select" title="选择 AI 大脑引擎（并存切换试点）" style="padding:4px 6px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;">
-        <option value="deepseek">🧠 DeepSeek</option>
-        <option value="hermes">🧠 Hermes</option>
-      </select>
+      <button id="back-btn" onclick="location.href='/dashboard'" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--border);border-radius:4px;cursor:pointer;" title="返回工作台">← 工作台</button>
       <select id="lang-switcher">
         <option value="zh-CN">简</option>
         <option value="zh-TW">繁</option>
@@ -387,7 +384,7 @@
     <button class="dialog-close" id="close-connect-btn" title="关闭" aria-label="关闭">✕</button>
     <h2 data-i18n="dialog_title">[+] 加入远程诊断</h2>
     <p data-i18n="dialog_subtitle">输入 6 位房间码，或创建一个新房间</p>
-    <input id="room-input" type="text" maxlength="6" placeholder="AB12CD" autocomplete="off">
+    <input id="room-input" type="text" maxlength="8" placeholder="AB12CDEF" autocomplete="off">
     <div class="action-row">
       <button id="create-room-link" data-i18n="dialog_create">创建新房间</button>
       <button id="join-btn" data-i18n="dialog_join">加入房间</button>
@@ -490,7 +487,7 @@ const I18N = {
     input_placeholder: '描述你的电脑问题，例如：帮我检查系统有没有异常',
     room_prefix: '房间: ',
     dialog_title: '[+] 加入远程诊断',
-    dialog_subtitle: '输入 6 位房间码，或创建一个新房间',
+    dialog_subtitle: '输入 8 位房间码，或创建一个新房间',
     dialog_join: '加入房间',
     dialog_create: '创建新房间',
     dialog_instructions: '<strong>使用说明：</strong><br>'
@@ -555,7 +552,7 @@ const I18N = {
     export_tool: '工具',
     export_error: '错误',
     export_system: '系统',
-    alert_room_code: '请输入 6 位房间码',
+    alert_room_code: '请输入 8 位房间码',
     alert_create_fail: '创建房间失败: ',
   },
   'zh-TW': {
@@ -637,7 +634,7 @@ const I18N = {
     export_tool: '工具',
     export_error: '錯誤',
     export_system: '系統',
-    alert_room_code: '請輸入 6 位房間碼',
+    alert_room_code: '請輸入 8 位房間碼',
     alert_create_fail: '建立房間失敗: ',
   },
   'en': {
@@ -719,7 +716,7 @@ const I18N = {
     export_tool: 'Tool',
     export_error: 'Error',
     export_system: 'System',
-    alert_room_code: 'Please enter a 6-digit room code',
+    alert_room_code: 'Please enter an 8-digit room code',
     alert_create_fail: 'Failed to create room: ',
   }
 };
@@ -816,7 +813,6 @@ let reconnectTimer = null;
 const messagesEl = document.getElementById('messages');
 const inputBox = document.getElementById('input-box');
 const sendBtn = document.getElementById('send-btn');
-const brainSelect = document.getElementById('brain-select');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const roomDisplay = document.getElementById('room-display');
@@ -887,6 +883,7 @@ function connect(room) {
     document.getElementById('reconnect-btn').style.display = 'none';
     exportBtn.style.display = 'inline-block';
     addSystemMsg(t('msg_connected'));
+    loadHistory(roomCode);  // 断线重连/刷新后恢复历史对话
     // Sync auto-approve state with server
     ws.send(JSON.stringify({ type: 'auto_approve_toggle', enabled: autoApproveT2 }));
   };
@@ -909,6 +906,24 @@ function connect(room) {
   };
 
   ws.onerror = () => { addErrorMsg(t('msg_ws_failed')); };
+}
+
+// 从 SQLite 拉取该房间历史并渲染（登录用户可访问 /api/history/{room}）
+async function loadHistory(room) {
+  try {
+    const resp = await fetch('/api/history/' + room);
+    if (!resp.ok) { addSystemMsg('(历史加载失败: HTTP ' + resp.status + ')'); return; }
+    const data = await resp.json();
+    messagesEl.innerHTML = '';
+    for (const m of data.messages) {
+      if (m.role === 'user') addUserMessage(m.content);
+      else if (m.role === 'ai') addAiMessage(m.content);
+      else if (m.role === 'system') addSystemMsg(m.content);
+      else if (m.role === 'error') addErrorMsg(m.content);
+      // tool 消息不恢复（工具卡片与实时审批状态耦合，避免混乱）
+    }
+    scrollBottom();
+  } catch (e) { console.error('loadHistory failed', e); }
 }
 
 // 自动重连：指数退避，最多 5 次
@@ -1206,7 +1221,7 @@ function sendMessage() {
   const text = inputBox.value.trim();
   if (!text || !ws || ws.readyState !== WebSocket.OPEN || !bridgeConnected) return;
   addUserMessage(text);
-  ws.send(JSON.stringify({ type: 'chat', content: text, brain: brainSelect.value }));
+  ws.send(JSON.stringify({ type: 'chat', content: text }));  // brain 默认 hermes（服务端）
   inputBox.value = ''; inputBox.style.height = 'auto'; sendBtn.disabled = true;
 }
 
@@ -1221,16 +1236,13 @@ inputBox.addEventListener('input', () => {
 
 joinBtn.addEventListener('click', () => {
   let code = roomInput.value.trim().toUpperCase();
-  if (code.length === 6) { connect(code); }
+  if (code.length === 8) { connect(code); }
   else { alert(t('alert_room_code')); }
 });
 roomInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBtn.click(); });
-createRoomLink.addEventListener('click', async () => {
-  try {
-    const resp = await fetch('/api/rooms', { method: 'POST' });
-    const data = await resp.json();
-    roomInput.value = data.room_code; connect(data.room_code);
-  } catch (err) { alert(t('alert_create_fail') + err.message); }
+createRoomLink.addEventListener('click', () => {
+  // 创建房间已移至工作台（需登录 + 绑定 SN/工单号）
+  location.href = '/dashboard';
 });
 
 langSwitcher.addEventListener('change', () => { applyLang(langSwitcher.value); });
@@ -1285,8 +1297,14 @@ exportBtn.addEventListener('click', () => {
 langSwitcher.value = currentLang;
 applyLang(currentLang);
 updateAutoApproveBtnState();
-overlay.style.display = 'flex';
-roomInput.focus();
+// 从 URL 参数进入房间；无参数则回工作台（创建/加入均在工作台完成）
+const urlParams = new URLSearchParams(location.search);
+const roomFromUrl = (urlParams.get('room') || '').trim().toUpperCase();
+if (roomFromUrl) {
+  connect(roomFromUrl);
+} else {
+  location.href = '/dashboard';
+}
 </script>
 </body>
 </html>

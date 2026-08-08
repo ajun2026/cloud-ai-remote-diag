@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 — 云端 AI 远程运维助手</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
+    --border: #30363d; --text: #e6edf3; --text2: #9da7b3;
+    --info: #58a6ff; --error: #f85149;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #1c2a44 0%, var(--bg) 60%);
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--text);
+  }
+  .login-box {
+    width: 380px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 36px 32px 28px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.45);
+  }
+  .login-box h1 { font-size: 20px; font-weight: 600; text-align: center; color: var(--info); margin-bottom: 4px; }
+  .login-box .sub { font-size: 13px; color: var(--text2); text-align: center; margin-bottom: 26px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+  .field input {
+    width: 100%; padding: 10px 12px; background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; font-size: 14px; outline: none;
+  }
+  .field input:focus { border-color: var(--info); }
+  .btn {
+    width: 100%; padding: 11px; background: var(--info); color: #fff; border: none;
+    border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 6px;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .error { display: none; background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.4);
+    color: var(--error); font-size: 13px; padding: 8px 10px; border-radius: 6px; margin-bottom: 14px; }
+  .foot { margin-top: 20px; font-size: 12px; color: var(--text2); text-align: center; line-height: 1.8; }
+</style>
+</head>
+<body>
+  <div class="login-box">
+    <h1>云端 AI 远程运维助手</h1>
+    <div class="sub">联想售后电脑问题远程诊断 · 授权用户登录</div>
+    <div class="error" id="error-box"></div>
+    <div class="field">
+      <label>工号</label>
+      <input id="username" type="text" placeholder="请输入工号" autocomplete="username" autofocus>
+    </div>
+    <div class="field">
+      <label>密码</label>
+      <input id="password" type="password" placeholder="请输入密码" autocomplete="current-password">
+    </div>
+    <button class="btn" id="login-btn">登 录</button>
+    <div class="foot">如需账号，请联系管理员开通</div>
+  </div>
+
+<script>
+const usernameInput = document.getElementById('username');
+const passwordInput = document.getElementById('password');
+const loginBtn = document.getElementById('login-btn');
+const errorBox = document.getElementById('error-box');
+
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.style.display = 'block';
+}
+function hideError() { errorBox.style.display = 'none'; }
+
+async function doLogin() {
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value;
+  if (!username || !password) { showError('请输入工号和密码'); return; }
+  loginBtn.disabled = true;
+  loginBtn.textContent = '登录中...';
+  hideError();
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showError(data.error || '登录失败'); loginBtn.disabled = false; loginBtn.textContent = '登 录'; return; }
+    location.href = '/dashboard';
+  } catch (e) {
+    showError('网络错误: ' + e.message);
+    loginBtn.disabled = false;
+    loginBtn.textContent = '登 录';
+  }
+}
+
+loginBtn.addEventListener('click', doLogin);
+usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') passwordInput.focus(); });
+passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+// 已登录直接进工作台
+fetch('/api/auth/me').then(r => r.json()).then(d => {
+  if (!d.error) location.href = '/dashboard';
+}).catch(() => {});
+</script>
+</body>
+</html>

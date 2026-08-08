@@ -1,0 +1,98 @@
+#!/bin/bash
+# ============================================================
+# 云端AI远程运维助手 · Linux 桥接器一键安装脚本
+#
+# 用法:
+#   curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash
+#
+# 功能:
+#   1. 自动检测 CPU 架构 (x86_64 / ARM64 / 龙芯)
+#   2. 下载对应架构的 bridge
+#   3. 安装到 /usr/local/bin/bridge
+#   4. 提示输入房间码并启动
+#
+# 设计定位: 一次性使用, 重启后手动启动即可, 不驻留后台
+# ============================================================
+
+SERVER="http://106.54.193.9:8000"
+INSTALL_DIR="/usr/local/bin"
+
+# 颜色
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+
+echo "=============================================="
+echo " 云端AI远程运维助手 · Linux 桥接器安装"
+echo "=============================================="
+
+# ---------- 1. 检测架构 ----------
+echo -e "${YELLOW}[1/4]${NC} 检测系统架构..."
+ARCH="$(uname -m)"
+case "$ARCH" in
+    x86_64|amd64)
+        BIN="bridge-linux-amd64"
+        echo "  检测到 x86_64 架构 → 选择 $BIN"
+        ;;
+    aarch64|arm64)
+        BIN="bridge-linux-arm64"
+        echo "  检测到 ARM64 架构 → 选择 $BIN"
+        ;;
+    loongarch64)
+        BIN="bridge-linux-loong64"
+        echo "  检测到 LoongArch 架构 → 选择 $BIN"
+        ;;
+    *)
+        echo -e "${RED}  不支持的架构: $ARCH${NC}"
+        echo "  目前支持: x86_64 / ARM64 / LoongArch"
+        exit 1
+        ;;
+esac
+
+# ---------- 2. 下载 ----------
+echo -e "${YELLOW}[2/4]${NC} 下载 $BIN ..."
+URL="$SERVER/static/$BIN"
+TMP_FILE="/tmp/$BIN"
+if command -v curl >/dev/null 2>&1; then
+    curl -sL -o "$TMP_FILE" "$URL"
+elif command -v wget >/dev/null 2>&1; then
+    wget -q -O "$TMP_FILE" "$URL"
+else
+    echo -e "${RED}  未找到 curl 或 wget, 请先安装: apt install curl (或 yum install curl)${NC}"
+    exit 1
+fi
+
+# 校验下载成功 (非 HTML 错误页)
+if ! file "$TMP_FILE" 2>/dev/null | grep -q "ELF"; then
+    echo -e "${RED}  下载失败, 请检查网络或服务器地址${NC}"
+    exit 1
+fi
+
+# ---------- 3. 安装 ----------
+echo -e "${YELLOW}[3/4]${NC} 安装到 $INSTALL_DIR/bridge ..."
+chmod +x "$TMP_FILE"
+if [ -w "$INSTALL_DIR" ]; then
+    mv "$TMP_FILE" "$INSTALL_DIR/bridge"
+else
+    echo "  $INSTALL_DIR 需要 root 权限, 使用 sudo 安装..."
+    if command -v sudo >/dev/null 2>&1; then
+        sudo mv "$TMP_FILE" "$INSTALL_DIR/bridge"
+    else
+        echo -e "${RED}  无法写入 $INSTALL_DIR, 请以 root 运行: sudo bash${NC}"
+        exit 1
+    fi
+fi
+echo -e "${GREEN}  已安装: $INSTALL_DIR/bridge ($(ls -la "$INSTALL_DIR/bridge" | awk '{print $5}') bytes)${NC}"
+
+# ---------- 4. 启动 ----------
+echo -e "${YELLOW}[4/4]${NC} 启动桥接器..."
+echo "----------------------------------------------"
+echo -e "${GREEN}安装完成!${NC}"
+echo ""
+echo "  运行方式(一次性使用, 重启后手动启动即可):"
+echo "   bridge"
+echo ""
+echo "  或指定服务器和房间码:"
+echo "   bridge -server ws://106.54.193.9:8000 -room 房间码"
+echo ""
+echo "  现在为你启动交互模式, 请输入房间码:"
+echo "----------------------------------------------"
+exec "$INSTALL_DIR/bridge"
