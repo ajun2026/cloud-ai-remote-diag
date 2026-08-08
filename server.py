@@ -2122,6 +2122,184 @@ async def api_bridge_execute(request: Request):
 
 
 # ============================================================
+# 工具模式 — 非 AI 工具集合（SN/MTM 刷写，ThinkStation 专用）
+# ============================================================
+SNTOOLS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sntools")
+
+# 机型 → 工具链路由表（来源：BIOS_ANALYSIS_REPORT.md 6.8，31 条路由）
+# amide: AMIDEWINx64.exe 所在子目录; drv: amigendrv64.sys 所在子目录
+SNMTM_ROUTE = {
+    "ThinkStation P2 Tower":      {"amide": "v1", "drv": "v1"},
+    "ThinkStation P3 Tower":      {"amide": "v1", "drv": "v1"},
+    "ThinkStation P3 Ultra":      {"amide": "v1", "drv": "v1"},
+    "ThinkStation P340 Tower":    {"amide": "v1", "drv": "v1"},
+    "ThinkStation P340 Tiny":     {"amide": "v1", "drv": "v1"},
+    "ThinkStation P350":          {"amide": "v1", "drv": "v1"},
+    "ThinkStation P360":          {"amide": "v1", "drv": "v1"},
+    "ThinkStation P360 Tiny":     {"amide": "v1", "drv": "v1"},
+    "ThinkStation P360 Ultra":    {"amide": "v1", "drv": "v1"},
+    "ThinkStation P5":            {"amide": "v1", "drv": "v1"},
+    "ThinkStation P5 Gen2":       {"amide": "v1", "drv": "v1"},
+    "ThinkStation P620":          {"amide": "v1", "drv": "v1"},
+    "ThinkStation P720 (PRC)":    {"amide": "v1", "drv": "v1"},
+    "ThinkStation P720 (WW)":     {"amide": "v1", "drv": "v1"},
+    "ThinkStation P920 (PRC)":    {"amide": "v1", "drv": "v1"},
+    "ThinkStation P920 (WW)":     {"amide": "v1", "drv": "v1"},
+    "ThinkStation PX":            {"amide": "v1", "drv": "v1"},
+    "ThinkStation P2 Tower Gen2": {"amide": "v2", "drv": "v2"},
+    "ThinkStation P3 Tower Gen2": {"amide": "v2", "drv": "v2"},
+    "ThinkStation P3 Tiny":       {"amide": "v2", "drv": "v2"},
+    "ThinkStation P3 Tiny Gen2":  {"amide": "v2", "drv": "v2"},
+    "ThinkStation P3 Ultra Gen2": {"amide": "v2", "drv": "v2"},
+    "ThinkStation P348":          {"amide": "v2", "drv": "v3"},
+    "ThinkStation P358 Tower":    {"amide": "v2", "drv": "v3"},
+    "ThinkStation P8":            {"amide": "v2", "drv": "p8"},
+    "ThinkStation P520 (PRC)":    {"amide": "v3", "drv": "v3"},
+    "ThinkStation P520 (WW)":     {"amide": "v3", "drv": "v3"},
+    "ThinkStation P520c (PRC)":   {"amide": "v3", "drv": "v3"},
+    "ThinkStation P520c (WW)":    {"amide": "v3", "drv": "v3"},
+    "ThinkStation P7":            {"amide": "v3", "drv": "v3"},
+    "ThinkStation P350 Tiny":     {"amide": "v4", "drv": "v4"},
+}
+
+# 刷写目标目录（客户机上的临时工作目录，工具释放到此并执行）
+SNMTM_TMP_DIR = r"C:\Windows\Temp\sntools"
+
+
+@app.get("/api/tools/snmtm/models")
+async def tools_snmtm_models(request: Request):
+    """返回机型路由表（前端下拉选择用），需登录。"""
+    if not _require_user(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return {"ok": True, "models": [
+        {"name": name, "amide": route["amide"], "drv": route["drv"]}
+        for name, route in SNMTM_ROUTE.items()
+    ]}
+
+
+def _validate_snmtm_value(value: str, field: str) -> Optional[str]:
+    """校验 SN/MTM 只含字母数字/连字符，返回错误信息或 None。"""
+    value = (value or "").strip()
+    if not value:
+        return f"{field} 不能为空"
+    if not re.match(r"^[A-Za-z0-9\-]{4,32}$", value):
+        return f"{field} 格式不正确（仅允许字母、数字、连字符，4-32 位）"
+    return None
+
+
+@app.post("/api/tools/snmtm/flash")
+async def tools_snmtm_flash(request: Request):
+    """SN/MTM 刷写：推工具 → 执行 /SS /SP → WMI 回读校验。需登录。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    model = str(body.get("model", "")).strip()
+    sn = str(body.get("sn", "")).strip()
+    mtm = str(body.get("mtm", "")).strip()
+
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    if model not in SNMTM_ROUTE:
+        return JSONResponse({"error": f"未知机型: {model}"}, status_code=400)
+    err = _validate_snmtm_value(sn, "SN") or _validate_snmtm_value(mtm, "MTM")
+    if err:
+        return JSONResponse({"error": err}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    route = SNMTM_ROUTE[model]
+    amide_path = os.path.join(SNTOOLS_DIR, route["amide"], "AMIDEWINx64.exe")
+    drv_path = os.path.join(SNTOOLS_DIR, route["drv"], "amigendrv64.sys")
+
+    if not os.path.exists(amide_path) or not os.path.exists(drv_path):
+        return JSONResponse({"error": f"服务器缺少工具文件: {amide_path} / {drv_path}"}, status_code=500)
+
+    def _b64(path: str) -> str:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+
+    steps = []  # 执行日志
+    def _log(msg: str):
+        steps.append(msg)
+        run_logger.info(f"[{room_code}] SNMTM: {msg}")
+
+    try:
+        # 1. 推送 AMIDEWINx64.exe
+        _log(f"推送 AMIDEWINx64.exe ({route['amide']}) ...")
+        r1 = await execute_bridge_command(room, "FileUpload",
+                                          {"path": SNMTM_TMP_DIR + r"\AMIDEWINx64.exe",
+                                           "data_base64": _b64(amide_path)},
+                                          f"sntm_amide_{int(time.time())}", tier=3)
+        _log(f"推送结果: {r1[:120]}")
+
+        # 2. 推送 amigendrv64.sys
+        _log(f"推送 amigendrv64.sys ({route['drv']}) ...")
+        r2 = await execute_bridge_command(room, "FileUpload",
+                                          {"path": SNMTM_TMP_DIR + r"\amigendrv64.sys",
+                                           "data_base64": _b64(drv_path)},
+                                          f"sntm_drv_{int(time.time())}", tier=3)
+        _log(f"推送结果: {r2[:120]}")
+
+        # 3. 执行 /SS 写 SN（& 调用 + 双引号参数；先切到工作目录保证驱动同目录加载）
+        cmd_sn = f'cd /d {SNMTM_TMP_DIR} && AMIDEWINx64.exe /SS "{sn}"'
+        _log(f"写入 SN: AMIDEWINx64.exe /SS \"{sn}\"")
+        r3 = await execute_bridge_command(room, "RunCommand",
+                                          {"command": cmd_sn, "timeout": 60, "cwd": ""},
+                                          f"sntm_ss_{int(time.time())}", tier=3)
+        _log(f"SN 写入输出: {r3[:300]}")
+
+        # 4. 执行 /SP 写 MTM
+        cmd_sp = f'cd /d {SNMTM_TMP_DIR} && AMIDEWINx64.exe /SP "{mtm}"'
+        _log(f"写入 MTM: AMIDEWINx64.exe /SP \"{mtm}\"")
+        r4 = await execute_bridge_command(room, "RunCommand",
+                                          {"command": cmd_sp, "timeout": 60, "cwd": ""},
+                                          f"sntm_sp_{int(time.time())}", tier=3)
+        _log(f"MTM 写入输出: {r4[:300]}")
+
+        # 5. WMI 回读校验
+        verify_cmd = (
+            "$p = Get-CimInstance Win32_ComputerSystemProduct; "
+            "$b = Get-CimInstance Win32_BIOS; "
+            "Write-Output ('SN=' + $p.IdentifyingNumber + '|MTM=' + $p.Name + '|BIOS_SN=' + $b.SerialNumber)"
+        )
+        _log("WMI 回读校验中 ...")
+        r5 = await execute_bridge_command(room, "RunCommand",
+                                          {"command": verify_cmd, "timeout": 30, "cwd": ""},
+                                          f"sntm_verify_{int(time.time())}", tier=1)
+        _log(f"校验输出: {r5[:300]}")
+
+        # 审计留痕
+        save_approval(room_code, "SNMTM_Flash", {"model": model, "sn": sn, "mtm": mtm}, 3, 1)
+        save_message(room_code, "tool",
+                     f"[SN/MTM 刷写] 机型={model} SN={sn} MTM={mtm} 用户={user.get('username')}",
+                     "SNMTM_Flash", 3)
+
+        # 判定：校验输出里是否出现写入的 SN/MTM
+        verify_ok = (sn.upper() in r5.upper() and mtm.upper() in r5.upper())
+        status = "ok" if verify_ok else "warning"
+        return JSONResponse({
+            "status": status,
+            "model": model, "sn": sn, "mtm": mtm,
+            "steps": steps,
+            "verify_output": r5[:2000],
+            "hint": "" if verify_ok else "写入命令已执行，但 WMI 回读未匹配到新值——可能原因：Supervisor 密码/BIOS 写保护/驱动被安全软件拦截。请重启后再次确认，或到 BIOS 里查看。",
+        })
+
+    except Exception as e:
+        run_logger.error(f"[{room_code}] SNMTM flash error: {e}", exc_info=True)
+        return JSONResponse({"status": "error", "error": str(e), "steps": steps}, status_code=500)
+
+
+# ============================================================
 # WebSocket endpoints
 # ============================================================
 @app.websocket("/ws/browser/{room_code}")

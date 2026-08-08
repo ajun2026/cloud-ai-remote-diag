@@ -23,3 +23,6 @@ logs/
 static/*.exe
 static/*.exe.tmp
 static/bridge-linux-*
+
+# Backup
+.git-backup-*/

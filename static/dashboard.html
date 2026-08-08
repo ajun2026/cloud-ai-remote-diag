@@ -199,6 +199,23 @@
   .msg-box { display: none; padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
   .msg-box.err { display: block; background: rgba(248,81,73,.1); border: 1px solid rgba(248,81,73,.35); color: var(--error); }
   .msg-box.ok { display: block; background: rgba(63,185,80,.1); border: 1px solid rgba(63,185,80,.35); color: var(--success); }
+  .msg-box.info { display: block; background: rgba(52,120,246,.1); border: 1px solid rgba(52,120,246,.35); color: var(--info); }
+  .msg-box.warn { display: block; background: rgba(255,165,0,.1); border: 1px solid rgba(255,165,0,.4); color: var(--warn); }
+
+  /* ===== 工具模式 ===== */
+  .tool-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .tool-card-title { font-size: 15px; font-weight: 600; }
+  .badge-write { background: rgba(248,81,73,.12); color: var(--error); border: 1px solid rgba(248,81,73,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .tool-card-desc { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
+  .field-hint { font-size: 11px; color: var(--text2); margin-top: 4px; }
+  .tool-warn { font-size: 12px; color: var(--warn); border: 1px solid rgba(255,165,0,.4); background: rgba(255,165,0,.08); padding: 8px 10px; border-radius: 6px; margin: 12px 0; }
+  .tool-actions { margin: 12px 0; }
+  .btn-danger { background: var(--error); color: #fff; }
+  .btn-danger:hover { filter: brightness(1.1); }
+  .tool-steps { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface); margin-top: 12px; max-height: 320px; overflow-y: auto; }
+  .tool-step { font-size: 12px; color: var(--text2); font-family: "Consolas", monospace; padding: 3px 0; border-bottom: 1px dashed var(--border); white-space: pre-wrap; word-break: break-all; }
+  .tool-step-verify { color: var(--success); }
+  .tool-hint { font-size: 12px; color: var(--warn); margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(255,165,0,.4); background: rgba(255,165,0,.08); border-radius: 6px; }
   .toast {
     position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 200;
     background: var(--surface2); color: var(--text); border: 1px solid var(--border);
@@ -237,6 +254,7 @@
         <div class="nav-item" onclick="switchTab('create')"><span data-i18n="nav_create">➕ 创建房间</span></div>
         <div class="nav-item" onclick="switchTab('join')"><span data-i18n="nav_join">⇄ 加入房间</span></div>
         <div class="nav-item" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
+        <div class="nav-item" onclick="switchTab('tools')"><span data-i18n="nav_tools">🔧 工具模式</span></div>
         <div class="nav-item" onclick="switchTab('password')"><span data-i18n="nav_password">🔒 修改密码</span></div>
         <div class="nav-divider"></div>
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
@@ -327,6 +345,41 @@
         </div>
       </section>
 
+      <!-- 工具模式（非 AI 工具集合） -->
+      <section class="page" id="page-tools">
+        <div class="page-title">🔧 <span data-i18n="nav_tools">工具模式</span></div>
+        <div class="page-desc" data-i18n="tools_desc">无需 AI 对话的本地工具集合，通过桥接器远程推送到客户机执行</div>
+
+        <div class="panel">
+          <div class="tool-card-head">
+            <div class="tool-card-title">💾 SN/MTM 刷写</div>
+            <span class="badge badge-write" data-i18n="tools_write">写入类 · 需审批</span>
+          </div>
+          <div class="tool-card-desc" data-i18n="snmtm_desc">ThinkStation 工作站更换主板后，将正确的序列号(SN)与机型型号(MTM)写入 BIOS DMI 区</div>
+          <div class="msg-box" id="sntm-msg"></div>
+
+          <div class="field">
+            <label data-i18n="lbl_tool_room">目标房间（需桥接器在线）</label>
+            <select id="sntm-room" onchange="sntmRefreshRoom()"></select>
+          </div>
+          <div class="field">
+            <label data-i18n="lbl_tool_model">机型型号</label>
+            <select id="sntm-model"></select>
+            <div class="field-hint" id="sntm-route-hint"></div>
+          </div>
+          <div class="field"><label data-i18n="lbl_tool_sn">序列号 SN</label><input id="sntm-sn" maxlength="32" data-i18n-placeholder="ph_tool_sn" placeholder="如 PC22XGDR"></div>
+          <div class="field"><label data-i18n="lbl_tool_mtm">机型型号 MTM</label><input id="sntm-mtm" maxlength="32" data-i18n-placeholder="ph_tool_mtm" placeholder="如 30E1S5NV00"></div>
+
+          <div class="tool-warn" data-i18n="snmtm_warn">⚠ 写入后无法撤销，请仔细核对 SN / MTM 再点击刷写</div>
+
+          <div class="tool-actions">
+            <button class="btn-main btn-danger" id="sntm-btn" data-i18n="btn_snmtm_flash" onclick="snmtmFlash()">✍️ 刷写 SN/MTM</button>
+          </div>
+
+          <div class="tool-steps" id="sntm-steps" style="display:none;"></div>
+        </div>
+      </section>
+
       <!-- 修改密码 -->
       <section class="page" id="page-password">
         <div class="page-title">🔒 <span data-i18n="nav_password">修改密码</span></div>
@@ -390,7 +443,21 @@
 const I18N = {
   'zh-CN': {
     nav_workorders: '我的工单', nav_chat: '对话', nav_create: '创建房间', nav_join: '加入房间',
-    nav_download: '下载桥接器', nav_password: '修改密码', nav_users: '账号管理', nav_admin: '管理后台',
+    nav_download: '下载桥接器', nav_tools: '工具模式', nav_password: '修改密码', nav_users: '账号管理', nav_admin: '管理后台',
+    tools_desc: '无需 AI 对话的本地工具集合，通过桥接器远程推送到客户机执行',
+    tools_write: '写入类 · 需审批',
+    snmtm_desc: 'ThinkStation 工作站更换主板后，将正确的序列号(SN)与机型型号(MTM)写入 BIOS DMI 区',
+    lbl_tool_room: '目标房间（需桥接器在线）', lbl_tool_model: '机型型号',
+    lbl_tool_sn: '序列号 SN', lbl_tool_mtm: '机型型号 MTM',
+    ph_tool_sn: '如 PC22XGDR', ph_tool_mtm: '如 30E1S5NV00',
+    snmtm_warn: '⚠ 写入后无法撤销，请仔细核对 SN / MTM 再点击刷写',
+    btn_snmtm_flash: '✍️ 刷写 SN/MTM',
+    sntm_no_room: '暂无可用的在线房间。请先在「我的工单」/「创建房间」让客户机桥接器上线',
+    need_model: '请选择机型型号',
+    snmtm_running: '刷写执行中，请稍候（推送工具 → 写入 SN/MTM → 回读校验）...',
+    snmtm_verify_label: '回读校验:',
+    snmtm_ok: '刷写成功，WMI 回读一致。建议重启后进入 BIOS 二次确认',
+    snmtm_warn_verify: '写入命令已执行，但回读校验未完全匹配',
     logout: '退出登录',
     wo_desc: '当前账号处理过的诊断房间',
     search_ph: '按 SN / 工单号 / 型号 / 房间码搜索',
@@ -446,7 +513,21 @@ const I18N = {
   },
   'zh-TW': {
     nav_workorders: '我的工單', nav_chat: '對話', nav_create: '創建房間', nav_join: '加入房間',
-    nav_download: '下載橋接器', nav_password: '修改密碼', nav_users: '帳號管理', nav_admin: '管理後台',
+    nav_download: '下載橋接器', nav_tools: '工具模式', nav_password: '修改密碼', nav_users: '帳號管理', nav_admin: '管理後台',
+    tools_desc: '無需 AI 對話的本地工具集合，通過橋接器遠程推送到客戶機執行',
+    tools_write: '寫入類 · 需審批',
+    snmtm_desc: 'ThinkStation 工作站更換主板後，將正確的序號(SN)與機型型號(MTM)寫入 BIOS DMI 區',
+    lbl_tool_room: '目標房間（需橋接器在線）', lbl_tool_model: '機型型號',
+    lbl_tool_sn: '序號 SN', lbl_tool_mtm: '機型型號 MTM',
+    ph_tool_sn: '如 PC22XGDR', ph_tool_mtm: '如 30E1S5NV00',
+    snmtm_warn: '⚠ 寫入後無法撤銷，請仔細核對 SN / MTM 再點擊刷寫',
+    btn_snmtm_flash: '✍️ 刷寫 SN/MTM',
+    sntm_no_room: '暫無可用的在線房間。請先在「我的工單」/「創建房間」讓客戶機橋接器上線',
+    need_model: '請選擇機型型號',
+    snmtm_running: '刷寫執行中，請稍候（推送工具 → 寫入 SN/MTM → 回讀校驗）...',
+    snmtm_verify_label: '回讀校驗:',
+    snmtm_ok: '刷寫成功，WMI 回讀一致。建議重啟後進入 BIOS 二次確認',
+    snmtm_warn_verify: '寫入命令已執行，但回讀校驗未完全匹配',
     logout: '退出登錄',
     wo_desc: '當前帳號處理過的診斷房間',
     search_ph: '按 SN / 工單號 / 型號 / 房間碼搜索',
@@ -502,7 +583,21 @@ const I18N = {
   },
   'en': {
     nav_workorders: 'Work Orders', nav_chat: 'Chat', nav_create: 'Create Room', nav_join: 'Join Room',
-    nav_download: 'Download Bridge', nav_password: 'Change Password', nav_users: 'Accounts', nav_admin: 'Admin Console',
+    nav_download: 'Download Bridge', nav_tools: 'Tool Mode', nav_password: 'Change Password', nav_users: 'Accounts', nav_admin: 'Admin Console',
+    tools_desc: 'Local tool collection without AI chat — pushed to the client PC via the bridge',
+    tools_write: 'Write · Approval',
+    snmtm_desc: 'For ThinkStation workstations after motherboard replacement: write the correct Serial Number (SN) and Machine Type Model (MTM) into the BIOS DMI area',
+    lbl_tool_room: 'Target Room (bridge online required)', lbl_tool_model: 'Machine Model',
+    lbl_tool_sn: 'Serial Number (SN)', lbl_tool_mtm: 'Machine Type Model (MTM)',
+    ph_tool_sn: 'e.g. PC22XGDR', ph_tool_mtm: 'e.g. 30E1S5NV00',
+    snmtm_warn: '⚠ This cannot be undone. Double-check SN / MTM before flashing',
+    btn_snmtm_flash: '✍️ Flash SN/MTM',
+    sntm_no_room: 'No online rooms available. Start the bridge on the client PC from "Work Orders" / "Create Room" first',
+    need_model: 'Please select a machine model',
+    snmtm_running: 'Flashing in progress (push tools → write SN/MTM → verify)...',
+    snmtm_verify_label: 'Verify:',
+    snmtm_ok: 'Flash succeeded, WMI read-back matches. Reboot and confirm in BIOS',
+    snmtm_warn_verify: 'Write executed but read-back did not fully match',
     logout: 'Logout',
     wo_desc: 'Diagnosis rooms handled by this account',
     search_ph: 'Search by SN / ticket / model / room code',
@@ -595,6 +690,7 @@ function switchTab(name) {
   if (nav) nav.classList.add('active');
   if (name === 'workorders' && !allRooms.length) loadRooms();
   if (name === 'users') loadUsers();
+  if (name === 'tools') initTools();
 }
 
 // 打开对话（iframe 加载 /chat?room=XXX，不跳页）
@@ -923,6 +1019,115 @@ async function exportRoom(room) {
     URL.revokeObjectURL(url);
     showToast(t('export_ok'));
   } catch (e) { showToast(t('net_err') + ': ' + e.message); }
+}
+
+// ===== 工具模式（SN/MTM 刷写） =====
+let snmtmModels = [];
+let snmtmLoading = false;
+
+async function initTools() {
+  const msg = document.getElementById('sntm-msg');
+  msg.className = 'msg-box';
+  // 房间下拉（取在线房间）
+  const roomSel = document.getElementById('sntm-room');
+  const online = allRooms.filter(r => r.bridge_online);
+  if (!online.length) {
+    roomSel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    roomSel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+  // 机型下拉
+  try {
+    const resp = await fetch('/api/tools/snmtm/models');
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || t('load_fail'));
+    snmtmModels = data.models || [];
+    document.getElementById('sntm-model').innerHTML = snmtmModels.map(m =>
+      '<option value="' + m.name + '">' + m.name + '</option>'
+    ).join('');
+    sntmRefreshRoom();
+    sntmRouteHint();
+  } catch (e) {
+    msg.textContent = t('load_fail') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+}
+
+// 根据房间的 machine_model 预选机型
+function sntmRefreshRoom() {
+  const roomCode = document.getElementById('sntm-room').value;
+  const room = allRooms.find(r => r.room_code === roomCode);
+  const model = room && room.machine_model ? room.machine_model.trim() : '';
+  const sel = document.getElementById('sntm-model');
+  if (model) {
+    const found = snmtmModels.find(m => m.name === model);
+    if (found) { sel.value = model; }
+  }
+  sntmRouteHint();
+}
+
+function sntmRouteHint() {
+  const model = document.getElementById('sntm-model').value;
+  const m = snmtmModels.find(x => x.name === model);
+  document.getElementById('sntm-route-hint').textContent = m
+    ? '工具链: AMIDEWIN ' + m.amide.toUpperCase() + ' + 驱动 ' + m.drv.toUpperCase()
+    : '';
+}
+
+async function snmtmFlash() {
+  const msg = document.getElementById('sntm-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('sntm-room').value;
+  const model = document.getElementById('sntm-model').value;
+  const sn = document.getElementById('sntm-sn').value.trim();
+  const mtm = document.getElementById('sntm-mtm').value.trim();
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  if (!model) { msg.textContent = t('need_model'); msg.className = 'msg-box err'; return; }
+  if (!sn) { msg.textContent = t('need_sn'); msg.className = 'msg-box err'; return; }
+  if (!mtm) { msg.textContent = t('need_ticket'); msg.className = 'msg-box err'; return; }
+
+  // 二次确认（防呆）
+  if (!confirm('⚠ 确认写入\n\n机型: ' + model + '\nSN : ' + sn + '\nMTM: ' + mtm + '\n\n写入后无法撤销，确认无误？')) return;
+
+  const btn = document.getElementById('sntm-btn');
+  btn.disabled = true;
+  snmtmLoading = true;
+  msg.textContent = t('snmtm_running');
+  msg.className = 'msg-box info';
+  const stepsBox = document.getElementById('sntm-steps');
+  stepsBox.style.display = 'block';
+  stepsBox.innerHTML = '<div class="empty">' + t('loading') + '</div>';
+  try {
+    const resp = await fetch('/api/tools/snmtm/flash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room, model, sn, mtm }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; stepsBox.innerHTML = ''; return; }
+    // 渲染步骤日志
+    const steps = data.steps || [];
+    stepsBox.innerHTML = steps.map(s => '<div class="tool-step">' + escapeHtml(s) + '</div>').join('')
+      + '<div class="tool-step tool-step-verify">' + escapeHtml(t('snmtm_verify_label')) + ' ' + escapeHtml(data.verify_output || '') + '</div>';
+    if (data.status === 'ok') {
+      msg.textContent = '✅ ' + t('snmtm_ok');
+      msg.className = 'msg-box ok';
+    } else if (data.status === 'warning') {
+      msg.textContent = '⚠ ' + t('snmtm_warn_verify');
+      msg.className = 'msg-box warn';
+      if (data.hint) { const hint = document.createElement('div'); hint.className = 'tool-hint'; hint.textContent = data.hint; stepsBox.appendChild(hint); }
+    } else {
+      msg.textContent = data.error || t('op_fail');
+      msg.className = 'msg-box err';
+    }
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+  snmtmLoading = false;
 }
 
 // ===== 工具 =====
