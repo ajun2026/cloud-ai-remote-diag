@@ -86,6 +86,16 @@ def _db_connect():
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
+
+def _ensure_column(conn, table: str, column: str, ddl: str):
+    """老库迁移：列不存在时补上。"""
+    try:
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+    except Exception as e:
+        run_logger.error(f"ensure_column {table}.{column} failed: {e}")
+
 def init_db():
     conn = _db_connect()
     conn.execute("""
@@ -120,9 +130,12 @@ def init_db():
             name TEXT NOT NULL DEFAULT '',        -- 姓名
             password_hash TEXT NOT NULL,          -- 密码哈希（salt$hash）
             role TEXT NOT NULL DEFAULT 'engineer', -- admin | engineer
+            enabled INTEGER NOT NULL DEFAULT 1,   -- 1=启用 0=停用
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # 老库迁移：补 enabled 列
+    _ensure_column(conn, "users", "enabled", "enabled INTEGER NOT NULL DEFAULT 1")
     # 房间业务信息表（房间码 + SN + 工单号 + 型号 + 工程师 + 创建时间）
     conn.execute("""
         CREATE TABLE IF NOT EXISTS rooms (
@@ -870,6 +883,8 @@ async def user_login(request: Request):
     user = get_user(username)
     if not user or not verify_password(password, user["password_hash"]):
         return JSONResponse({"error": "用户名或密码错误"}, status_code=401)
+    if not user.get("enabled", 1):
+        return JSONResponse({"error": "账号已停用，请联系管理员"}, status_code=403)
     resp = JSONResponse({"ok": True, "username": user["username"], "name": user["name"], "role": user["role"]})
     _set_user_cookie(resp, user["username"], user["role"])
     run_logger.info(f"[auth] {username} 登录成功")
@@ -912,6 +927,97 @@ async def change_password(request: Request):
     conn.close()
     run_logger.info(f"[auth] {user['username']} 修改了密码")
     return {"ok": True}
+
+
+# ============================================================
+# 管理员 — 用户管理（创建/停用/重置密码，仅 role=admin）
+# ============================================================
+def _require_admin_user(request: Request) -> Optional[dict]:
+    """校验当前登录用户是管理员，返回用户信息或 None。"""
+    user = _require_user(request)
+    if user and user.get("role") == "admin":
+        return user
+    return None
+
+
+@app.get("/api/admin/users")
+async def admin_list_users(request: Request):
+    if not _require_admin_user(request):
+        return JSONResponse({"error": "未授权"}, status_code=401)
+    conn = _db_connect()
+    rows = conn.execute(
+        "SELECT id, username, name, role, enabled, created_at FROM users ORDER BY id"
+    ).fetchall()
+    conn.close()
+    return {"users": [dict(r) for r in rows]}
+
+
+@app.post("/api/admin/users")
+async def admin_create_user(request: Request):
+    admin = _require_admin_user(request)
+    if not admin:
+        return JSONResponse({"error": "未授权"}, status_code=401)
+    body = await request.json()
+    username = (body.get("username") or "").strip()
+    name = (body.get("name") or "").strip()
+    role = body.get("role") or "engineer"
+    password = body.get("password") or ""
+    if not username:
+        return JSONResponse({"error": "工号必填"}, status_code=400)
+    if role not in ("admin", "engineer"):
+        role = "engineer"
+    if len(password) < 4:
+        return JSONResponse({"error": "初始密码至少 4 位"}, status_code=400)
+    if get_user(username):
+        return JSONResponse({"error": f"工号 {username} 已存在"}, status_code=400)
+    conn = _db_connect()
+    conn.execute(
+        "INSERT INTO users (username, name, password_hash, role) VALUES (?, ?, ?, ?)",
+        (username, name, hash_password(password), role),
+    )
+    conn.commit()
+    conn.close()
+    run_logger.info(f"[admin] {admin['username']} 创建账号 {username} ({role})")
+    return {"ok": True, "username": username}
+
+
+@app.post("/api/admin/users/{username}/toggle")
+async def admin_toggle_user(request: Request, username: str):
+    admin = _require_admin_user(request)
+    if not admin:
+        return JSONResponse({"error": "未授权"}, status_code=401)
+    if username == admin["username"]:
+        return JSONResponse({"error": "不能停用自己的账号"}, status_code=400)
+    user = get_user(username)
+    if not user:
+        return JSONResponse({"error": "用户不存在"}, status_code=404)
+    new_enabled = 0 if user.get("enabled", 1) else 1
+    conn = _db_connect()
+    conn.execute("UPDATE users SET enabled = ? WHERE username = ?", (new_enabled, username))
+    conn.commit()
+    conn.close()
+    run_logger.info(f"[admin] {admin['username']} {'停用' if new_enabled == 0 else '启用'} 账号 {username}")
+    return {"ok": True, "username": username, "enabled": new_enabled}
+
+
+@app.post("/api/admin/users/{username}/reset_password")
+async def admin_reset_password(request: Request, username: str):
+    admin = _require_admin_user(request)
+    if not admin:
+        return JSONResponse({"error": "未授权"}, status_code=401)
+    body = await request.json()
+    new_pw = body.get("new_password") or ""
+    if len(new_pw) < 4:
+        return JSONResponse({"error": "新密码至少 4 位"}, status_code=400)
+    user = get_user(username)
+    if not user:
+        return JSONResponse({"error": "用户不存在"}, status_code=404)
+    conn = _db_connect()
+    conn.execute("UPDATE users SET password_hash = ? WHERE username = ?", (hash_password(new_pw), username))
+    conn.commit()
+    conn.close()
+    run_logger.info(f"[admin] {admin['username']} 重置账号 {username} 的密码")
+    return {"ok": True, "username": username}
 
 
 @app.post("/api/admin/delete_room")

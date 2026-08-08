@@ -12,140 +12,143 @@
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: radial-gradient(1200px 500px at 50% -10%, #1c2a44 0%, var(--bg) 60%);
-    min-height: 100vh; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); min-height: 100vh;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     color: var(--text);
   }
-  .container { max-width: 1100px; margin: 0 auto; padding: 20px 24px 60px; }
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
 
-  /* ===== 头部 ===== */
+  /* ===== 顶部 ===== */
   .header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 22px;
+    padding: 12px 24px; background: var(--surface); border-bottom: 1px solid var(--border);
   }
   .header .brand { display: flex; align-items: center; gap: 10px; }
   .header .logo {
-    width: 34px; height: 34px; border-radius: 8px; background: linear-gradient(135deg, var(--info), #7c4dff);
-    display: flex; align-items: center; justify-content: center; font-size: 16px; color: #fff; font-weight: 700;
+    width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, var(--info), #7c4dff);
+    display: flex; align-items: center; justify-content: center; font-size: 15px; color: #fff; font-weight: 700;
   }
-  .header .title { font-size: 18px; font-weight: 600; }
-  .header .sub { font-size: 12px; color: var(--text2); }
+  .header .title { font-size: 16px; font-weight: 600; }
+  .header .sub { font-size: 11px; color: var(--text2); }
   .header .user-box { display: flex; align-items: center; gap: 10px; }
-  .header .user-tag {
+  .user-tag {
     background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
-    padding: 6px 14px; font-size: 13px; display: flex; align-items: center; gap: 6px;
+    padding: 5px 14px; font-size: 13px; display: flex; align-items: center; gap: 6px;
   }
-  .header .user-tag .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .user-tag .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
   .btn-sm {
-    padding: 6px 12px; font-size: 12px; background: var(--surface2); color: var(--text2);
+    padding: 5px 12px; font-size: 12px; background: var(--surface2); color: var(--text2);
     border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
   }
   .btn-sm:hover { color: var(--text); border-color: var(--text2); }
 
-  /* ===== 三卡片 ===== */
-  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
-  .card {
+  /* ===== 主体：侧边栏 + 内容 ===== */
+  .main { display: flex; flex: 1; }
+  .sidebar {
+    width: 200px; flex-shrink: 0; background: var(--surface);
+    border-right: 1px solid var(--border); padding: 14px 10px;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 11px 12px; margin-bottom: 4px;
+    font-size: 14px; color: var(--text2); border-radius: 8px; cursor: pointer; user-select: none;
+    border-left: 3px solid transparent;
+  }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { background: var(--surface2); color: var(--info); border-left-color: var(--info); font-weight: 600; }
+  .nav-divider { height: 1px; background: var(--border); margin: 10px 8px; }
+  .sidebar-footer { padding: 8px 12px; font-size: 11px; color: var(--text2); }
+  .admin-only { display: none; }
+  .admin-only.show { display: flex; }
+
+  .content { flex: 1; padding: 24px 28px; overflow-y: auto; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .page-title { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+  .page-desc { font-size: 12px; color: var(--text2); margin-bottom: 20px; }
+
+  /* ===== 卡片/表单 ===== */
+  .panel {
     background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-    padding: 20px; min-height: 210px; display: flex; flex-direction: column;
+    padding: 22px; max-width: 640px;
   }
-  .card h3 { font-size: 15px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
-  .card .icon { width: 26px; height: 26px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
-  .icon-create { background: rgba(88,166,255,.15); color: var(--info); }
-  .icon-join { background: rgba(63,185,80,.15); color: var(--success); }
-  .icon-dl { background: rgba(210,153,34,.15); color: var(--warn); }
-  .card .desc { font-size: 12px; color: var(--text2); margin-bottom: 14px; }
-  .field { margin-bottom: 10px; }
-  .field label { display: block; font-size: 11px; color: var(--text2); margin-bottom: 4px; }
-  .field input {
-    width: 100%; padding: 8px 10px; background: var(--surface2); color: var(--text);
-    border: 1px solid var(--border); border-radius: 6px; font-size: 13px; outline: none;
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 5px; }
+  .field input, .field select {
+    width: 100%; padding: 9px 11px; background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; font-size: 14px; outline: none;
   }
-  .field input:focus { border-color: var(--info); }
+  .field input:focus, .field select:focus { border-color: var(--info); }
   .btn-main {
-    width: 100%; padding: 9px; background: var(--info); color: #fff; border: none;
+    padding: 10px 22px; background: var(--info); color: #fff; border: none;
     border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
   }
   .btn-main:hover { filter: brightness(1.1); }
   .btn-main:disabled { opacity: .5; cursor: not-allowed; }
   .btn-green { background: var(--success); }
   .btn-amber { background: var(--warn); }
-  .dl-row { display: flex; flex-direction: column; gap: 8px; }
-  .dl-btn {
-    display: block; text-align: center; padding: 9px; font-size: 13px; text-decoration: none;
-    background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+  .btn-ghost {
+    padding: 8px 16px; background: var(--surface2); color: var(--text2); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 13px; cursor: pointer;
   }
-  .dl-btn:hover { border-color: var(--info); color: var(--info); }
-  .dl-note { font-size: 11px; color: var(--text2); line-height: 1.7; margin-top: 4px; }
-  .dl-cmd {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
-    padding: 8px 10px; font-size: 11px; color: var(--info); word-break: break-all;
-    display: flex; justify-content: space-between; align-items: center; gap: 8px;
-  }
-  .dl-copy { color: var(--text2); cursor: pointer; flex-shrink: 0; font-size: 11px; }
-  .dl-copy:hover { color: var(--text); }
+  .btn-ghost:hover { color: var(--text); }
 
-  /* 创建结果 */
   .room-result {
-    display: none; margin-top: 10px; background: rgba(63,185,80,.08);
-    border: 1px solid rgba(63,185,80,.35); border-radius: 8px; padding: 12px;
+    display: none; margin-top: 16px; background: rgba(63,185,80,.08);
+    border: 1px solid rgba(63,185,80,.35); border-radius: 8px; padding: 14px;
   }
+  .room-result .tip { font-size: 12px; color: var(--text2); text-align: center; margin-bottom: 4px; }
   .room-result .code {
-    font-size: 26px; font-weight: 700; letter-spacing: 4px; color: var(--success);
-    text-align: center; margin: 6px 0 10px; font-family: "Consolas", monospace;
+    font-size: 30px; font-weight: 700; letter-spacing: 5px; color: var(--success);
+    text-align: center; margin: 6px 0 12px; font-family: "Consolas", monospace;
   }
-  .room-result .actions { display: flex; gap: 8px; }
-  .room-result .actions button, .room-result .actions a {
-    flex: 1; text-align: center; padding: 8px; font-size: 13px; border-radius: 6px; cursor: pointer;
+  .room-result .actions { display: flex; gap: 10px; }
+  .room-result .actions a, .room-result .actions button {
+    flex: 1; text-align: center; padding: 9px; font-size: 14px; border-radius: 6px; cursor: pointer;
     text-decoration: none; border: 1px solid var(--border);
   }
   .btn-enter { background: var(--success); color: #fff; border: none !important; font-weight: 600; }
-  .btn-copy { background: var(--surface2); color: var(--text); }
-  .room-result .tip { font-size: 11px; color: var(--text2); margin-bottom: 4px; text-align: center; }
 
-  /* ===== 工单列表 ===== */
-  .section-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
-  .section-title .count { font-size: 12px; color: var(--text2); font-weight: 400; }
-  .toolbar { display: flex; gap: 10px; margin-bottom: 12px; }
+  .dl-row { display: flex; flex-direction: column; gap: 9px; }
+  .dl-btn {
+    display: block; text-align: center; padding: 10px; font-size: 14px; text-decoration: none;
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .dl-btn:hover { border-color: var(--info); color: var(--info); }
+  .dl-cmd {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 9px 11px; font-size: 12px; color: var(--info); word-break: break-all;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .dl-copy { color: var(--text2); cursor: pointer; flex-shrink: 0; font-size: 12px; }
+  .dl-copy:hover { color: var(--text); }
+  .dl-note { font-size: 11px; color: var(--text2); line-height: 1.8; margin-top: 6px; }
+
+  /* ===== 表格 ===== */
+  .toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
   .toolbar input {
     padding: 8px 12px; background: var(--surface2); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; font-size: 13px; outline: none; width: 260px;
+    border-radius: 6px; font-size: 13px; outline: none; width: 280px;
   }
   .toolbar input:focus { border-color: var(--info); }
+  .count { font-size: 12px; color: var(--text2); align-self: center; }
   table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 10px; overflow: hidden; }
   th, td { padding: 11px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
   th { background: var(--surface2); color: var(--text2); font-weight: 500; font-size: 12px; white-space: nowrap; }
   tr:hover td { background: rgba(88,166,255,.04); }
-  td .mono { font-family: "Consolas", monospace; letter-spacing: 1px; }
+  .mono { font-family: "Consolas", monospace; letter-spacing: 1px; }
   .status { padding: 3px 10px; border-radius: 12px; font-size: 11px; white-space: nowrap; }
   .status.on { background: rgba(63,185,80,.15); color: var(--success); }
   .status.off { background: rgba(157,167,179,.12); color: var(--text2); }
+  .status.disabled { background: rgba(248,81,73,.12); color: var(--error); }
   .empty { text-align: center; color: var(--text2); padding: 36px 0; font-size: 13px; }
+  .row-actions { display: flex; gap: 6px; }
+  .row-actions .btn-sm { padding: 3px 9px; font-size: 11px; }
 
-  /* ===== 模态 ===== */
-  .modal-overlay {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 100;
-    align-items: center; justify-content: center;
-  }
-  .modal-overlay.show { display: flex; }
-  .modal {
-    width: 360px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: 12px; padding: 24px;
-  }
-  .modal h3 { font-size: 16px; margin-bottom: 18px; }
-  .modal .field input { padding: 9px 11px; }
-  .modal .btn-row { display: flex; gap: 10px; margin-top: 18px; }
-  .modal .btn-row .btn-main { flex: 1; }
-  .btn-ghost {
-    flex: 1; padding: 9px; background: var(--surface2); color: var(--text2); border: 1px solid var(--border);
-    border-radius: 6px; font-size: 14px; cursor: pointer;
-  }
-  .modal .error { display: none; background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.4);
-    color: var(--error); font-size: 12px; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px; }
-  .modal .error.show { display: block; }
-  .modal .ok { display: none; background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.4);
-    color: var(--success); font-size: 12px; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px; }
-  .modal .ok.show { display: block; }
-
+  /* ===== 提示 ===== */
+  .msg-box { display: none; padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
+  .msg-box.err { display: block; background: rgba(248,81,73,.1); border: 1px solid rgba(248,81,73,.35); color: var(--error); }
+  .msg-box.ok { display: block; background: rgba(63,185,80,.1); border: 1px solid rgba(63,185,80,.35); color: var(--success); }
   .toast {
     position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 200;
     background: var(--surface2); color: var(--text); border: 1px solid var(--border);
@@ -155,97 +158,144 @@
 </style>
 </head>
 <body>
-<div class="container">
+<div class="app">
 
   <div class="header">
     <div class="brand">
       <div class="logo">AI</div>
       <div>
         <div class="title">云端 AI 远程运维助手</div>
-        <div class="sub">联想售后 · 电脑问题远程诊断工作台</div>
+        <div class="sub">联想售后 · 电脑问题远程诊断</div>
       </div>
     </div>
     <div class="user-box">
       <span class="user-tag"><span class="dot"></span><span id="user-name">未登录</span></span>
-      <button class="btn-sm" onclick="openPwdModal()">修改密码</button>
       <button class="btn-sm" onclick="doLogout()">退出登录</button>
     </div>
   </div>
 
-  <div class="cards">
+  <div class="main">
+    <aside class="sidebar">
+      <nav>
+        <div class="nav-item active" onclick="switchTab('workorders')">📋 我的工单</div>
+        <div class="nav-item" onclick="switchTab('create')">➕ 创建房间</div>
+        <div class="nav-item" onclick="switchTab('join')">⇄ 加入房间</div>
+        <div class="nav-item" onclick="switchTab('download')">📦 下载桥接器</div>
+        <div class="nav-item" onclick="switchTab('password')">🔒 修改密码</div>
+        <div class="nav-divider"></div>
+        <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')">👥 账号管理</div>
+        <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'">🛠 管理后台</div>
+      </nav>
+      <div class="sidebar-footer">v0.8.0</div>
+    </aside>
 
-    <!-- 创建房间 -->
-    <div class="card">
-      <h3><span class="icon icon-create">+</span>创建房间</h3>
-      <div class="desc">需绑定电脑 SN 与报修工单号</div>
-      <div class="field"><label>SN 序列号</label><input id="f-sn" placeholder="如 PC204XF3"></div>
-      <div class="field"><label>报修工单号</label><input id="f-ticket" placeholder="如 202608063200477002"></div>
-      <div class="field"><label>机器型号（选填）</label><input id="f-model" placeholder="如 ThinkPad X1 Carbon"></div>
-      <button class="btn-main" id="create-btn" onclick="createRoom()">创建房间</button>
-      <div class="room-result" id="room-result">
-        <div class="tip">房间创建成功，请让客户电脑运行桥接器并输入房间码</div>
-        <div class="code" id="room-code"></div>
-        <div class="actions">
-          <a class="btn-enter" id="room-enter" href="#">进入房间</a>
-          <button class="btn-copy" onclick="copyRoomCode()">复制房间码</button>
+    <main class="content">
+
+      <!-- 我的工单 -->
+      <section class="page active" id="page-workorders">
+        <div class="page-title">📋 我的工单</div>
+        <div class="page-desc">当前账号处理过的诊断房间</div>
+        <div class="toolbar">
+          <input id="search-input" placeholder="按 SN / 工单号 / 型号 / 房间码搜索" oninput="renderRooms()">
+          <span class="count" id="room-count"></span>
         </div>
-      </div>
-    </div>
+        <table>
+          <thead><tr><th>房间码</th><th>SN</th><th>型号</th><th>工单号</th><th>创建时间</th><th>最后活动</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody id="room-tbody"><tr><td colspan="8" class="empty">加载中...</td></tr></tbody>
+        </table>
+      </section>
 
-    <!-- 加入房间 -->
-    <div class="card">
-      <h3><span class="icon icon-join">⇄</span>加入房间</h3>
-      <div class="desc">输入 8 位房间码进入已有诊断会话</div>
-      <div class="field"><label>房间码</label><input id="f-join" maxlength="8" placeholder="如 AB12CDEF" style="text-transform:uppercase;"></div>
-      <button class="btn-main btn-green" onclick="joinRoom()">进入对话</button>
-    </div>
-
-    <!-- 下载桥接器 -->
-    <div class="card">
-      <h3><span class="icon icon-dl">↓</span>下载桥接器</h3>
-      <div class="desc">在需要诊断的电脑上运行桥接器，输入房间码配对</div>
-      <div class="dl-row">
-        <a class="dl-btn" href="/static/bridge-win64.exe" download>Windows 桥接器 (bridge-win64.exe, 4.8MB)</a>
-        <a class="dl-btn" href="/static/bridge-linux-amd64" download>Linux x86_64 桥接器</a>
-        <div class="dl-cmd">
-          <span>curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span>
-          <span class="dl-copy" onclick="copyCmd(this)">复制</span>
+      <!-- 创建房间 -->
+      <section class="page" id="page-create">
+        <div class="page-title">➕ 创建房间</div>
+        <div class="page-desc">需绑定电脑 SN 与报修工单号，生成 8 位房间码用于桥接器配对</div>
+        <div class="panel">
+          <div class="msg-box" id="create-msg"></div>
+          <div class="field"><label>SN 序列号</label><input id="f-sn" placeholder="如 PC204XF3"></div>
+          <div class="field"><label>报修工单号</label><input id="f-ticket" placeholder="如 202608063200477002"></div>
+          <div class="field"><label>机器型号（选填）</label><input id="f-model" placeholder="如 ThinkPad X1 Carbon"></div>
+          <button class="btn-main" id="create-btn" onclick="createRoom()">创建房间</button>
+          <div class="room-result" id="room-result">
+            <div class="tip">房间创建成功，请让客户电脑运行桥接器并输入房间码</div>
+            <div class="code" id="room-code"></div>
+            <div class="actions">
+              <a class="btn-enter" id="room-enter" href="#">进入对话</a>
+              <button class="btn-ghost" onclick="copyRoomCode()">复制房间码</button>
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="dl-note">Linux 其他架构：ARM64 / 龙芯 请在管理端获取。运行后按提示输入服务器地址与房间码即可。</div>
-    </div>
+      </section>
 
-  </div>
+      <!-- 加入房间 -->
+      <section class="page" id="page-join">
+        <div class="page-title">⇄ 加入房间</div>
+        <div class="page-desc">输入 8 位房间码，进入已有诊断会话</div>
+        <div class="panel">
+          <div class="field"><label>房间码</label><input id="f-join" maxlength="8" placeholder="如 AB12CDEF" style="text-transform:uppercase;letter-spacing:3px;font-size:18px;"></div>
+          <button class="btn-main btn-green" onclick="joinRoom()">进入对话</button>
+        </div>
+      </section>
 
-  <div class="section-title">我的工单 <span class="count" id="room-count">共 0 条</span></div>
-  <div class="toolbar">
-    <input id="search-input" placeholder="按 SN / 工单号 / 型号搜索" oninput="renderRooms()">
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th>房间码</th><th>SN</th><th>型号</th><th>工单号</th><th>创建时间</th><th>最后活动</th><th>状态</th><th>操作</th>
-      </tr>
-    </thead>
-    <tbody id="room-tbody">
-      <tr><td colspan="8" class="empty">加载中...</td></tr>
-    </tbody>
-  </table>
-</div>
+      <!-- 下载桥接器 -->
+      <section class="page" id="page-download">
+        <div class="page-title">📦 下载桥接器</div>
+        <div class="page-desc">在需要诊断的电脑上运行桥接器，输入房间码完成配对</div>
+        <div class="panel">
+          <div class="dl-row">
+            <a class="dl-btn" href="/static/bridge-win64.exe" download>⬇ Windows 桥接器 (bridge-win64.exe, 4.8MB)</a>
+            <a class="dl-btn" href="/static/bridge-linux-amd64" download>⬇ Linux x86_64 桥接器</a>
+            <div class="dl-cmd">
+              <span>curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span>
+              <span class="dl-copy" onclick="copyCmd(this)">复制</span>
+            </div>
+          </div>
+          <div class="dl-note">Linux 其他架构（ARM64 / 龙芯）请从管理后台获取。<br>运行后按提示输入服务器地址与 8 位房间码即可连接。</div>
+        </div>
+      </section>
 
-<!-- 修改密码模态 -->
-<div class="modal-overlay" id="pwd-modal">
-  <div class="modal">
-    <h3>修改密码</h3>
-    <div class="error" id="pwd-error"></div>
-    <div class="ok" id="pwd-ok">密码修改成功</div>
-    <div class="field"><label>旧密码</label><input id="p-old" type="password"></div>
-    <div class="field"><label>新密码（至少 4 位）</label><input id="p-new" type="password"></div>
-    <div class="field"><label>确认新密码</label><input id="p-new2" type="password"></div>
-    <div class="btn-row">
-      <button class="btn-ghost" onclick="closePwdModal()">取消</button>
-      <button class="btn-main" onclick="changePwd()">确认修改</button>
-    </div>
+      <!-- 修改密码 -->
+      <section class="page" id="page-password">
+        <div class="page-title">🔒 修改密码</div>
+        <div class="page-desc">定期修改密码保护账号安全</div>
+        <div class="panel">
+          <div class="msg-box" id="pwd-msg"></div>
+          <div class="field"><label>旧密码</label><input id="p-old" type="password"></div>
+          <div class="field"><label>新密码（至少 4 位）</label><input id="p-new" type="password"></div>
+          <div class="field"><label>确认新密码</label><input id="p-new2" type="password"></div>
+          <button class="btn-main" onclick="changePwd()">确认修改</button>
+        </div>
+      </section>
+
+      <!-- 账号管理（仅管理员） -->
+      <section class="page" id="page-users">
+        <div class="page-title">👥 账号管理</div>
+        <div class="page-desc">创建工程师账号、停用/启用、重置密码</div>
+        <div class="toolbar">
+          <button class="btn-main" onclick="showCreateUser()">+ 新建账号</button>
+          <span class="count" id="user-count"></span>
+        </div>
+        <div class="panel" id="create-user-panel" style="display:none;margin-bottom:16px;">
+          <div class="msg-box" id="user-msg"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;">
+            <div class="field"><label>工号</label><input id="u-username" placeholder="如 E10086"></div>
+            <div class="field"><label>姓名</label><input id="u-name" placeholder="如 张三"></div>
+            <div class="field"><label>角色</label>
+              <select id="u-role"><option value="engineer">工程师</option><option value="admin">管理员</option></select>
+            </div>
+            <div class="field"><label>初始密码</label><input id="u-password" placeholder="至少 4 位"></div>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button class="btn-main" onclick="createUser()">创建账号</button>
+            <button class="btn-ghost" onclick="document.getElementById('create-user-panel').style.display='none'">取消</button>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>ID</th><th>工号</th><th>姓名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+          <tbody id="user-tbody"><tr><td colspan="7" class="empty">加载中...</td></tr></tbody>
+        </table>
+      </section>
+
+    </main>
   </div>
 </div>
 
@@ -253,16 +303,30 @@
 
 <script>
 let allRooms = [];
-const tbody = document.getElementById('room-tbody');
+let currentRole = 'engineer';
 
-// ===== 用户信息 / 登录校验 =====
+// ===== Tab 切换 =====
+function switchTab(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  const nav = document.querySelector('.nav-item[onclick="switchTab(\'' + name + '\')"]');
+  if (nav) nav.classList.add('active');
+  if (name === 'workorders' && !allRooms.length) loadRooms();
+  if (name === 'users') loadUsers();
+}
+
+// ===== 用户信息 =====
 async function loadMe() {
   try {
     const resp = await fetch('/api/auth/me');
     const data = await resp.json();
     if (data.error) { location.href = '/login'; return; }
-    document.getElementById('user-name').textContent = '工号: ' + data.username;
-    if (data.role === 'admin') document.getElementById('user-name').textContent += ' (管理员)';
+    currentRole = data.role;
+    document.getElementById('user-name').textContent = '工号: ' + data.username + (data.role === 'admin' ? ' (管理员)' : '');
+    if (data.role === 'admin') {
+      document.querySelectorAll('.admin-only').forEach(el => el.classList.add('show'));
+    }
   } catch (e) { location.href = '/login'; }
 }
 
@@ -275,8 +339,10 @@ async function createRoom() {
   const sn = document.getElementById('f-sn').value.trim();
   const ticket = document.getElementById('f-ticket').value.trim();
   const model = document.getElementById('f-model').value.trim();
-  if (!sn) { showToast('请填写 SN 序列号'); return; }
-  if (!ticket) { showToast('请填写报修工单号'); return; }
+  const msg = document.getElementById('create-msg');
+  msg.className = 'msg-box';
+  if (!sn) { msg.textContent = '请填写 SN 序列号'; msg.className = 'msg-box err'; return; }
+  if (!ticket) { msg.textContent = '请填写报修工单号'; msg.className = 'msg-box err'; return; }
   const btn = document.getElementById('create-btn');
   btn.disabled = true; btn.textContent = '创建中...';
   try {
@@ -286,18 +352,15 @@ async function createRoom() {
       body: JSON.stringify({ sn, ticket_no: ticket, machine_model: model }),
     });
     const data = await resp.json();
-    if (!resp.ok) { showToast(data.error || '创建失败'); btn.disabled = false; btn.textContent = '创建房间'; return; }
-    const code = data.room_code;
-    document.getElementById('room-code').textContent = code;
-    document.getElementById('room-enter').href = '/chat?room=' + code;
+    if (!resp.ok) { msg.textContent = data.error || '创建失败'; msg.className = 'msg-box err'; btn.disabled = false; btn.textContent = '创建房间'; return; }
+    document.getElementById('room-code').textContent = data.room_code;
+    document.getElementById('room-enter').href = '/chat?room=' + data.room_code;
     document.getElementById('room-result').style.display = 'block';
     document.getElementById('f-sn').value = '';
     document.getElementById('f-ticket').value = '';
     document.getElementById('f-model').value = '';
     loadRooms();
-  } catch (e) {
-    showToast('网络错误: ' + e.message);
-  }
+  } catch (e) { msg.textContent = '网络错误: ' + e.message; msg.className = 'msg-box err'; }
   btn.disabled = false; btn.textContent = '创建房间';
 }
 
@@ -327,7 +390,7 @@ async function loadRooms() {
     allRooms = data.rooms || [];
     renderRooms();
   } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">加载失败: ' + e.message + '</td></tr>';
+    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="8" class="empty">加载失败: ' + e.message + '</td></tr>';
   }
 }
 
@@ -340,12 +403,11 @@ function renderRooms() {
     || r.room_code.toLowerCase().includes(kw));
   document.getElementById('room-count').textContent = '共 ' + list.length + ' 条';
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">暂无工单记录，点击上方「创建房间」开始</td></tr>';
+    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="8" class="empty">暂无工单记录，左侧点「创建房间」开始</td></tr>';
     return;
   }
-  tbody.innerHTML = list.map(r => {
-    const on = r.bridge_online;
-    const st = on ? '<span class="status on">连接中</span>' : '<span class="status off">已断开</span>';
+  document.getElementById('room-tbody').innerHTML = list.map(r => {
+    const st = r.bridge_online ? '<span class="status on">连接中</span>' : '<span class="status off">已断开</span>';
     return '<tr>'
       + '<td class="mono">' + r.room_code + '</td>'
       + '<td>' + r.sn + '</td>'
@@ -360,25 +422,14 @@ function renderRooms() {
 }
 
 // ===== 修改密码 =====
-function openPwdModal() {
-  document.getElementById('pwd-error').className = 'error';
-  document.getElementById('pwd-ok').className = 'ok';
-  document.getElementById('p-old').value = '';
-  document.getElementById('p-new').value = '';
-  document.getElementById('p-new2').value = '';
-  document.getElementById('pwd-modal').classList.add('show');
-}
-function closePwdModal() { document.getElementById('pwd-modal').classList.remove('show'); }
-
 async function changePwd() {
   const oldPw = document.getElementById('p-old').value;
   const newPw = document.getElementById('p-new').value;
   const newPw2 = document.getElementById('p-new2').value;
-  const errBox = document.getElementById('pwd-error');
-  const okBox = document.getElementById('pwd-ok');
-  errBox.className = 'error'; okBox.className = 'ok';
-  if (newPw !== newPw2) { errBox.textContent = '两次输入的新密码不一致'; errBox.className = 'error show'; return; }
-  if (newPw.length < 4) { errBox.textContent = '新密码至少 4 位'; errBox.className = 'error show'; return; }
+  const msg = document.getElementById('pwd-msg');
+  msg.className = 'msg-box';
+  if (newPw !== newPw2) { msg.textContent = '两次输入的新密码不一致'; msg.className = 'msg-box err'; return; }
+  if (newPw.length < 4) { msg.textContent = '新密码至少 4 位'; msg.className = 'msg-box err'; return; }
   try {
     const resp = await fetch('/api/auth/change_password', {
       method: 'POST',
@@ -386,10 +437,109 @@ async function changePwd() {
       body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
     });
     const data = await resp.json();
-    if (!resp.ok) { errBox.textContent = data.error || '修改失败'; errBox.className = 'error show'; return; }
-    okBox.className = 'ok show';
-    setTimeout(closePwdModal, 1200);
-  } catch (e) { errBox.textContent = '网络错误: ' + e.message; errBox.className = 'error show'; }
+    if (!resp.ok) { msg.textContent = data.error || '修改失败'; msg.className = 'msg-box err'; return; }
+    msg.textContent = '✅ 密码修改成功';
+    msg.className = 'msg-box ok';
+    document.getElementById('p-old').value = '';
+    document.getElementById('p-new').value = '';
+    document.getElementById('p-new2').value = '';
+  } catch (e) { msg.textContent = '网络错误: ' + e.message; msg.className = 'msg-box err'; }
+}
+
+// ===== 账号管理（管理员） =====
+function showCreateUser() {
+  const panel = document.getElementById('create-user-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  const msg = document.getElementById('user-msg');
+  msg.className = 'msg-box';
+}
+
+async function createUser() {
+  const username = document.getElementById('u-username').value.trim();
+  const name = document.getElementById('u-name').value.trim();
+  const role = document.getElementById('u-role').value;
+  const password = document.getElementById('u-password').value;
+  const msg = document.getElementById('user-msg');
+  msg.className = 'msg-box';
+  if (!username) { msg.textContent = '工号必填'; msg.className = 'msg-box err'; return; }
+  if (password.length < 4) { msg.textContent = '初始密码至少 4 位'; msg.className = 'msg-box err'; return; }
+  try {
+    const resp = await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, name, role, password }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || '创建失败'; msg.className = 'msg-box err'; return; }
+    msg.textContent = '✅ 账号 ' + username + ' 创建成功';
+    msg.className = 'msg-box ok';
+    document.getElementById('u-username').value = '';
+    document.getElementById('u-name').value = '';
+    document.getElementById('u-password').value = '';
+    loadUsers();
+  } catch (e) { msg.textContent = '网络错误: ' + e.message; msg.className = 'msg-box err'; }
+}
+
+async function loadUsers() {
+  try {
+    const resp = await fetch('/api/admin/users');
+    if (resp.status === 401) { showToast('无权限'); return; }
+    const data = await resp.json();
+    renderUsers(data.users || []);
+  } catch (e) {
+    document.getElementById('user-tbody').innerHTML = '<tr><td colspan="7" class="empty">加载失败: ' + e.message + '</td></tr>';
+  }
+}
+
+function renderUsers(users) {
+  document.getElementById('user-count').textContent = '共 ' + users.length + ' 个账号';
+  if (!users.length) {
+    document.getElementById('user-tbody').innerHTML = '<tr><td colspan="7" class="empty">暂无账号</td></tr>';
+    return;
+  }
+  document.getElementById('user-tbody').innerHTML = users.map(u => {
+    const st = u.enabled ? '<span class="status on">启用</span>' : '<span class="status disabled">停用</span>';
+    const roleTxt = u.role === 'admin' ? '管理员' : '工程师';
+    return '<tr>'
+      + '<td>' + u.id + '</td>'
+      + '<td class="mono">' + u.username + '</td>'
+      + '<td>' + u.name + '</td>'
+      + '<td>' + roleTxt + '</td>'
+      + '<td>' + st + '</td>'
+      + '<td>' + (u.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
+      + '<td><div class="row-actions">'
+      + '<button class="btn-sm" onclick="toggleUser(\'' + u.username + '\')">' + (u.enabled ? '停用' : '启用') + '</button>'
+      + '<button class="btn-sm" onclick="resetPwd(\'' + u.username + '\')">重置密码</button>'
+      + '</div></td>'
+      + '</tr>';
+  }).join('');
+}
+
+async function toggleUser(username) {
+  if (!confirm('确定' + (document.activeElement.textContent || '') + '账号 ' + username + ' 吗？')) return;
+  try {
+    const resp = await fetch('/api/admin/users/' + username + '/toggle', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) { showToast(data.error || '操作失败'); return; }
+    showToast((data.enabled ? '已启用 ' : '已停用 ') + username);
+    loadUsers();
+  } catch (e) { showToast('网络错误: ' + e.message); }
+}
+
+async function resetPwd(username) {
+  const newPw = prompt('为账号 ' + username + ' 设置新密码（至少 4 位）:');
+  if (!newPw) return;
+  if (newPw.length < 4) { showToast('密码至少 4 位'); return; }
+  try {
+    const resp = await fetch('/api/admin/users/' + username + '/reset_password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_password: newPw }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showToast(data.error || '重置失败'); return; }
+    showToast('✅ ' + username + ' 密码已重置');
+  } catch (e) { showToast('网络错误: ' + e.message); }
 }
 
 // ===== 工具 =====
@@ -406,7 +556,8 @@ function copyCmd(el) {
 }
 
 document.getElementById('f-join').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinRoom(); });
-document.getElementById('pwd-modal').addEventListener('click', (e) => { if (e.target.id === 'pwd-modal') closePwdModal(); });
+document.getElementById('f-sn').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRoom(); });
+document.getElementById('f-ticket').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRoom(); });
 
 // ===== Init =====
 loadMe();
