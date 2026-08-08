@@ -12,11 +12,11 @@
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: var(--bg); min-height: 100vh;
+    background: var(--bg); height: 100vh; overflow: hidden;
     font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     color: var(--text);
   }
-  .app { display: flex; flex-direction: column; min-height: 100vh; }
+  .app { display: flex; flex-direction: column; height: 100vh; }
 
   /* ===== 顶部 ===== */
   .header {
@@ -43,7 +43,7 @@
   .btn-sm:hover { color: var(--text); border-color: var(--text2); }
 
   /* ===== 主体：侧边栏 + 内容 ===== */
-  .main { display: flex; flex: 1; }
+  .main { display: flex; flex: 1; min-height: 0; }
   .sidebar {
     width: 200px; flex-shrink: 0; background: var(--surface);
     border-right: 1px solid var(--border); padding: 14px 10px;
@@ -61,7 +61,10 @@
   .admin-only { display: none; }
   .admin-only.show { display: flex; }
 
-  .content { flex: 1; padding: 24px 28px; overflow-y: auto; }
+  .content {
+    flex: 1; min-height: 0; padding: 24px 28px; overflow-y: auto;
+    display: flex; flex-direction: column;
+  }
   .page { display: none; }
   .page.active { display: block; }
   .page-title { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
@@ -146,7 +149,7 @@
   .row-actions .btn-sm { padding: 3px 9px; font-size: 11px; }
 
   /* ===== 对话（iframe 嵌入） ===== */
-  #page-chat.active { display: flex; flex-direction: column; }
+  #page-chat.active { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .chat-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
   .chat-head .page-title { margin-bottom: 0; }
   .chat-head .room-tag {
