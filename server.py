@@ -566,14 +566,16 @@ V2_COMMAND_TEMPLATES = {
 }
 
 
-def build_system_prompt(room: "Room") -> str:
-    """根据目标平台动态组装系统提示词（v2 管道化：平台感知）"""
+def build_system_prompt(room: "Room", lang: str = "zh-CN") -> str:
+    """根据目标平台动态组装系统提示词；lang: zh-CN | zh-TW | en（控制 AI 回复语言）。"""
     platform = getattr(room, "platform", "windows")
     if platform == "linux":
-        return SYSTEM_PROMPT_LINUX
-    if platform == "darwin":
-        return SYSTEM_PROMPT_MACOS
-    return SYSTEM_PROMPT_WINDOWS
+        base = SYSTEM_PROMPT_LINUX
+    elif platform == "darwin":
+        base = SYSTEM_PROMPT_MACOS
+    else:
+        base = SYSTEM_PROMPT_WINDOWS
+    return base + LANG_INSTRUCTION.get(lang, LANG_INSTRUCTION["zh-CN"])
 
 
 def build_v2_command(tool_name: str, args: dict, platform: str) -> tuple[str, int]:
@@ -739,6 +741,13 @@ SYSTEM_PROMPT_MACOS = """You are a professional macOS remote diagnostics assista
 
 # 兼容别名（旧代码引用）
 SYSTEM_PROMPT = SYSTEM_PROMPT_WINDOWS
+
+# 回复语言指令（随前端所选语言注入 system prompt）
+LANG_INSTRUCTION = {
+    "zh-CN": "\n\nIMPORTANT: Always reply to the user in Simplified Chinese (简体中文) with markdown formatting.",
+    "zh-TW": "\n\nIMPORTANT: Always reply to the user in Traditional Chinese (繁體中文) with markdown formatting.",
+    "en": "\n\nIMPORTANT: Always reply to the user in English with markdown formatting.",
+}
 
 
 
@@ -1745,9 +1754,10 @@ async def run_agent(
     room: Room,
     http_client: httpx.AsyncClient,
     browser_ws: WebSocket,
+    lang: str = "zh-CN",
 ) -> str:
     messages = [
-        {"role": "system", "content": build_system_prompt(room)},
+        {"role": "system", "content": build_system_prompt(room, lang)},
         *get_recent_context(room.code, user_message),
         {"role": "user", "content": user_message},
     ]
@@ -1929,10 +1939,15 @@ async def run_agent(
 #   Hermes api_server 是自治 agent：它用自己的工具集在服务器上
 #   工作，并通过 HTTP 桥接接口（/api/bridge/execute）操作远程电脑。
 # ============================================================
-def build_hermes_bridge_guide(room: Room) -> str:
-    """构造给 Hermes 的桥接操作指南（注入 system prompt）。"""
+def build_hermes_bridge_guide(room: Room, lang: str = "zh-CN") -> str:
+    """构造给 Hermes 的桥接操作指南（注入 system prompt）。lang 控制回复语言。"""
     platform = getattr(room, "platform", "windows")
     secret = BRIDGE_HTTP_SECRET or "（未配置 BRIDGE_HTTP_SECRET）"
+    reply_lang = {
+        "zh-CN": "最终用**简体中文** + markdown 给出结论和后续建议",
+        "zh-TW": "最終用**繁體中文** + markdown 給出結論和後續建議",
+        "en": "Finally reply in **English** with markdown, giving conclusions and suggestions",
+    }.get(lang, "最终用**简体中文** + markdown 给出结论和后续建议")
     return f"""
 ## 远程桥接操作指南（重要）
 
@@ -1981,7 +1996,7 @@ Body: {{"room_code": "{room.code}", "tool": "<工具名>", "args": {{...}}}}
 1. 先诊断：用 Tier 1 工具或 RunCommand 只读命令收集信息（必要时多次调用，逐步深入）
 2. 用户要求操作时：简要说明后用 curl 调用对应工具，等待接口返回（期间浏览器会弹审批窗给用户）
 3. 若工具返回 [approval_denied]，如实告知用户操作被拒绝
-4. 最终用中文 + markdown 给出结论和后续建议
+4. {reply_lang}
 5. 信息不足时主动询问用户补充细节
 """
 
@@ -1991,13 +2006,14 @@ async def run_agent_hermes(
     room: Room,
     http_client: httpx.AsyncClient,
     browser_ws: WebSocket,
+    lang: str = "zh-CN",
 ) -> str:
     """Hermes 通道：把用户消息交给本机 Hermes api_server（自治 agent）处理。
 
     Hermes 用自己的工具集（terminal/web/file 等）工作，并通过
     /api/bridge/execute HTTP 桥操作远程电脑。返回最终文本。
     """
-    system_prompt = build_system_prompt(room) + "\n\n" + build_hermes_bridge_guide(room)
+    system_prompt = build_system_prompt(room, lang) + "\n\n" + build_hermes_bridge_guide(room, lang)
     payload = {
         "model": HERMES_MODEL,
         "messages": [
@@ -2145,6 +2161,8 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                 user_message = msg_data["content"]
                 # brain: deepseek（默认）| hermes —— 消息级覆盖环境变量 AGENT_BRAIN
                 brain = msg_data.get("brain") or AGENT_BRAIN
+                # lang: zh-CN | zh-TW | en —— 控制 AI 回复语言
+                lang = msg_data.get("lang") or "zh-CN"
                 save_message(room_code, "user", user_message)
                 chat_logger.info(f"[{room_code}] USER: {user_message[:500]}")
 
@@ -2172,7 +2190,7 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                     continue
 
                 # 后台任务运行 agent，主循环保持活跃以便接收 approval_response
-                async def agent_runner(user_message, room, http_client, websocket, brain):
+                async def agent_runner(user_message, room, http_client, websocket, brain, lang):
                     async def safe_send(payload: dict):
                         try:
                             await websocket.send_json(payload)
@@ -2182,12 +2200,12 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                     try:
                         if brain == "hermes":
                             answer = await asyncio.wait_for(
-                                run_agent_hermes(user_message, room, http_client, websocket),
+                                run_agent_hermes(user_message, room, http_client, websocket, lang),
                                 timeout=330.0  # Hermes 自治 agent 需要更长预算
                             )
                         else:
                             answer = await asyncio.wait_for(
-                                run_agent(user_message, room, http_client, websocket),
+                                run_agent(user_message, room, http_client, websocket, lang),
                                 timeout=300.0  # 5 minute total timeout for agent
                             )
                         chat_logger.info(f"[{room_code}] AI ({brain}): {answer[:500]}")
@@ -2215,7 +2233,7 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                         })
 
                 agent_task = asyncio.create_task(
-                    agent_runner(user_message, room, http_client, websocket, brain)
+                    agent_runner(user_message, room, http_client, websocket, brain, lang)
                 )
 
             elif msg_data.get("type") == "approval_response":

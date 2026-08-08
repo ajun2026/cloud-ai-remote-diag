@@ -190,22 +190,27 @@
     </div>
     <div class="user-box">
       <span class="user-tag"><span class="dot"></span><span id="user-name">未登录</span></span>
-      <button class="btn-sm" onclick="doLogout()">退出登录</button>
+      <select id="lang-switcher" onchange="switchLang(this.value)" style="padding:5px 8px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:6px;cursor:pointer;">
+        <option value="zh-CN">简</option>
+        <option value="zh-TW">繁</option>
+        <option value="en">EN</option>
+      </select>
+      <button class="btn-sm" data-i18n="logout" onclick="doLogout()">退出登录</button>
     </div>
   </div>
 
   <div class="main">
     <aside class="sidebar">
       <nav>
-        <div class="nav-item active" onclick="switchTab('workorders')">📋 我的工单</div>
-        <div class="nav-item" id="nav-chat" onclick="switchTab('chat')">💬 对话</div>
-        <div class="nav-item" onclick="switchTab('create')">➕ 创建房间</div>
-        <div class="nav-item" onclick="switchTab('join')">⇄ 加入房间</div>
-        <div class="nav-item" onclick="switchTab('download')">📦 下载桥接器</div>
-        <div class="nav-item" onclick="switchTab('password')">🔒 修改密码</div>
+        <div class="nav-item active" onclick="switchTab('workorders')"><span data-i18n="nav_workorders">📋 我的工单</span></div>
+        <div class="nav-item" id="nav-chat" onclick="switchTab('chat')"><span data-i18n="nav_chat">💬 对话</span></div>
+        <div class="nav-item" onclick="switchTab('create')"><span data-i18n="nav_create">➕ 创建房间</span></div>
+        <div class="nav-item" onclick="switchTab('join')"><span data-i18n="nav_join">⇄ 加入房间</span></div>
+        <div class="nav-item" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
+        <div class="nav-item" onclick="switchTab('password')"><span data-i18n="nav_password">🔒 修改密码</span></div>
         <div class="nav-divider"></div>
-        <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')">👥 账号管理</div>
-        <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'">🛠 管理后台</div>
+        <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
+        <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
       <div class="sidebar-footer">v0.8.0</div>
     </aside>
@@ -214,22 +219,24 @@
 
       <!-- 我的工单 -->
       <section class="page active" id="page-workorders">
-        <div class="page-title">📋 我的工单</div>
-        <div class="page-desc">当前账号处理过的诊断房间</div>
+        <div class="page-title">📋 <span data-i18n="nav_workorders">我的工单</span></div>
+        <div class="page-desc" data-i18n="wo_desc">当前账号处理过的诊断房间</div>
         <div class="toolbar">
-          <input id="search-input" placeholder="按 SN / 工单号 / 型号 / 房间码搜索" oninput="renderRooms()">
+          <input id="search-input" data-i18n-placeholder="search_ph" placeholder="按 SN / 工单号 / 型号 / 房间码搜索" oninput="renderRooms()">
           <span class="count" id="room-count"></span>
         </div>
         <table>
-          <thead><tr><th>房间码</th><th>SN</th><th>型号</th><th>工单号</th><th>创建时间</th><th>最后活动</th><th>状态</th><th>操作</th></tr></thead>
-          <tbody id="room-tbody"><tr><td colspan="8" class="empty">加载中...</td></tr></tbody>
+          <thead><tr>
+            <th data-i18n="th_room">房间码</th><th>SN</th><th data-i18n="th_model">型号</th><th data-i18n="th_ticket">工单号</th><th data-i18n="th_created">创建时间</th><th data-i18n="th_last">最后活动</th><th data-i18n="th_status">状态</th><th data-i18n="th_action">操作</th>
+          </tr></thead>
+          <tbody id="room-tbody"><tr><td colspan="8" class="empty" data-i18n="loading">加载中...</td></tr></tbody>
         </table>
       </section>
 
       <!-- 对话（iframe 嵌入聊天页） -->
       <section class="page" id="page-chat">
         <div class="chat-head">
-          <div class="page-title">💬 对话</div>
+          <div class="page-title">💬 <span data-i18n="nav_chat">对话</span></div>
           <span class="room-tag" id="chat-room-tag"></span>
         </div>
         <div class="chat-frame-wrap" id="chat-frame-wrap" style="display:none;">
@@ -237,27 +244,27 @@
         </div>
         <div class="chat-empty" id="chat-empty">
           <div class="big">💬</div>
-          <div>尚未选择房间</div>
-          <div style="font-size:12px;">在「我的工单」里点「进入对话」，或创建/加入房间后自动打开</div>
+          <div data-i18n="chat_empty1">尚未选择房间</div>
+          <div style="font-size:12px;" data-i18n="chat_empty2">在「我的工单」里点「进入对话」，或创建/加入房间后自动打开</div>
         </div>
       </section>
 
       <!-- 创建房间 -->
       <section class="page" id="page-create">
-        <div class="page-title">➕ 创建房间</div>
-        <div class="page-desc">需绑定电脑 SN 与报修工单号，生成 8 位房间码用于桥接器配对</div>
+        <div class="page-title">➕ <span data-i18n="nav_create">创建房间</span></div>
+        <div class="page-desc" data-i18n="create_desc">需绑定电脑 SN 与报修工单号，生成 8 位房间码用于桥接器配对</div>
         <div class="panel">
           <div class="msg-box" id="create-msg"></div>
-          <div class="field"><label>SN 序列号</label><input id="f-sn" placeholder="如 PC204XF3"></div>
-          <div class="field"><label>报修工单号</label><input id="f-ticket" placeholder="如 202608063200477002"></div>
-          <div class="field"><label>机器型号（选填）</label><input id="f-model" placeholder="如 ThinkPad X1 Carbon"></div>
-          <button class="btn-main" id="create-btn" onclick="createRoom()">创建房间</button>
+          <div class="field"><label data-i18n="lbl_sn">SN 序列号</label><input id="f-sn" data-i18n-placeholder="ph_sn" placeholder="如 PC204XF3"></div>
+          <div class="field"><label data-i18n="lbl_ticket">报修工单号</label><input id="f-ticket" data-i18n-placeholder="ph_ticket" placeholder="如 202608063200477002"></div>
+          <div class="field"><label data-i18n="lbl_model">机器型号（选填）</label><input id="f-model" data-i18n-placeholder="ph_model" placeholder="如 ThinkPad X1 Carbon"></div>
+          <button class="btn-main" id="create-btn" data-i18n="btn_create" onclick="createRoom()">创建房间</button>
           <div class="room-result" id="room-result">
-            <div class="tip">房间创建成功，请让客户电脑运行桥接器并输入房间码</div>
+            <div class="tip" data-i18n="room_ok_tip">房间创建成功，请让客户电脑运行桥接器并输入房间码</div>
             <div class="code" id="room-code"></div>
             <div class="actions">
-              <a class="btn-enter" id="room-enter" href="#">进入对话</a>
-              <button class="btn-ghost" onclick="copyRoomCode()">复制房间码</button>
+              <a class="btn-enter" id="room-enter" href="#" data-i18n="enter_chat">进入对话</a>
+              <button class="btn-ghost" data-i18n="copy_room" onclick="copyRoomCode()">复制房间码</button>
             </div>
           </div>
         </div>
@@ -265,70 +272,70 @@
 
       <!-- 加入房间 -->
       <section class="page" id="page-join">
-        <div class="page-title">⇄ 加入房间</div>
-        <div class="page-desc">输入 8 位房间码，进入已有诊断会话</div>
+        <div class="page-title">⇄ <span data-i18n="nav_join">加入房间</span></div>
+        <div class="page-desc" data-i18n="join_desc">输入 8 位房间码，进入已有诊断会话</div>
         <div class="panel">
-          <div class="field"><label>房间码</label><input id="f-join" maxlength="8" placeholder="如 AB12CDEF" style="text-transform:uppercase;letter-spacing:3px;font-size:18px;"></div>
-          <button class="btn-main btn-green" onclick="joinRoom()">进入对话</button>
+          <div class="field"><label data-i18n="lbl_room_code">房间码</label><input id="f-join" maxlength="8" data-i18n-placeholder="ph_room_code" placeholder="如 AB12CDEF" style="text-transform:uppercase;letter-spacing:3px;font-size:18px;"></div>
+          <button class="btn-main btn-green" data-i18n="btn_join" onclick="joinRoom()">进入对话</button>
         </div>
       </section>
 
       <!-- 下载桥接器 -->
       <section class="page" id="page-download">
-        <div class="page-title">📦 下载桥接器</div>
-        <div class="page-desc">在需要诊断的电脑上运行桥接器，输入房间码完成配对</div>
+        <div class="page-title">📦 <span data-i18n="nav_download">下载桥接器</span></div>
+        <div class="page-desc" data-i18n="dl_desc">在需要诊断的电脑上运行桥接器，输入房间码完成配对</div>
         <div class="panel">
           <div class="dl-row">
-            <a class="dl-btn" href="/static/bridge-win64.exe" download>⬇ Windows 桥接器 (bridge-win64.exe, 4.8MB)</a>
-            <a class="dl-btn" href="/static/bridge-linux-amd64" download>⬇ Linux x86_64 桥接器</a>
+            <a class="dl-btn" href="/static/bridge-win64.exe" download data-i18n="dl_win">⬇ Windows 桥接器 (bridge-win64.exe, 4.8MB)</a>
+            <a class="dl-btn" href="/static/bridge-linux-amd64" download data-i18n="dl_linux">⬇ Linux x86_64 桥接器</a>
             <div class="dl-cmd">
               <span>curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span>
-              <span class="dl-copy" onclick="copyCmd(this)">复制</span>
+              <span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span>
             </div>
           </div>
-          <div class="dl-note">Linux 其他架构（ARM64 / 龙芯）请从管理后台获取。<br>运行后按提示输入服务器地址与 8 位房间码即可连接。</div>
+          <div class="dl-note" data-i18n="dl_note">Linux 其他架构（ARM64 / 龙芯）请从管理后台获取。<br>运行后按提示输入服务器地址与 8 位房间码即可连接。</div>
         </div>
       </section>
 
       <!-- 修改密码 -->
       <section class="page" id="page-password">
-        <div class="page-title">🔒 修改密码</div>
-        <div class="page-desc">定期修改密码保护账号安全</div>
+        <div class="page-title">🔒 <span data-i18n="nav_password">修改密码</span></div>
+        <div class="page-desc" data-i18n="pwd_desc">定期修改密码保护账号安全</div>
         <div class="panel">
           <div class="msg-box" id="pwd-msg"></div>
-          <div class="field"><label>旧密码</label><input id="p-old" type="password"></div>
-          <div class="field"><label>新密码（至少 4 位）</label><input id="p-new" type="password"></div>
-          <div class="field"><label>确认新密码</label><input id="p-new2" type="password"></div>
-          <button class="btn-main" onclick="changePwd()">确认修改</button>
+          <div class="field"><label data-i18n="lbl_old">旧密码</label><input id="p-old" type="password"></div>
+          <div class="field"><label data-i18n="lbl_new">新密码（至少 4 位）</label><input id="p-new" type="password"></div>
+          <div class="field"><label data-i18n="lbl_confirm">确认新密码</label><input id="p-new2" type="password"></div>
+          <button class="btn-main" data-i18n="btn_change" onclick="changePwd()">确认修改</button>
         </div>
       </section>
 
       <!-- 账号管理（仅管理员） -->
       <section class="page" id="page-users">
-        <div class="page-title">👥 账号管理</div>
-        <div class="page-desc">创建工程师账号、停用/启用、重置密码</div>
+        <div class="page-title">👥 <span data-i18n="nav_users">账号管理</span></div>
+        <div class="page-desc" data-i18n="users_desc">创建工程师账号、停用/启用、重置密码</div>
         <div class="toolbar">
-          <button class="btn-main" onclick="showCreateUser()">+ 新建账号</button>
+          <button class="btn-main" data-i18n="btn_new_user" onclick="showCreateUser()">+ 新建账号</button>
           <span class="count" id="user-count"></span>
         </div>
         <div class="panel" id="create-user-panel" style="display:none;margin-bottom:16px;">
           <div class="msg-box" id="user-msg"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;">
-            <div class="field"><label>工号</label><input id="u-username" placeholder="如 E10086"></div>
-            <div class="field"><label>姓名</label><input id="u-name" placeholder="如 张三"></div>
-            <div class="field"><label>角色</label>
-              <select id="u-role"><option value="engineer">工程师</option><option value="admin">管理员</option></select>
+            <div class="field"><label data-i18n="lbl_username">工号</label><input id="u-username" data-i18n-placeholder="ph_username" placeholder="如 E10086"></div>
+            <div class="field"><label data-i18n="lbl_name">姓名</label><input id="u-name" data-i18n-placeholder="ph_name" placeholder="如 张三"></div>
+            <div class="field"><label data-i18n="lbl_role">角色</label>
+              <select id="u-role"><option value="engineer" data-i18n="role_engineer">工程师</option><option value="admin" data-i18n="role_admin">管理员</option></select>
             </div>
-            <div class="field"><label>初始密码</label><input id="u-password" placeholder="至少 4 位"></div>
+            <div class="field"><label data-i18n="lbl_init_pwd">初始密码</label><input id="u-password" data-i18n-placeholder="ph_init_pwd" placeholder="至少 4 位"></div>
           </div>
           <div style="display:flex;gap:10px;">
-            <button class="btn-main" onclick="createUser()">创建账号</button>
-            <button class="btn-ghost" onclick="document.getElementById('create-user-panel').style.display='none'">取消</button>
+            <button class="btn-main" data-i18n="btn_create_user" onclick="createUser()">创建账号</button>
+            <button class="btn-ghost" data-i18n="btn_cancel" onclick="document.getElementById('create-user-panel').style.display='none'">取消</button>
           </div>
         </div>
         <table>
-          <thead><tr><th>ID</th><th>工号</th><th>姓名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
-          <tbody id="user-tbody"><tr><td colspan="7" class="empty">加载中...</td></tr></tbody>
+          <thead><tr><th data-i18n="th_id">ID</th><th data-i18n="th_username">工号</th><th data-i18n="lbl_name">姓名</th><th data-i18n="lbl_role">角色</th><th data-i18n="th_status">状态</th><th data-i18n="th_created">创建时间</th><th data-i18n="th_action">操作</th></tr></thead>
+          <tbody id="user-tbody"><tr><td colspan="7" class="empty" data-i18n="loading">加载中...</td></tr></tbody>
         </table>
       </section>
 
@@ -339,6 +346,185 @@
 <div class="toast" id="toast"></div>
 
 <script>
+const I18N = {
+  'zh-CN': {
+    nav_workorders: '我的工单', nav_chat: '对话', nav_create: '创建房间', nav_join: '加入房间',
+    nav_download: '下载桥接器', nav_password: '修改密码', nav_users: '账号管理', nav_admin: '管理后台',
+    logout: '退出登录',
+    wo_desc: '当前账号处理过的诊断房间',
+    search_ph: '按 SN / 工单号 / 型号 / 房间码搜索',
+    th_room: '房间码', th_model: '型号', th_ticket: '工单号', th_created: '创建时间', th_last: '最后活动', th_status: '状态', th_action: '操作',
+    status_on: '连接中', status_off: '已断开',
+    enter_chat: '进入对话',
+    loading: '加载中...',
+    count_prefix: '共 ', count_suffix: ' 条',
+    empty_rooms: '暂无工单记录，左侧点「创建房间」开始',
+    load_fail: '加载失败',
+    create_desc: '需绑定电脑 SN 与报修工单号，生成 8 位房间码用于桥接器配对',
+    lbl_sn: 'SN 序列号', lbl_ticket: '报修工单号', lbl_model: '机器型号（选填）',
+    ph_sn: '如 PC204XF3', ph_ticket: '如 202608063200477002', ph_model: '如 ThinkPad X1 Carbon',
+    btn_create: '创建房间', creating: '创建中...',
+    need_sn: '请填写 SN 序列号', need_ticket: '请填写报修工单号',
+    room_ok_tip: '房间创建成功，请让客户电脑运行桥接器并输入房间码',
+    copy_room: '复制房间码', copied_room: '房间码已复制',
+    join_desc: '输入 8 位房间码，进入已有诊断会话',
+    lbl_room_code: '房间码', ph_room_code: '如 AB12CDEF',
+    btn_join: '进入对话',
+    need_code: '请输入 8 位房间码',
+    room_not_found: '房间不存在，请确认房间码或先创建房间',
+    check_fail: '校验失败',
+    dl_desc: '在需要诊断的电脑上运行桥接器，输入房间码完成配对',
+    dl_win: '⬇ Windows 桥接器 (bridge-win64.exe, 4.8MB)', dl_linux: '⬇ Linux x86_64 桥接器',
+    copy: '复制', copied_cmd: '命令已复制',
+    dl_note: 'Linux 其他架构（ARM64 / 龙芯）请从管理后台获取。<br>运行后按提示输入服务器地址与 8 位房间码即可连接。',
+    pwd_desc: '定期修改密码保护账号安全',
+    lbl_old: '旧密码', lbl_new: '新密码（至少 4 位）', lbl_confirm: '确认新密码',
+    btn_change: '确认修改',
+    pwd_mismatch: '两次输入的新密码不一致', pwd_short: '新密码至少 4 位', pwd_ok: '密码修改成功', pwd_fail: '修改失败',
+    users_desc: '创建工程师账号、停用/启用、重置密码',
+    btn_new_user: '+ 新建账号',
+    lbl_username: '工号', lbl_name: '姓名', lbl_role: '角色', lbl_init_pwd: '初始密码',
+    ph_username: '如 E10086', ph_name: '如 张三', ph_init_pwd: '至少 4 位',
+    role_engineer: '工程师', role_admin: '管理员',
+    btn_create_user: '创建账号', btn_cancel: '取消',
+    th_id: 'ID', th_username: '工号',
+    need_username: '工号必填', user_created: '创建成功', no_perm: '无权限',
+    empty_users: '暂无账号',
+    status_enabled: '启用', status_disabled: '停用',
+    btn_disable: '停用', btn_enable: '启用', btn_reset: '重置密码',
+    reset_ok: '密码已重置', op_fail: '操作失败',
+    chat_empty1: '尚未选择房间', chat_empty2: '在「我的工单」里点「进入对话」，或创建/加入房间后自动打开',
+    room_prefix: '房间: ',
+    net_err: '网络错误',
+    user_guest: '未登录', user_admin: ' (管理员)', user_prefix: '工号: ',
+  },
+  'zh-TW': {
+    nav_workorders: '我的工單', nav_chat: '對話', nav_create: '創建房間', nav_join: '加入房間',
+    nav_download: '下載橋接器', nav_password: '修改密碼', nav_users: '帳號管理', nav_admin: '管理後台',
+    logout: '退出登錄',
+    wo_desc: '當前帳號處理過的診斷房間',
+    search_ph: '按 SN / 工單號 / 型號 / 房間碼搜索',
+    th_room: '房間碼', th_model: '型號', th_ticket: '工單號', th_created: '創建時間', th_last: '最後活動', th_status: '狀態', th_action: '操作',
+    status_on: '連接中', status_off: '已斷開',
+    enter_chat: '進入對話',
+    loading: '加載中...',
+    count_prefix: '共 ', count_suffix: ' 條',
+    empty_rooms: '暫無工單記錄，左側點「創建房間」開始',
+    load_fail: '加載失敗',
+    create_desc: '需綁定電腦 SN 與報修工單號，生成 8 位房間碼用於橋接器配對',
+    lbl_sn: 'SN 序號', lbl_ticket: '報修工單號', lbl_model: '機器型號（選填）',
+    ph_sn: '如 PC204XF3', ph_ticket: '如 202608063200477002', ph_model: '如 ThinkPad X1 Carbon',
+    btn_create: '創建房間', creating: '創建中...',
+    need_sn: '請填寫 SN 序號', need_ticket: '請填寫報修工單號',
+    room_ok_tip: '房間創建成功，請讓客戶電腦運行橋接器並輸入房間碼',
+    copy_room: '複製房間碼', copied_room: '房間碼已複製',
+    join_desc: '輸入 8 位房間碼，進入已有診斷會話',
+    lbl_room_code: '房間碼', ph_room_code: '如 AB12CDEF',
+    btn_join: '進入對話',
+    need_code: '請輸入 8 位房間碼',
+    room_not_found: '房間不存在，請確認房間碼或先創建房間',
+    check_fail: '校驗失敗',
+    dl_desc: '在需要診斷的電腦上運行橋接器，輸入房間碼完成配對',
+    dl_win: '⬇ Windows 橋接器 (bridge-win64.exe, 4.8MB)', dl_linux: '⬇ Linux x86_64 橋接器',
+    copy: '複製', copied_cmd: '命令已複製',
+    dl_note: 'Linux 其他架構（ARM64 / 龍芯）請從管理後台獲取。<br>運行後按提示輸入服務器地址與 8 位房間碼即可連接。',
+    pwd_desc: '定期修改密碼保護帳號安全',
+    lbl_old: '舊密碼', lbl_new: '新密碼（至少 4 位）', lbl_confirm: '確認新密碼',
+    btn_change: '確認修改',
+    pwd_mismatch: '兩次輸入的新密碼不一致', pwd_short: '新密碼至少 4 位', pwd_ok: '密碼修改成功', pwd_fail: '修改失敗',
+    users_desc: '創建工程師帳號、停用/啟用、重置密碼',
+    btn_new_user: '+ 新建帳號',
+    lbl_username: '工號', lbl_name: '姓名', lbl_role: '角色', lbl_init_pwd: '初始密碼',
+    ph_username: '如 E10086', ph_name: '如 張三', ph_init_pwd: '至少 4 位',
+    role_engineer: '工程師', role_admin: '管理員',
+    btn_create_user: '創建帳號', btn_cancel: '取消',
+    th_id: 'ID', th_username: '工號',
+    need_username: '工號必填', user_created: '創建成功', no_perm: '無權限',
+    empty_users: '暫無帳號',
+    status_enabled: '啟用', status_disabled: '停用',
+    btn_disable: '停用', btn_enable: '啟用', btn_reset: '重置密碼',
+    reset_ok: '密碼已重置', op_fail: '操作失敗',
+    chat_empty1: '尚未選擇房間', chat_empty2: '在「我的工單」裡點「進入對話」，或創建/加入房間後自動打開',
+    room_prefix: '房間: ',
+    net_err: '網路錯誤',
+    user_guest: '未登錄', user_admin: ' (管理員)', user_prefix: '工號: ',
+  },
+  'en': {
+    nav_workorders: 'Work Orders', nav_chat: 'Chat', nav_create: 'Create Room', nav_join: 'Join Room',
+    nav_download: 'Download Bridge', nav_password: 'Change Password', nav_users: 'Accounts', nav_admin: 'Admin Console',
+    logout: 'Logout',
+    wo_desc: 'Diagnosis rooms handled by this account',
+    search_ph: 'Search by SN / ticket / model / room code',
+    th_room: 'Room', th_model: 'Model', th_ticket: 'Ticket', th_created: 'Created', th_last: 'Last Active', th_status: 'Status', th_action: 'Action',
+    status_on: 'Connected', status_off: 'Disconnected',
+    enter_chat: 'Open Chat',
+    loading: 'Loading...',
+    count_prefix: '', count_suffix: ' total',
+    empty_rooms: 'No work orders yet. Create a room from the left menu',
+    load_fail: 'Load failed',
+    create_desc: 'Bind PC SN and repair ticket no. to generate an 8-digit room code',
+    lbl_sn: 'SN', lbl_ticket: 'Ticket No.', lbl_model: 'Machine Model (optional)',
+    ph_sn: 'e.g. PC204XF3', ph_ticket: 'e.g. 202608063200477002', ph_model: 'e.g. ThinkPad X1 Carbon',
+    btn_create: 'Create Room', creating: 'Creating...',
+    need_sn: 'Please enter SN', need_ticket: 'Please enter ticket no.',
+    room_ok_tip: 'Room created. Run the bridge on the customer PC and enter the room code',
+    copy_room: 'Copy Code', copied_room: 'Room code copied',
+    join_desc: 'Enter an 8-digit room code to open an existing session',
+    lbl_room_code: 'Room Code', ph_room_code: 'e.g. AB12CDEF',
+    btn_join: 'Join',
+    need_code: 'Please enter the 8-digit room code',
+    room_not_found: 'Room not found. Check the code or create a room first',
+    check_fail: 'Verification failed',
+    dl_desc: 'Run the bridge on the PC to diagnose and enter the room code',
+    dl_win: '⬇ Windows Bridge (bridge-win64.exe, 4.8MB)', dl_linux: '⬇ Linux x86_64 Bridge',
+    copy: 'Copy', copied_cmd: 'Command copied',
+    dl_note: 'Other Linux architectures (ARM64 / LoongArch) available from the admin console.<br>Run it and enter the server address and 8-digit room code.',
+    pwd_desc: 'Change your password regularly to keep your account safe',
+    lbl_old: 'Current Password', lbl_new: 'New Password (min 4)', lbl_confirm: 'Confirm New Password',
+    btn_change: 'Change Password',
+    pwd_mismatch: 'Passwords do not match', pwd_short: 'Password must be at least 4 characters', pwd_ok: 'Password changed', pwd_fail: 'Change failed',
+    users_desc: 'Create engineer accounts, disable/enable, reset passwords',
+    btn_new_user: '+ New Account',
+    lbl_username: 'Username', lbl_name: 'Name', lbl_role: 'Role', lbl_init_pwd: 'Initial Password',
+    ph_username: 'e.g. E10086', ph_name: 'e.g. Zhang San', ph_init_pwd: 'min 4 chars',
+    role_engineer: 'Engineer', role_admin: 'Admin',
+    btn_create_user: 'Create', btn_cancel: 'Cancel',
+    th_id: 'ID', th_username: 'Username',
+    need_username: 'Username required', user_created: 'created', no_perm: 'No permission',
+    empty_users: 'No accounts',
+    status_enabled: 'Enabled', status_disabled: 'Disabled',
+    btn_disable: 'Disable', btn_enable: 'Enable', btn_reset: 'Reset Password',
+    reset_ok: 'Password reset', op_fail: 'Operation failed',
+    chat_empty1: 'No room selected', chat_empty2: 'Click "Open Chat" in Work Orders, or create/join a room to open it',
+    room_prefix: 'Room: ',
+    net_err: 'Network error',
+    user_guest: 'Not logged in', user_admin: ' (Admin)', user_prefix: 'ID: ',
+  },
+};
+
+let currentLang = localStorage.getItem('bridge_ui_lang') || 'zh-CN';
+function t(key) { return I18N[currentLang]?.[key] || I18N['zh-CN'][key] || key; }
+
+function applyLang(lang) {
+  currentLang = lang;
+  localStorage.setItem('bridge_ui_lang', lang);
+  const switcher = document.getElementById('lang-switcher');
+  if (switcher) switcher.value = lang;
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+  // 动态内容重渲染
+  renderRooms();
+  if (currentRole === 'admin') loadUsers();
+  // 同步对话页 iframe（同源可直接调用其 applyLang）
+  const frame = document.getElementById('chat-frame');
+  if (frame && frame.contentWindow && typeof frame.contentWindow.applyLang === 'function') {
+    try { frame.contentWindow.applyLang(lang); } catch (e) { /* ignore */ }
+  }
+}
+
+function switchLang(lang) { applyLang(lang); }
+
 let allRooms = [];
 let currentRole = 'engineer';
 
@@ -360,7 +546,7 @@ function openChat(room) {
   currentChatRoom = room;
   document.getElementById('chat-frame-wrap').style.display = 'block';
   document.getElementById('chat-empty').style.display = 'none';
-  document.getElementById('chat-room-tag').textContent = '房间: ' + room;
+  document.getElementById('chat-room-tag').textContent = t('room_prefix') + room;
   document.getElementById('chat-frame').src = '/chat?room=' + room;
   switchTab('chat');
 }
@@ -377,7 +563,7 @@ async function loadMe() {
     const data = await resp.json();
     if (data.error) { location.href = '/login'; return; }
     currentRole = data.role;
-    document.getElementById('user-name').textContent = '工号: ' + data.username + (data.role === 'admin' ? ' (管理员)' : '');
+    document.getElementById('user-name').textContent = t('user_prefix') + data.username + (data.role === 'admin' ? t('user_admin') : '');
     if (data.role === 'admin') {
       document.querySelectorAll('.admin-only').forEach(el => el.classList.add('show'));
     }
@@ -395,10 +581,10 @@ async function createRoom() {
   const model = document.getElementById('f-model').value.trim();
   const msg = document.getElementById('create-msg');
   msg.className = 'msg-box';
-  if (!sn) { msg.textContent = '请填写 SN 序列号'; msg.className = 'msg-box err'; return; }
-  if (!ticket) { msg.textContent = '请填写报修工单号'; msg.className = 'msg-box err'; return; }
+  if (!sn) { msg.textContent = t('need_sn'); msg.className = 'msg-box err'; return; }
+  if (!ticket) { msg.textContent = t('need_ticket'); msg.className = 'msg-box err'; return; }
   const btn = document.getElementById('create-btn');
-  btn.disabled = true; btn.textContent = '创建中...';
+  btn.disabled = true; btn.textContent = t('creating');
   try {
     const resp = await fetch('/api/rooms', {
       method: 'POST',
@@ -406,7 +592,7 @@ async function createRoom() {
       body: JSON.stringify({ sn, ticket_no: ticket, machine_model: model }),
     });
     const data = await resp.json();
-    if (!resp.ok) { msg.textContent = data.error || '创建失败'; msg.className = 'msg-box err'; btn.disabled = false; btn.textContent = '创建房间'; return; }
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; btn.disabled = false; btn.textContent = t('btn_create'); return; }
     document.getElementById('room-code').textContent = data.room_code;
     document.getElementById('room-enter').onclick = function (e) { e.preventDefault(); openChat(data.room_code); };
     document.getElementById('room-result').style.display = 'block';
@@ -414,26 +600,26 @@ async function createRoom() {
     document.getElementById('f-ticket').value = '';
     document.getElementById('f-model').value = '';
     loadRooms();
-  } catch (e) { msg.textContent = '网络错误: ' + e.message; msg.className = 'msg-box err'; }
-  btn.disabled = false; btn.textContent = '创建房间';
+  } catch (e) { msg.textContent = t('net_err') + ': ' + e.message; msg.className = 'msg-box err'; }
+  btn.disabled = false; btn.textContent = t('btn_create');
 }
 
 function copyRoomCode() {
   const code = document.getElementById('room-code').textContent;
-  copyText(code).then(() => showToast('房间码已复制: ' + code));
+  copyText(code).then(() => showToast(t('copied_room') + ': ' + code));
 }
 
 // ===== 加入房间 =====
 async function joinRoom() {
   const code = document.getElementById('f-join').value.trim().toUpperCase();
-  if (code.length !== 8) { showToast('请输入 8 位房间码'); return; }
+  if (code.length !== 8) { showToast(t('need_code')); return; }
   try {
     const resp = await fetch('/api/rooms/check/' + code);
     const data = await resp.json();
-    if (!resp.ok) { showToast(data.error || '校验失败'); return; }
-    if (!data.exists) { showToast('房间不存在，请确认房间码或先创建房间'); return; }
+    if (!resp.ok) { showToast(data.error || t('check_fail')); return; }
+    if (!data.exists) { showToast(t('room_not_found')); return; }
     openChat(code);
-  } catch (e) { showToast('网络错误: ' + e.message); }
+  } catch (e) { showToast(t('net_err') + ': ' + e.message); }
 }
 
 // ===== 工单列表 =====
@@ -444,7 +630,7 @@ async function loadRooms() {
     allRooms = data.rooms || [];
     renderRooms();
   } catch (e) {
-    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="8" class="empty">加载失败: ' + e.message + '</td></tr>';
+    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="8" class="empty">' + t('load_fail') + ': ' + e.message + '</td></tr>';
   }
 }
 
@@ -455,13 +641,13 @@ function renderRooms() {
     || r.ticket_no.toLowerCase().includes(kw)
     || (r.machine_model || '').toLowerCase().includes(kw)
     || r.room_code.toLowerCase().includes(kw));
-  document.getElementById('room-count').textContent = '共 ' + list.length + ' 条';
+  document.getElementById('room-count').textContent = t('count_prefix') + list.length + t('count_suffix');
   if (!list.length) {
-    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="8" class="empty">暂无工单记录，左侧点「创建房间」开始</td></tr>';
+    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="8" class="empty">' + t('empty_rooms') + '</td></tr>';
     return;
   }
   document.getElementById('room-tbody').innerHTML = list.map(r => {
-    const st = r.bridge_online ? '<span class="status on">连接中</span>' : '<span class="status off">已断开</span>';
+    const st = r.bridge_online ? '<span class="status on">' + t('status_on') + '</span>' : '<span class="status off">' + t('status_off') + '</span>';
     return '<tr>'
       + '<td class="mono">' + r.room_code + '</td>'
       + '<td>' + r.sn + '</td>'
@@ -470,7 +656,7 @@ function renderRooms() {
       + '<td>' + (r.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td>' + (r.last_seen || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td>' + st + '</td>'
-      + '<td><button class="btn-sm" onclick="openChat(\'' + r.room_code + '\')">进入对话</button></td>'
+      + '<td><button class="btn-sm" onclick="openChat(\'' + r.room_code + '\')">' + t('enter_chat') + '</button></td>'
       + '</tr>';
   }).join('');
 }
@@ -482,8 +668,8 @@ async function changePwd() {
   const newPw2 = document.getElementById('p-new2').value;
   const msg = document.getElementById('pwd-msg');
   msg.className = 'msg-box';
-  if (newPw !== newPw2) { msg.textContent = '两次输入的新密码不一致'; msg.className = 'msg-box err'; return; }
-  if (newPw.length < 4) { msg.textContent = '新密码至少 4 位'; msg.className = 'msg-box err'; return; }
+  if (newPw !== newPw2) { msg.textContent = t('pwd_mismatch'); msg.className = 'msg-box err'; return; }
+  if (newPw.length < 4) { msg.textContent = t('pwd_short'); msg.className = 'msg-box err'; return; }
   try {
     const resp = await fetch('/api/auth/change_password', {
       method: 'POST',
@@ -491,13 +677,13 @@ async function changePwd() {
       body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
     });
     const data = await resp.json();
-    if (!resp.ok) { msg.textContent = data.error || '修改失败'; msg.className = 'msg-box err'; return; }
-    msg.textContent = '✅ 密码修改成功';
+    if (!resp.ok) { msg.textContent = data.error || t('pwd_fail'); msg.className = 'msg-box err'; return; }
+    msg.textContent = '✅ ' + t('pwd_ok');
     msg.className = 'msg-box ok';
     document.getElementById('p-old').value = '';
     document.getElementById('p-new').value = '';
     document.getElementById('p-new2').value = '';
-  } catch (e) { msg.textContent = '网络错误: ' + e.message; msg.className = 'msg-box err'; }
+  } catch (e) { msg.textContent = t('net_err') + ': ' + e.message; msg.className = 'msg-box err'; }
 }
 
 // ===== 账号管理（管理员） =====
@@ -515,8 +701,8 @@ async function createUser() {
   const password = document.getElementById('u-password').value;
   const msg = document.getElementById('user-msg');
   msg.className = 'msg-box';
-  if (!username) { msg.textContent = '工号必填'; msg.className = 'msg-box err'; return; }
-  if (password.length < 4) { msg.textContent = '初始密码至少 4 位'; msg.className = 'msg-box err'; return; }
+  if (!username) { msg.textContent = t('need_username'); msg.className = 'msg-box err'; return; }
+  if (password.length < 4) { msg.textContent = t('pwd_short'); msg.className = 'msg-box err'; return; }
   try {
     const resp = await fetch('/api/admin/users', {
       method: 'POST',
@@ -524,36 +710,36 @@ async function createUser() {
       body: JSON.stringify({ username, name, role, password }),
     });
     const data = await resp.json();
-    if (!resp.ok) { msg.textContent = data.error || '创建失败'; msg.className = 'msg-box err'; return; }
-    msg.textContent = '✅ 账号 ' + username + ' 创建成功';
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    msg.textContent = '✅ ' + username + ' ' + t('user_created');
     msg.className = 'msg-box ok';
     document.getElementById('u-username').value = '';
     document.getElementById('u-name').value = '';
     document.getElementById('u-password').value = '';
     loadUsers();
-  } catch (e) { msg.textContent = '网络错误: ' + e.message; msg.className = 'msg-box err'; }
+  } catch (e) { msg.textContent = t('net_err') + ': ' + e.message; msg.className = 'msg-box err'; }
 }
 
 async function loadUsers() {
   try {
     const resp = await fetch('/api/admin/users');
-    if (resp.status === 401) { showToast('无权限'); return; }
+    if (resp.status === 401) { showToast(t('no_perm')); return; }
     const data = await resp.json();
     renderUsers(data.users || []);
   } catch (e) {
-    document.getElementById('user-tbody').innerHTML = '<tr><td colspan="7" class="empty">加载失败: ' + e.message + '</td></tr>';
+    document.getElementById('user-tbody').innerHTML = '<tr><td colspan="7" class="empty">' + t('load_fail') + ': ' + e.message + '</td></tr>';
   }
 }
 
 function renderUsers(users) {
-  document.getElementById('user-count').textContent = '共 ' + users.length + ' 个账号';
+  document.getElementById('user-count').textContent = t('count_prefix') + users.length + t('count_suffix');
   if (!users.length) {
-    document.getElementById('user-tbody').innerHTML = '<tr><td colspan="7" class="empty">暂无账号</td></tr>';
+    document.getElementById('user-tbody').innerHTML = '<tr><td colspan="7" class="empty">' + t('empty_users') + '</td></tr>';
     return;
   }
   document.getElementById('user-tbody').innerHTML = users.map(u => {
-    const st = u.enabled ? '<span class="status on">启用</span>' : '<span class="status disabled">停用</span>';
-    const roleTxt = u.role === 'admin' ? '管理员' : '工程师';
+    const st = u.enabled ? '<span class="status on">' + t('status_enabled') + '</span>' : '<span class="status disabled">' + t('status_disabled') + '</span>';
+    const roleTxt = u.role === 'admin' ? t('role_admin') : t('role_engineer');
     return '<tr>'
       + '<td>' + u.id + '</td>'
       + '<td class="mono">' + u.username + '</td>'
@@ -562,28 +748,30 @@ function renderUsers(users) {
       + '<td>' + st + '</td>'
       + '<td>' + (u.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td><div class="row-actions">'
-      + '<button class="btn-sm" onclick="toggleUser(\'' + u.username + '\')">' + (u.enabled ? '停用' : '启用') + '</button>'
-      + '<button class="btn-sm" onclick="resetPwd(\'' + u.username + '\')">重置密码</button>'
+      + '<button class="btn-sm" onclick="toggleUser(\'' + u.username + '\')">' + (u.enabled ? t('btn_disable') : t('btn_enable')) + '</button>'
+      + '<button class="btn-sm" onclick="resetPwd(\'' + u.username + '\')">' + t('btn_reset') + '</button>'
       + '</div></td>'
       + '</tr>';
   }).join('');
 }
 
 async function toggleUser(username) {
-  if (!confirm('确定' + (document.activeElement.textContent || '') + '账号 ' + username + ' 吗？')) return;
+  const btn = document.activeElement;
+  const action = btn && btn.textContent ? btn.textContent.trim() : t('btn_disable');
+  if (!confirm(action + ' ' + username + ' ?')) return;
   try {
     const resp = await fetch('/api/admin/users/' + username + '/toggle', { method: 'POST' });
     const data = await resp.json();
-    if (!resp.ok) { showToast(data.error || '操作失败'); return; }
-    showToast((data.enabled ? '已启用 ' : '已停用 ') + username);
+    if (!resp.ok) { showToast(data.error || t('op_fail')); return; }
+    showToast((data.enabled ? t('status_enabled') : t('status_disabled')) + ' ' + username);
     loadUsers();
-  } catch (e) { showToast('网络错误: ' + e.message); }
+  } catch (e) { showToast(t('net_err') + ': ' + e.message); }
 }
 
 async function resetPwd(username) {
-  const newPw = prompt('为账号 ' + username + ' 设置新密码（至少 4 位）:');
+  const newPw = prompt(t('btn_reset') + ' ' + username + ':');
   if (!newPw) return;
-  if (newPw.length < 4) { showToast('密码至少 4 位'); return; }
+  if (newPw.length < 4) { showToast(t('pwd_short')); return; }
   try {
     const resp = await fetch('/api/admin/users/' + username + '/reset_password', {
       method: 'POST',
@@ -591,9 +779,9 @@ async function resetPwd(username) {
       body: JSON.stringify({ new_password: newPw }),
     });
     const data = await resp.json();
-    if (!resp.ok) { showToast(data.error || '重置失败'); return; }
-    showToast('✅ ' + username + ' 密码已重置');
-  } catch (e) { showToast('网络错误: ' + e.message); }
+    if (!resp.ok) { showToast(data.error || t('op_fail')); return; }
+    showToast('✅ ' + username + ' ' + t('reset_ok'));
+  } catch (e) { showToast(t('net_err') + ': ' + e.message); }
 }
 
 // ===== 工具 =====
@@ -606,7 +794,7 @@ function showToast(msg) {
 
 function copyCmd(el) {
   const cmd = el.parentElement.querySelector('span').textContent;
-  copyText(cmd).then(() => showToast('命令已复制'));
+  copyText(cmd).then(() => showToast(t('copied_cmd')));
 }
 
 // 通用复制：HTTP 环境下 navigator.clipboard 不可用（非安全上下文），自动降级 execCommand
@@ -633,6 +821,7 @@ document.getElementById('f-sn').addEventListener('keydown', (e) => { if (e.key =
 document.getElementById('f-ticket').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRoom(); });
 
 // ===== Init =====
+applyLang(currentLang);
 loadMe();
 loadRooms();
 </script>

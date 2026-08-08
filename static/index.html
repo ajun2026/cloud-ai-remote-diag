@@ -1231,7 +1231,7 @@ function sendMessage() {
   const text = inputBox.value.trim();
   if (!text || !ws || ws.readyState !== WebSocket.OPEN || !bridgeConnected) return;
   addUserMessage(text);
-  ws.send(JSON.stringify({ type: 'chat', content: text }));  // brain 默认 hermes（服务端）
+  ws.send(JSON.stringify({ type: 'chat', content: text, lang: currentLang }));  // brain 默认 hermes（服务端）；lang 控制 AI 回复语言
   inputBox.value = ''; inputBox.style.height = 'auto'; sendBtn.disabled = true;
 }
 
