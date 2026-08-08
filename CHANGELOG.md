@@ -4,7 +4,51 @@
 
 ---
 
----
+## v0.8.0 — 2026-08-08（登录体系 + 工作台 + 房间业务绑定 + 对话上下文）
+
+### 一、用户登录体系（原无登录，人人可创建房间）
+
+**需求来源**：系统面向联想售后工程师，不能人人拿到链接就建房间；每台电脑有 SN、报修有工单号、工程师有工号，房间必须与业务信息关联。
+
+- **users 表**（SQLite）：工号（登录账号）、姓名、密码（PBKDF2 哈希，salt$hash）、角色（admin/engineer）
+- **认证 API**：`/api/auth/login` / `logout` / `me` / `change_password`，session cookie（12 小时）
+- **种子账号**：首次启动自动创建 admin（沿用环境变量）+ test1~test10（测试账号，密码同工号）
+- **改密**：验证旧密码 → 设新密码（至少 4 位），登录后工作台右上角入口
+- **管理后台兼容**：`_require_admin` 同时接受旧 admin_token 与 user_token(role=admin)
+
+### 二、工作台 dashboard.html（登录后主页，功能模块化，无弹窗）
+
+- 顶部：工号 + 修改密码 + 退出登录
+- 三个功能卡片：
+  - **创建房间**：必填 SN / 工单号（型号选填），创建成功后原地显示 8 位房间码 + 一键复制 + 进入房间
+  - **加入房间**：输入 8 位码，先校验 rooms 表存在再进入
+  - **下载桥接器**：Windows / Linux 下载 + install-linux.sh 一键命令
+- **我的工单**：当前工程师的房间列表（房间码/SN/型号/工单号/创建时间/最后活动/状态），按 SN/工单/型号搜索
+- 房间状态 = **连接中**（bridge 在线）/ **已断开**（实时从内存 Room 判断）
+
+### 三、房间业务绑定（防止绕过创建限制）
+
+- `POST /api/rooms`：需登录 + SN/工单号必填 → 生成 8 位码 → 写 rooms 表（room_code/sn/ticket_no/machine_model/engineer_username/created_at）
+- **8 位房间码**：字符集去掉易混字符（O/0、I/1、L、Z/2、S/5），如 `D6NQ7BBY`，电话报读不易错
+- **WebSocket 校验**：ws_browser / ws_bridge 连接时，房间必须先存在于 rooms 表（服务重启后从 DB 重建内存 Room），否则拒绝连接——彻底杜绝"任意码自动建房间"绕过
+- 归档：按 房间码 + SN + 创建日期 统计（/api/my_rooms、管理后台可查）
+
+### 四、对话上下文（原两大脑每轮失忆）
+
+- `get_recent_context()`：取该房间最近 20 条 user/ai 消息（每条截断 600 字符），注入 DeepSeek 与 Hermes 两个通道的请求
+- 前端断线重连 / 刷新后自动调 `/api/history/{room}` 恢复历史对话（tool 消息不恢复，避免工具卡片状态混乱）
+- `/api/history/{room}` 从 admin 限定改为登录用户可访问
+
+### 五、大脑策略调整
+
+- **默认大脑 = Hermes**（AGENT_BRAIN 默认 hermes，.env 同步）
+- 对话页大脑切换下拉**移除**（前端不再展示），DeepSeek 通道代码保留兜底
+- 对话页从 URL `?room=` 进入；无 room 参数跳工作台；顶部新增「← 工作台」返回按钮
+
+### 六、数据清理
+
+- 用户要求旧房间全部删除：messages（1466 条）/ approvals（250 条）/ rooms 全部清空，users 保留
+- 页面文件拆分：`login.html`（登录）/ `dashboard.html`（工作台）/ `index.html`（对话页改造）
 
 ## v0.7.0 — 2026-08-07（Hermes 大脑并存切换）
 

@@ -21,24 +21,32 @@ A cloud-based AI remote diagnostics system for Windows computers. Users describe
 ```
 Browser (Web UI)  <-->  Cloud Server (server.py)  <-->  Remote PC (Go bridge)
       |                        |                              |
-  Chat interface         FastAPI + Agent Core           Executes systeminfo/dxdiag/
-  3-language support     Brain 二选一 (brain 参数)        PowerShell/process mgmt/
-  Approval dialog        ├─ DeepSeek（默认, tool-calling）  49 diagnostic tools
-  大脑切换下拉           └─ Hermes（可选, 自治 agent）     Linux/macOS/Windows
-                         106.54.193.9:8000
+  Login page               FastAPI + Agent Core           Executes systeminfo/dxdiag/
+  Dashboard (工单)         Brain: Hermes（默认, 自治 agent） PowerShell/process mgmt/
+  Chat interface           └─ DeepSeek（兜底, 前端入口隐藏）   49 diagnostic tools
+  Approval dialog          106.54.193.9:8000              Linux/macOS/Windows
 ```
 
 ## Features
+
+### User Accounts & Dashboard (v0.8.0+)
+- **Login Required** -- 工号 + 密码登录（users 表，PBKDF2 密码哈希），未登录无法创建房间/进入对话
+- **Workbench Dashboard** -- 登录后进入工作台：创建房间 / 加入房间 / 下载桥接器三个功能卡片 + 我的工单台账
+- **Room Binding** -- 创建房间必须填写电脑 **SN 序列号 + 报修工单号**（型号选填），按 房间码 + SN + 日期 归档
+- **8-Digit Room Code** -- 大写字母+数字，去掉易混字符（O/0、I/1、L、Z/2、S/5），电话报读不易错
+- **My Work Orders** -- 只显示当前工程师的房间（房间码/SN/型号/工单号/状态），状态 = 连接中 / 已断开
+- **Change Password** -- 登录用户可修改自己的密码
+- **Conversation Memory** -- 两大脑请求自动携带最近 20 条对话历史；断线重连/刷新后自动恢复聊天记录
 
 ### AI-Powered Diagnostics
 - **Natural Language Interface** -- Describe your PC problem in plain language, AI plans and executes diagnostics
 - **49 Windows Tools** -- System info, screenshots, process monitoring, network tests, registry access, event logs, OCR, desktop control, and more
 - **Smart Analysis** -- AI collects data, analyzes results, and produces Chinese-language diagnostic reports with markdown formatting
 
-### Dual AI Brain (v0.7.0+)
-- **DeepSeek Brain (default)** -- Original tool-calling loop, zero-config, direct DeepSeek API
-- **Hermes Brain (optional)** -- Switch to Hermes Agent as the server-side brain via the 🧠 dropdown or `AGENT_BRAIN` env var; Hermes operates the remote PC through the HTTP bridge (`POST /api/bridge/execute`)
-- **Per-message switching** -- Each chat message carries a `brain` field, so you can A/B test both brains side by side
+### Dual AI Brain (v0.7.0+, Hermes 默认)
+- **Hermes Brain (default)** -- Hermes Agent 作为服务器端大脑，通过 HTTP 桥（`POST /api/bridge/execute`）操作远程电脑；前端切换下拉已移除
+- **DeepSeek Brain (fallback)** -- 原 tool-calling 通道，代码保留作为兜底（`AGENT_BRAIN=deepseek` 可切回）
+- **Conversation memory** -- 两通道均携带该房间最近 20 条对话，上下文连续
 - **Safety first** -- Hermes api_server toolsets are locked down to `web + terminal`; a "security red line" in its system prompt forbids touching server files/processes (see [集成记录](docs/Hermes大脑集成与调试记录.md))
 
 ### Safety and Approval System

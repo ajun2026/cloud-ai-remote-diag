@@ -9,19 +9,21 @@
 ```
 浏览器 (Web UI)  ←→  云端 Server (server.py)  ←→  本地桥接器 (bridge.exe on Windows)
      ↑                        ↑                         ↑
-  用户聊天界面            FastAPI + Agent核心          执行 systeminfo/dxdiag
-                         大脑二选一（brain 参数）        事件日志/PowerShell
-                         ├─ DeepSeek（默认，tool-calling）
-                         └─ Hermes（自治 agent，经 HTTP 桥）
+  登录页→工作台          FastAPI + Agent核心         执行 systeminfo/dxdiag/
+  工单台账→对话页       大脑：Hermes（默认，自治 agent） 事件日志/PowerShell
+  （登录+房间绑定）      └─ DeepSeek（兜底，前端入口隐藏）
                          106.54.193.9:8000
 ```
 
-## Hermes 大脑并存切换（v0.7.0）
+## v0.8.0：登录体系 + 工作台 + 房间业务绑定
 
-- **切换方式**：WebSocket 消息带 `brain` 字段（前端 🧠 下拉）或环境变量 `AGENT_BRAIN=deepseek|hermes`
-- **DeepSeek 通道**：原 `run_agent()` 循环（tool-calling，直连 DeepSeek API）
-- **Hermes 通道**：`run_agent_hermes()` → 本机 Hermes api_server（`127.0.0.1:8642`，自治 agent）→ 用 curl 调 `POST /api/bridge/execute`（X-Bridge-Secret 认证）操作远程电脑
-- **⚠️ 安全红线（重要）**：Hermes api_server 的 `platform_toolsets` 已最小化（仅 web+terminal）；**任何 Hermes agent 都禁止读取/修改本目录文件、禁止 pkill/重启服务、禁止 import server.py**——详见 `docs/Hermes大脑集成与调试记录.md` 事故复盘
+- **登录**：工号+密码（users 表，PBKDF2 哈希），种子账号 admin + test1~test10（密码同工号）
+- **工作台** `/dashboard`：创建房间（必填 SN+工单号，型号选填）、加入房间（8位码校验）、下载桥接器、我的工单列表（状态=连接中/已断开，可搜索）
+- **房间绑定**：`POST /api/rooms` 需登录，生成 8 位房间码（去易混字符 O/I/L/Z/S/0/1/2/5），写入 rooms 表
+- **WebSocket 校验**：ws_browser/ws_bridge 连接前必须 rooms 表存在该房间，否则拒绝——防绕过创建限制
+- **对话上下文**：`get_recent_context()` 注入最近 20 条历史到两大脑；前端断线重连自动恢复历史
+- **大脑**：默认 Hermes（AGENT_BRAIN=hermes），对话页无切换下拉；DeepSeek 通道代码保留兜底
+- **切换方式（保留兜底）**：`AGENT_BRAIN=deepseek` 环境变量可切回老通道
 
 ## 文件说明
 
