@@ -206,6 +206,12 @@
   .tool-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
   .tool-card-title { font-size: 15px; font-weight: 600; }
   .badge-write { background: rgba(248,81,73,.12); color: var(--error); border: 1px solid rgba(248,81,73,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .badge-read { background: rgba(52,120,246,.12); color: var(--info); border: 1px solid rgba(52,120,246,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .oa3-result { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 10px; background: var(--surface); }
+  .oa3-key-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .oa3-label { font-size: 13px; color: var(--text2); }
+  .oa3-key { font-size: 15px; font-weight: 600; letter-spacing: 1px; color: var(--success); word-break: break-all; }
+  .oa3-meta { font-size: 12px; color: var(--text2); margin: 8px 0; }
   .tool-card-desc { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
   .field-hint { font-size: 11px; color: var(--text2); margin-top: 4px; }
   .tool-warn { font-size: 12px; color: var(--warn); border: 1px solid rgba(255,165,0,.4); background: rgba(255,165,0,.08); padding: 8px 10px; border-radius: 6px; margin: 12px 0; }
@@ -378,6 +384,38 @@
 
           <div class="tool-steps" id="sntm-steps" style="display:none;"></div>
         </div>
+
+        <div class="panel" style="margin-top:20px;">
+          <div class="tool-card-head">
+            <div class="tool-card-title">🔑 OA3 密钥读取 / 激活系统</div>
+            <span class="badge badge-read" data-i18n="tools_read">只读 + 写入</span>
+          </div>
+          <div class="tool-card-desc" data-i18n="oa3_desc">读取主板内置 OA3 系统激活密钥（SoftwareLicensingService），并可导入密钥激活当前系统——换主板后重装/激活用</div>
+          <div class="msg-box" id="oa3-msg"></div>
+
+          <div class="field">
+            <label data-i18n="lbl_tool_room2">目标房间（需桥接器在线）</label>
+            <select id="oa3-room"></select>
+          </div>
+          <div class="tool-actions">
+            <button class="btn-main" id="oa3-read-btn" data-i18n="btn_oa3_read" onclick="oa3Read()">🔍 读取 OA3 密钥</button>
+          </div>
+
+          <div class="oa3-result" id="oa3-result" style="display:none;">
+            <div class="oa3-key-row">
+              <span class="oa3-label" data-i18n="oa3_key">主板 OA3 密钥:</span>
+              <span class="oa3-key mono" id="oa3-key"></span>
+              <button class="btn-sm" data-i18n="copy" onclick="copyOa3Key()">复制</button>
+            </div>
+            <div class="oa3-meta" id="oa3-meta"></div>
+            <div class="tool-warn" data-i18n="oa3_activate_warn">⚠ 激活系统会导入密钥并尝试在线激活，请确认密钥与当前系统版本匹配</div>
+            <div class="tool-actions">
+              <button class="btn-main btn-danger" id="oa3-act-btn" data-i18n="btn_oa3_activate" onclick="oa3Activate()">⚡ 导入密钥并激活系统</button>
+            </div>
+          </div>
+
+          <div class="tool-steps" id="oa3-steps" style="display:none;"></div>
+        </div>
       </section>
 
       <!-- 修改密码 -->
@@ -458,6 +496,22 @@ const I18N = {
     snmtm_verify_label: '回读校验:',
     snmtm_ok: '刷写成功，WMI 回读一致。建议重启后进入 BIOS 二次确认',
     snmtm_warn_verify: '写入命令已执行，但回读校验未完全匹配',
+    tools_read: '只读 + 写入',
+    oa3_desc: '读取主板内置 OA3 系统激活密钥（SoftwareLicensingService），并可导入密钥激活当前系统——换主板后重装/激活用',
+    lbl_tool_room2: '目标房间（需桥接器在线）',
+    btn_oa3_read: '🔍 读取 OA3 密钥',
+    oa3_key: '主板 OA3 密钥:',
+    oa3_marker: 'OA2 主板标记',
+    oa3_lic: '激活状态',
+    oa3_marker_yes: '是', oa3_marker_no: '否',
+    oa3_lic_activated: '已激活(永久)', oa3_lic_oob: 'OOB 宽限期', oa3_lic_oot: 'OOT 宽限期', oa3_lic_none: '未激活',
+    oa3_reading: '读取中...', oa3_read_ok: 'OA3 密钥读取成功', oa3_read_empty: '未读取到 OA3 密钥（该主板可能无 OA3 标记）',
+    oa3_no_key: '暂无密钥', oa3_confirm: '确认导入以下密钥并激活系统？',
+    oa3_activate_warn: '⚠ 激活系统会导入密钥并尝试在线激活，请确认密钥与当前系统版本匹配',
+    btn_oa3_activate: '⚡ 导入密钥并激活系统',
+    oa3_activating: '激活中（导入密钥 → 在线激活 → 状态验证）...',
+    oa3_act_ok: '激活完成，系统处于已激活/宽限期状态',
+    oa3_act_warn: '激活命令已执行，但系统状态未确认',
     logout: '退出登录',
     wo_desc: '当前账号处理过的诊断房间',
     search_ph: '按 SN / 工单号 / 型号 / 房间码搜索',
@@ -528,6 +582,22 @@ const I18N = {
     snmtm_verify_label: '回讀校驗:',
     snmtm_ok: '刷寫成功，WMI 回讀一致。建議重啟後進入 BIOS 二次確認',
     snmtm_warn_verify: '寫入命令已執行，但回讀校驗未完全匹配',
+    tools_read: '只讀 + 寫入',
+    oa3_desc: '讀取主板內置 OA3 系統啟動金鑰（SoftwareLicensingService），並可導入金鑰啟動當前系統——換主板後重裝/啟動用',
+    lbl_tool_room2: '目標房間（需橋接器在線）',
+    btn_oa3_read: '🔍 讀取 OA3 金鑰',
+    oa3_key: '主板 OA3 金鑰:',
+    oa3_marker: 'OA2 主板標記',
+    oa3_lic: '啟動狀態',
+    oa3_marker_yes: '是', oa3_marker_no: '否',
+    oa3_lic_activated: '已啟動(永久)', oa3_lic_oob: 'OOB 寬限期', oa3_lic_oot: 'OOT 寬限期', oa3_lic_none: '未啟動',
+    oa3_reading: '讀取中...', oa3_read_ok: 'OA3 金鑰讀取成功', oa3_read_empty: '未讀取到 OA3 金鑰（該主板可能無 OA3 標記）',
+    oa3_no_key: '暫無金鑰', oa3_confirm: '確認導入以下金鑰並啟動系統？',
+    oa3_activate_warn: '⚠ 啟動系統會導入金鑰並嘗試線上啟動，請確認金鑰與當前系統版本匹配',
+    btn_oa3_activate: '⚡ 導入金鑰並啟動系統',
+    oa3_activating: '啟動中（導入金鑰 → 線上啟動 → 狀態驗證）...',
+    oa3_act_ok: '啟動完成，系統處於已啟動/寬限期狀態',
+    oa3_act_warn: '啟動命令已執行，但系統狀態未確認',
     logout: '退出登錄',
     wo_desc: '當前帳號處理過的診斷房間',
     search_ph: '按 SN / 工單號 / 型號 / 房間碼搜索',
@@ -598,6 +668,22 @@ const I18N = {
     snmtm_verify_label: 'Verify:',
     snmtm_ok: 'Flash succeeded, WMI read-back matches. Reboot and confirm in BIOS',
     snmtm_warn_verify: 'Write executed but read-back did not fully match',
+    tools_read: 'Read + Write',
+    oa3_desc: 'Read the OA3 activation key built into the motherboard (SoftwareLicensingService), and optionally import it to activate the current system — for after motherboard replacement',
+    lbl_tool_room2: 'Target Room (bridge online required)',
+    btn_oa3_read: '🔍 Read OA3 Key',
+    oa3_key: 'OA3 Key:',
+    oa3_marker: 'OA2 BIOS Marker',
+    oa3_lic: 'Activation Status',
+    oa3_marker_yes: 'Yes', oa3_marker_no: 'No',
+    oa3_lic_activated: 'Activated (permanent)', oa3_lic_oob: 'OOB Grace', oa3_lic_oot: 'OOT Grace', oa3_lic_none: 'Not activated',
+    oa3_reading: 'Reading...', oa3_read_ok: 'OA3 key read successfully', oa3_read_empty: 'No OA3 key found (motherboard may not have OA3 marker)',
+    oa3_no_key: 'No key', oa3_confirm: 'Import the following key and activate the system?',
+    oa3_activate_warn: '⚠ Activation imports the key and tries online activation. Confirm the key matches the current Windows edition',
+    btn_oa3_activate: '⚡ Import Key & Activate',
+    oa3_activating: 'Activating (import key → online activation → verify)...',
+    oa3_act_ok: 'Activation done, system is activated / in grace period',
+    oa3_act_warn: 'Activation command executed but status not confirmed',
     logout: 'Logout',
     wo_desc: 'Diagnosis rooms handled by this account',
     search_ph: 'Search by SN / ticket / model / room code',
@@ -1053,6 +1139,7 @@ async function initTools() {
     msg.textContent = t('load_fail') + ': ' + e.message;
     msg.className = 'msg-box err';
   }
+  fillOa3Room();
 }
 
 // 根据房间的 machine_model 预选机型
@@ -1128,6 +1215,108 @@ async function snmtmFlash() {
   }
   btn.disabled = false;
   snmtmLoading = false;
+}
+
+// ===== OA3 密钥读取 / 激活 =====
+let oa3Key = '';
+
+function fillOa3Room() {
+  const sel = document.getElementById('oa3-room');
+  const online = allRooms.filter(r => r.bridge_online);
+  if (!online.length) {
+    sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    sel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+async function oa3Read() {
+  const msg = document.getElementById('oa3-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('oa3-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  const btn = document.getElementById('oa3-read-btn');
+  btn.disabled = true;
+  msg.textContent = t('oa3_reading');
+  msg.className = 'msg-box info';
+  try {
+    const resp = await fetch('/api/tools/oa3/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    oa3Key = data.key || '';
+    document.getElementById('oa3-key').textContent = oa3Key || t('oa3_no_key');
+    const markerTxt = data.bios_marker === '1' ? t('oa3_marker_yes') : (data.bios_marker === '0' ? t('oa3_marker_no') : (data.bios_marker || '-'));
+    const licTxt = oa3LicText(data.license_status);
+    document.getElementById('oa3-meta').textContent = t('oa3_marker') + ': ' + markerTxt + ' | ' + t('oa3_lic') + ': ' + licTxt;
+    document.getElementById('oa3-result').style.display = 'block';
+    document.getElementById('oa3-act-btn').disabled = !oa3Key;
+    document.getElementById('oa3-steps').style.display = 'none';
+    if (oa3Key) { msg.textContent = '✅ ' + t('oa3_read_ok'); msg.className = 'msg-box ok'; }
+    else { msg.textContent = '⚠ ' + t('oa3_read_empty'); msg.className = 'msg-box warn'; }
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+}
+
+function oa3LicText(status) {
+  if (status === '1') return t('oa3_lic_activated');
+  if (status === '2') return t('oa3_lic_oob');
+  if (status === '3') return t('oa3_lic_oot');
+  if (status === '0') return t('oa3_lic_none');
+  return (status || '-');
+}
+
+function copyOa3Key() {
+  if (!oa3Key) return;
+  copyText(oa3Key).then(() => showToast(t('copied_room')));
+}
+
+async function oa3Activate() {
+  const msg = document.getElementById('oa3-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('oa3-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  if (!oa3Key) { msg.textContent = t('oa3_no_key'); msg.className = 'msg-box err'; return; }
+  if (!confirm('⚠ ' + t('oa3_confirm') + '\n\n' + oa3Key + '\n\n' + t('oa3_activate_warn'))) return;
+  const btn = document.getElementById('oa3-act-btn');
+  btn.disabled = true;
+  msg.textContent = t('oa3_activating');
+  msg.className = 'msg-box info';
+  const stepsBox = document.getElementById('oa3-steps');
+  stepsBox.style.display = 'block';
+  stepsBox.innerHTML = '<div class="empty">' + t('loading') + '</div>';
+  try {
+    const resp = await fetch('/api/tools/oa3/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room, key: oa3Key }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; stepsBox.innerHTML = ''; return; }
+    const steps = data.steps || [];
+    stepsBox.innerHTML = steps.map(s => '<div class="tool-step">' + escapeHtml(s) + '</div>').join('')
+      + '<div class="tool-step tool-step-verify">' + escapeHtml(t('oa3_lic')) + ': ' + escapeHtml(oa3LicText(data.license_status)) + '</div>';
+    if (data.status === 'ok') {
+      msg.textContent = '✅ ' + t('oa3_act_ok');
+      msg.className = 'msg-box ok';
+    } else {
+      msg.textContent = '⚠ ' + t('oa3_act_warn');
+      msg.className = 'msg-box warn';
+      if (data.hint) { const h = document.createElement('div'); h.className = 'tool-hint'; h.textContent = data.hint; stepsBox.appendChild(h); }
+    }
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
 }
 
 // ===== 工具 =====

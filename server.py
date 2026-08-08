@@ -2300,6 +2300,158 @@ async def tools_snmtm_flash(request: Request):
 
 
 # ============================================================
+# 工具模式 — OA3 主板密钥读取 / 激活系统（换板三件套之二）
+# 原理：Windows 启动时已将主板 ACPI 的 OA3 密钥解析到
+#       SoftwareLicensingService（SPP），wmic/PowerShell 查询即可。
+#       激活 = slmgr.vbs /ipk <key> + /ato。
+# ============================================================
+# PowerShell 查询命令（wmic 在 Win11 24H2 已移除，统一用 PowerShell）
+OA3_READ_CMD = (
+    "$s = Get-CimInstance -ClassName SoftwareLicensingService; "
+    "Write-Output ('OA3Key=' + $s.OA3xOriginalProductKey); "
+    "Write-Output ('BiosMarker=' + $s.OA2xBiosMarkerStatus); "
+    "Write-Output ('LicenseStatus=' + $s.LicenseStatus); "
+    "Write-Output ('GracePeriod=' + $s.GracePeriodMinutes)"
+)
+
+
+def _validate_oa3_key(value: str) -> Optional[str]:
+    """校验 OA3 密钥格式（25 位 5 组，字母数字，可带连字符）。"""
+    key = (value or "").strip()
+    if not key:
+        return "密钥不能为空"
+    compact = key.replace("-", "").upper()
+    if not re.match(r"^[A-Z0-9]{25}$", compact):
+        return "密钥格式不正确（应为 25 位产品密钥）"
+    return None
+
+
+@app.post("/api/tools/oa3/read")
+async def tools_oa3_read(request: Request):
+    """读取主板 OA3 密钥 + 系统激活状态（只读，免审批）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    try:
+        result = await execute_bridge_command(room, "RunCommand",
+                                              {"command": OA3_READ_CMD, "timeout": 30, "cwd": ""},
+                                              f"oa3_read_{int(time.time())}", tier=1)
+        run_logger.info(f"[{room_code}] OA3 read done: {result[:200]}")
+        # 解析输出
+        key = ""
+        marker = ""
+        lic = ""
+        for line in (result or "").splitlines():
+            line = line.strip()
+            if line.startswith("OA3Key="):
+                key = line.split("=", 1)[1].strip()
+            elif line.startswith("BiosMarker="):
+                marker = line.split("=", 1)[1].strip()
+            elif line.startswith("LicenseStatus="):
+                lic = line.split("=", 1)[1].strip()
+        save_message(room_code, "tool",
+                     f"[OA3 读取] 用户={user.get('username')} key={'有' if key else '无'} marker={marker}",
+                     "OA3_Read", 1)
+        return JSONResponse({
+            "status": "ok",
+            "key": key, "bios_marker": marker, "license_status": lic,
+            "raw": (result or "")[:2000],
+        })
+    except Exception as e:
+        run_logger.error(f"[{room_code}] OA3 read error: {e}", exc_info=True)
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
+@app.post("/api/tools/oa3/activate")
+async def tools_oa3_activate(request: Request):
+    """导入 OA3 密钥并激活系统（slmgr /ipk + /ato）。写入类，前端二次确认 + 审计。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    key = str(body.get("key", "")).strip()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    err = _validate_oa3_key(key)
+    if err:
+        return JSONResponse({"error": err}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    steps = []
+    def _log(msg: str):
+        steps.append(msg)
+        run_logger.info(f"[{room_code}] OA3 activate: {msg}")
+
+    try:
+        # 1. 导入密钥
+        cmd_ipk = f'cscript //nologo %windir%\\System32\\slmgr.vbs /ipk {key}'
+        _log(f"导入密钥: slmgr /ipk {key[:5]}...{key[-5:]}")
+        r1 = await execute_bridge_command(room, "RunCommand",
+                                          {"command": cmd_ipk, "timeout": 60, "cwd": ""},
+                                          f"oa3_ipk_{int(time.time())}", tier=3)
+        _log(f"导入输出: {r1[:300]}")
+
+        # 2. 激活
+        cmd_ato = 'cscript //nologo %windir%\\System32\\slmgr.vbs /ato'
+        _log("激活系统: slmgr /ato")
+        r2 = await execute_bridge_command(room, "RunCommand",
+                                          {"command": cmd_ato, "timeout": 120, "cwd": ""},
+                                          f"oa3_ato_{int(time.time())}", tier=3)
+        _log(f"激活输出: {r2[:300]}")
+
+        # 3. 复读状态验证
+        _log("复读激活状态中 ...")
+        r3 = await execute_bridge_command(room, "RunCommand",
+                                          {"command": OA3_READ_CMD, "timeout": 30, "cwd": ""},
+                                          f"oa3_verify_{int(time.time())}", tier=1)
+        lic = ""
+        for line in (r3 or "").splitlines():
+            line = line.strip()
+            if line.startswith("LicenseStatus="):
+                lic = line.split("=", 1)[1].strip()
+        _log(f"校验输出: {r3[:300]}")
+
+        # 审计留痕
+        save_approval(room_code, "OA3_Activate", {"key": key[-6:]}, 3, 1)
+        save_message(room_code, "tool",
+                     f"[OA3 激活] 用户={user.get('username')} key={key[-6:]} LicenseStatus={lic}",
+                     "OA3_Activate", 3)
+
+        # LicenseStatus: 1=已激活(永久), 2=OOB宽限, 3=OOT宽限; 0=未激活
+        activated = lic in ("1", "2", "3")
+        return JSONResponse({
+            "status": "ok" if activated else "warning",
+            "license_status": lic,
+            "steps": steps,
+            "hint": "" if activated else "激活命令已执行，但系统状态未变为已激活/宽限期——可能需要联网（KMS/MAK）或稍后重试。",
+        })
+    except Exception as e:
+        run_logger.error(f"[{room_code}] OA3 activate error: {e}", exc_info=True)
+        return JSONResponse({"status": "error", "error": str(e), "steps": steps}, status_code=500)
+
+
+# ============================================================
 # WebSocket endpoints
 # ============================================================
 @app.websocket("/ws/browser/{room_code}")
