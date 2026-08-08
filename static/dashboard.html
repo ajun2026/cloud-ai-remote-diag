@@ -420,7 +420,7 @@ async function createRoom() {
 
 function copyRoomCode() {
   const code = document.getElementById('room-code').textContent;
-  navigator.clipboard.writeText(code).then(() => showToast('房间码已复制: ' + code));
+  copyText(code).then(() => showToast('房间码已复制: ' + code));
 }
 
 // ===== 加入房间 =====
@@ -606,7 +606,26 @@ function showToast(msg) {
 
 function copyCmd(el) {
   const cmd = el.parentElement.querySelector('span').textContent;
-  navigator.clipboard.writeText(cmd).then(() => showToast('命令已复制'));
+  copyText(cmd).then(() => showToast('命令已复制'));
+}
+
+// 通用复制：HTTP 环境下 navigator.clipboard 不可用（非安全上下文），自动降级 execCommand
+function copyText(text) {
+  return new Promise((resolve, reject) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(resolve).catch(() => fallbackCopy(text, resolve));
+    } else {
+      fallbackCopy(text, resolve);
+    }
+  });
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) { }
+  document.body.removeChild(ta);
 }
 
 document.getElementById('f-join').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinRoom(); });
