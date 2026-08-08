@@ -165,6 +165,36 @@
   }
   .chat-empty .big { font-size: 40px; }
 
+  /* ===== 历史记录模态框 ===== */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 100;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-lg {
+    width: min(760px, 92vw); height: min(82vh, 700px); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--surface2);
+  }
+  .modal-head h3 { font-size: 15px; }
+  .history-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
+  .history-body .empty { padding: 40px 0; }
+  .h-msg { margin-bottom: 12px; max-width: 88%; }
+  .h-msg .h-body { white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.7; }
+  .h-msg .h-time { font-size: 11px; color: var(--text2); margin-top: 3px; }
+  .h-user { margin-left: auto; }
+  .h-user .h-body { background: rgba(88,166,255,.15); border: 1px solid rgba(88,166,255,.3); padding: 9px 12px; border-radius: 10px; }
+  .h-user .h-time { text-align: right; }
+  .h-ai .h-body { background: var(--surface2); border: 1px solid var(--border); padding: 9px 12px; border-radius: 10px; }
+  .h-system { margin: 8px auto; text-align: center; font-size: 12px; color: var(--text2); }
+  .h-error { margin: 8px auto; text-align: center; font-size: 12px; color: var(--error); }
+  .h-tool { margin: 8px 0 8px auto; max-width: 95%; background: rgba(210,153,34,.06); border: 1px dashed rgba(210,153,34,.35); border-radius: 8px; padding: 8px 10px; }
+  .h-tool-name { font-size: 11px; color: var(--warn); font-family: "Consolas", monospace; }
+  .h-tool pre { margin-top: 6px; font-size: 11px; color: var(--text2); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow-y: auto; }
+
   /* ===== 提示 ===== */
   .msg-box { display: none; padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
   .msg-box.err { display: block; background: rgba(248,81,73,.1); border: 1px solid rgba(248,81,73,.35); color: var(--error); }
@@ -343,6 +373,17 @@
   </div>
 </div>
 
+<!-- 历史记录模态框 -->
+<div class="modal-overlay" id="history-modal">
+  <div class="modal-lg">
+    <div class="modal-head">
+      <h3 id="history-title">历史对话记录</h3>
+      <button class="btn-sm" onclick="closeHistory()" data-i18n="close">关闭</button>
+    </div>
+    <div class="history-body" id="history-body"><div class="empty">加载中...</div></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -356,6 +397,11 @@ const I18N = {
     th_room: '房间码', th_model: '型号', th_ticket: '工单号', th_created: '创建时间', th_last: '最后活动', th_status: '状态', th_action: '操作',
     status_on: '连接中', status_off: '已断开',
     enter_chat: '进入对话',
+    view_history: '查看记录', export_record: '导出',
+    history_title: '历史对话记录', empty_history: '暂无对话记录',
+    close: '关闭',
+    export_title: '诊断对话记录', export_time: '导出时间', export_ok: '已导出',
+    msg_user: '用户', msg_ai: 'AI', msg_system: '系统', msg_error: '错误', msg_tool: '工具',
     loading: '加载中...',
     count_prefix: '共 ', count_suffix: ' 条',
     empty_rooms: '暂无工单记录，左侧点「创建房间」开始',
@@ -407,6 +453,11 @@ const I18N = {
     th_room: '房間碼', th_model: '型號', th_ticket: '工單號', th_created: '創建時間', th_last: '最後活動', th_status: '狀態', th_action: '操作',
     status_on: '連接中', status_off: '已斷開',
     enter_chat: '進入對話',
+    view_history: '查看記錄', export_record: '導出',
+    history_title: '歷史對話記錄', empty_history: '暫無對話記錄',
+    close: '關閉',
+    export_title: '診斷對話記錄', export_time: '導出時間', export_ok: '已導出',
+    msg_user: '用戶', msg_ai: 'AI', msg_system: '系統', msg_error: '錯誤', msg_tool: '工具',
     loading: '加載中...',
     count_prefix: '共 ', count_suffix: ' 條',
     empty_rooms: '暫無工單記錄，左側點「創建房間」開始',
@@ -458,6 +509,11 @@ const I18N = {
     th_room: 'Room', th_model: 'Model', th_ticket: 'Ticket', th_created: 'Created', th_last: 'Last Active', th_status: 'Status', th_action: 'Action',
     status_on: 'Connected', status_off: 'Disconnected',
     enter_chat: 'Open Chat',
+    view_history: 'History', export_record: 'Export',
+    history_title: 'Chat History', empty_history: 'No messages yet',
+    close: 'Close',
+    export_title: 'Diagnostic Chat Record', export_time: 'Exported', export_ok: 'Exported',
+    msg_user: 'User', msg_ai: 'AI', msg_system: 'System', msg_error: 'Error', msg_tool: 'Tool',
     loading: 'Loading...',
     count_prefix: '', count_suffix: ' total',
     empty_rooms: 'No work orders yet. Create a room from the left menu',
@@ -656,7 +712,11 @@ function renderRooms() {
       + '<td>' + (r.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td>' + (r.last_seen || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td>' + st + '</td>'
-      + '<td><button class="btn-sm" onclick="openChat(\'' + r.room_code + '\')">' + t('enter_chat') + '</button></td>'
+      + '<td><div class="row-actions">'
+      + '<button class="btn-sm" onclick="openChat(\'' + r.room_code + '\')">' + t('enter_chat') + '</button>'
+      + '<button class="btn-sm" onclick="viewHistory(\'' + r.room_code + '\')">' + t('view_history') + '</button>'
+      + '<button class="btn-sm" onclick="exportRoom(\'' + r.room_code + '\')">' + t('export_record') + '</button>'
+      + '</div></td>'
       + '</tr>';
   }).join('');
 }
@@ -784,6 +844,87 @@ async function resetPwd(username) {
   } catch (e) { showToast(t('net_err') + ': ' + e.message); }
 }
 
+// ===== 历史记录（只读查看 + 导出） =====
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+async function viewHistory(room) {
+  const modal = document.getElementById('history-modal');
+  document.getElementById('history-title').textContent = t('history_title') + ' — ' + t('room_prefix') + room;
+  document.getElementById('history-body').innerHTML = '<div class="empty">' + t('loading') + '</div>';
+  modal.classList.add('show');
+  try {
+    const resp = await fetch('/api/history/' + room);
+    const data = await resp.json();
+    if (!resp.ok) { document.getElementById('history-body').innerHTML = '<div class="empty">' + t('load_fail') + '</div>'; return; }
+    renderHistoryMessages(data.messages || []);
+  } catch (e) {
+    document.getElementById('history-body').innerHTML = '<div class="empty">' + t('net_err') + '</div>';
+  }
+}
+
+function closeHistory() {
+  document.getElementById('history-modal').classList.remove('show');
+}
+
+function renderHistoryMessages(messages) {
+  const body = document.getElementById('history-body');
+  if (!messages.length) { body.innerHTML = '<div class="empty">' + t('empty_history') + '</div>'; return; }
+  let html = '';
+  for (const m of messages) {
+    const time = (m.created_at || '').replace('T', ' ').slice(5, 16);
+    const content = m.content || '';
+    if (m.role === 'user') {
+      html += '<div class="h-msg h-user"><div class="h-body">' + escapeHtml(content) + '</div><div class="h-time">' + escapeHtml(time) + '</div></div>';
+    } else if (m.role === 'ai') {
+      html += '<div class="h-msg h-ai"><div class="h-body">' + escapeHtml(content) + '</div><div class="h-time">' + escapeHtml(time) + '</div></div>';
+    } else if (m.role === 'system') {
+      html += '<div class="h-msg h-system">' + escapeHtml(content) + '</div>';
+    } else if (m.role === 'error') {
+      html += '<div class="h-msg h-error">' + escapeHtml(content) + '</div>';
+    } else if (m.role === 'tool') {
+      html += '<div class="h-msg h-tool"><span class="h-tool-name">[' + t('msg_tool') + '] ' + escapeHtml(m.tool_name || '') + '</span><pre>' + escapeHtml(content.slice(0, 800)) + '</pre></div>';
+    }
+  }
+  body.innerHTML = html;
+}
+
+async function exportRoom(room) {
+  try {
+    const resp = await fetch('/api/history/' + room);
+    const data = await resp.json();
+    if (!resp.ok) { showToast(t('load_fail')); return; }
+    const lines = [];
+    lines.push('==== ' + t('export_title') + ' ====');
+    lines.push(t('room_prefix') + ' ' + room);
+    lines.push(t('export_time') + ': ' + new Date().toLocaleString());
+    lines.push('='.repeat(50)); lines.push('');
+    for (const m of data.messages) {
+      const content = (m.content || '').replace(/\r\n/g, '\n');
+      if (m.role === 'user') { lines.push('[' + t('msg_user') + '] ' + content); lines.push(''); }
+      else if (m.role === 'ai') { lines.push('[' + t('msg_ai') + ']'); lines.push(content); lines.push(''); }
+      else if (m.role === 'system') { lines.push('[' + t('msg_system') + '] ' + content); }
+      else if (m.role === 'error') { lines.push('[' + t('msg_error') + '] ' + content); }
+      else if (m.role === 'tool') {
+        lines.push('--- [' + t('msg_tool') + '] ' + (m.tool_name || '') + ' ---');
+        lines.push(content.slice(0, 2000)); lines.push('---'); lines.push('');
+      }
+    }
+    const text = lines.join('\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'diagnostic_record_' + room + '_' + new Date().toISOString().slice(0, 10) + '.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(t('export_ok'));
+  } catch (e) { showToast(t('net_err') + ': ' + e.message); }
+}
+
 // ===== 工具 =====
 function showToast(msg) {
   const t = document.getElementById('toast');
@@ -819,6 +960,7 @@ function fallbackCopy(text, done) {
 document.getElementById('f-join').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinRoom(); });
 document.getElementById('f-sn').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRoom(); });
 document.getElementById('f-ticket').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRoom(); });
+document.getElementById('history-modal').addEventListener('click', (e) => { if (e.target.id === 'history-modal') closeHistory(); });
 
 // ===== Init =====
 applyLang(currentLang);
