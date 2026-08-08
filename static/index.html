@@ -358,7 +358,7 @@
     </div>
     <div style="display:flex;align-items:center;gap:8px;">
       <button id="auto-approve-btn" title="Tier 2 自动审批：开启后鼠标/键盘等交互操作无需弹窗确认" onclick="toggleAutoApprove()">T2 Auto OFF</button>
-      <button id="back-btn" onclick="location.href='/dashboard'" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--border);border-radius:4px;cursor:pointer;" title="返回工作台">← 工作台</button>
+      <button id="back-btn" onclick="goBackToWorkbench()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--border);border-radius:4px;cursor:pointer;" title="返回工作台">← 工作台</button>
       <select id="lang-switcher">
         <option value="zh-CN">简</option>
         <option value="zh-TW">繁</option>
@@ -908,6 +908,17 @@ function connect(room) {
   ws.onerror = () => { addErrorMsg(t('msg_ws_failed')); };
 }
 
+// 返回工作台：dashboard iframe 内调用父窗口切 tab；独立打开则跳转
+function goBackToWorkbench() {
+  try {
+    if (window.parent && window.parent !== window && typeof window.parent.switchToWorkorders === 'function') {
+      window.parent.switchToWorkorders();
+      return;
+    }
+  } catch (e) { /* 跨域或异常时忽略，走跳转 */ }
+  location.href = '/dashboard';
+}
+
 // 从 SQLite 拉取该房间历史并渲染（登录用户可访问 /api/history/{room}）
 async function loadHistory(room) {
   try {
@@ -1242,7 +1253,7 @@ joinBtn.addEventListener('click', () => {
 roomInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBtn.click(); });
 createRoomLink.addEventListener('click', () => {
   // 创建房间已移至工作台（需登录 + 绑定 SN/工单号）
-  location.href = '/dashboard';
+  goBackToWorkbench();
 });
 
 langSwitcher.addEventListener('change', () => { applyLang(langSwitcher.value); });
@@ -1303,7 +1314,7 @@ const roomFromUrl = (urlParams.get('room') || '').trim().toUpperCase();
 if (roomFromUrl) {
   connect(roomFromUrl);
 } else {
-  location.href = '/dashboard';
+  goBackToWorkbench();
 }
 </script>
 </body>

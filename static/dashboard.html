@@ -145,6 +145,23 @@
   .row-actions { display: flex; gap: 6px; }
   .row-actions .btn-sm { padding: 3px 9px; font-size: 11px; }
 
+  /* ===== 对话（iframe 嵌入） ===== */
+  #page-chat.active { display: flex; flex-direction: column; }
+  .chat-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .chat-head .page-title { margin-bottom: 0; }
+  .chat-head .room-tag {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
+    padding: 4px 14px; font-size: 12px; color: var(--text2);
+  }
+  .chat-frame-wrap { flex: 1; min-height: 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+  #chat-frame { width: 100%; height: 100%; border: 0; background: var(--surface); display: block; }
+  .chat-empty {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--text2); font-size: 14px; gap: 8px;
+    border: 1px dashed var(--border); border-radius: 10px;
+  }
+  .chat-empty .big { font-size: 40px; }
+
   /* ===== 提示 ===== */
   .msg-box { display: none; padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
   .msg-box.err { display: block; background: rgba(248,81,73,.1); border: 1px solid rgba(248,81,73,.35); color: var(--error); }
@@ -178,6 +195,7 @@
     <aside class="sidebar">
       <nav>
         <div class="nav-item active" onclick="switchTab('workorders')">📋 我的工单</div>
+        <div class="nav-item" id="nav-chat" onclick="switchTab('chat')">💬 对话</div>
         <div class="nav-item" onclick="switchTab('create')">➕ 创建房间</div>
         <div class="nav-item" onclick="switchTab('join')">⇄ 加入房间</div>
         <div class="nav-item" onclick="switchTab('download')">📦 下载桥接器</div>
@@ -203,6 +221,22 @@
           <thead><tr><th>房间码</th><th>SN</th><th>型号</th><th>工单号</th><th>创建时间</th><th>最后活动</th><th>状态</th><th>操作</th></tr></thead>
           <tbody id="room-tbody"><tr><td colspan="8" class="empty">加载中...</td></tr></tbody>
         </table>
+      </section>
+
+      <!-- 对话（iframe 嵌入聊天页） -->
+      <section class="page" id="page-chat">
+        <div class="chat-head">
+          <div class="page-title">💬 对话</div>
+          <span class="room-tag" id="chat-room-tag"></span>
+        </div>
+        <div class="chat-frame-wrap" id="chat-frame-wrap" style="display:none;">
+          <iframe id="chat-frame" src="" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
+        </div>
+        <div class="chat-empty" id="chat-empty">
+          <div class="big">💬</div>
+          <div>尚未选择房间</div>
+          <div style="font-size:12px;">在「我的工单」里点「进入对话」，或创建/加入房间后自动打开</div>
+        </div>
       </section>
 
       <!-- 创建房间 -->
@@ -306,6 +340,8 @@ let allRooms = [];
 let currentRole = 'engineer';
 
 // ===== Tab 切换 =====
+let currentChatRoom = null;
+
 function switchTab(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -314,6 +350,21 @@ function switchTab(name) {
   if (nav) nav.classList.add('active');
   if (name === 'workorders' && !allRooms.length) loadRooms();
   if (name === 'users') loadUsers();
+}
+
+// 打开对话（iframe 加载 /chat?room=XXX，不跳页）
+function openChat(room) {
+  currentChatRoom = room;
+  document.getElementById('chat-frame-wrap').style.display = 'block';
+  document.getElementById('chat-empty').style.display = 'none';
+  document.getElementById('chat-room-tag').textContent = '房间: ' + room;
+  document.getElementById('chat-frame').src = '/chat?room=' + room;
+  switchTab('chat');
+}
+
+// 供对话页 iframe 内「← 工作台」按钮调用（同源父窗口访问）
+function switchToWorkorders() {
+  switchTab('workorders');
 }
 
 // ===== 用户信息 =====
@@ -354,7 +405,7 @@ async function createRoom() {
     const data = await resp.json();
     if (!resp.ok) { msg.textContent = data.error || '创建失败'; msg.className = 'msg-box err'; btn.disabled = false; btn.textContent = '创建房间'; return; }
     document.getElementById('room-code').textContent = data.room_code;
-    document.getElementById('room-enter').href = '/chat?room=' + data.room_code;
+    document.getElementById('room-enter').onclick = function (e) { e.preventDefault(); openChat(data.room_code); };
     document.getElementById('room-result').style.display = 'block';
     document.getElementById('f-sn').value = '';
     document.getElementById('f-ticket').value = '';
@@ -378,7 +429,7 @@ async function joinRoom() {
     const data = await resp.json();
     if (!resp.ok) { showToast(data.error || '校验失败'); return; }
     if (!data.exists) { showToast('房间不存在，请确认房间码或先创建房间'); return; }
-    location.href = '/chat?room=' + code;
+    openChat(code);
   } catch (e) { showToast('网络错误: ' + e.message); }
 }
 
@@ -416,7 +467,7 @@ function renderRooms() {
       + '<td>' + (r.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td>' + (r.last_seen || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td>' + st + '</td>'
-      + '<td><a class="btn-sm" style="text-decoration:none;" href="/chat?room=' + r.room_code + '">进入对话</a></td>'
+      + '<td><button class="btn-sm" onclick="openChat(\'' + r.room_code + '\')">进入对话</button></td>'
       + '</tr>';
   }).join('');
 }
