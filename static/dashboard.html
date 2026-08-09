@@ -510,7 +510,29 @@
             <div class="dl-card-actions">
               <a class="dl-btn" href="/static/bridge-linux-amd64" download data-i18n="dl_card_linux_btn">⬇ 下载 x86_64 桥接器</a>
               <div class="dl-cmd-block"><span class="dl-cmd-text">curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
-              <div class="dl-card-note" data-i18n="dl_card_linux_note">其他架构（ARM64 / 龙芯）请从管理后台获取</div>
+              <div class="dl-card-note" data-i18n="dl_card_linux_note">仅支持 x86_64 架构；ARM64 / 龙芯版本制作中</div>
+              <details class="dl-more">
+                <summary data-i18n="dl_linux_more">查看安装说明</summary>
+                <div class="dl-guide">
+                  <div class="dl-step">
+                    <div class="dl-step-title"><span class="num">1</span><span data-i18n="dl_linux_way1_t">方式一：一键安装（推荐）</span></div>
+                    <div data-i18n="dl_linux_way1_d">在客户机终端粘贴上面命令回车——自动检测架构、下载对应版本、安装到 /usr/local/bin/bridge，然后按提示输入 8 位房间码启动。需要 root 权限（自动用 sudo）。</div>
+                  </div>
+                  <div class="dl-step">
+                    <div class="dl-step-title"><span class="num">2</span><span data-i18n="dl_linux_way2_t">方式二：手动安装（已下载二进制）</span></div>
+                    <div data-i18n="dl_linux_way2_d">① 给执行权限：</div>
+                    <div class="dl-cmd-block"><span class="dl-cmd-text">chmod +x bridge-linux-amd64</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+                    <div data-i18n="dl_linux_way2_d2">② 放入系统目录（任意目录也可，这里以 /usr/local/bin 为例）：</div>
+                    <div class="dl-cmd-block"><span class="dl-cmd-text">sudo mv bridge-linux-amd64 /usr/local/bin/bridge</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+                    <div data-i18n="dl_linux_way2_d3">③ 启动（把 ABC12345 换成你的房间码）：</div>
+                    <div class="dl-cmd-block"><span class="dl-cmd-text">bridge -server ws://106.54.193.9:8000 -room ABC12345</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+                  </div>
+                  <div class="dl-step">
+                    <div class="dl-step-title"><span class="num">3</span><span data-i18n="dl_linux_way3_t">完成配对</span></div>
+                    <div data-i18n="dl_linux_way3_d">看到 Connected 即连接成功，保持终端开启即可远程诊断。重启电脑后需重新启动桥接器（一次性使用，不驻留后台）。</div>
+                  </div>
+                </div>
+              </details>
             </div>
           </div>
         </div>
@@ -977,6 +999,10 @@ const I18N = {
     dl_ps_step3_d: '看到绿色 Connected 即连接成功，保持窗口开启，回到本工作台进入对话即可远程诊断',
     dl_ps_foot: '命令版与 .exe 版完全兼容（连接 / 远程命令 / 文件传输）。如提示脚本被系统拦截，可改为下载后运行：powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345',
     dl_ps_foot2: '如提示脚本被系统拦截，可改为下载后运行：',
+    dl_linux_more: '查看安装说明',
+    dl_linux_way1_t: '方式一：一键安装（推荐）', dl_linux_way1_d: '在客户机终端粘贴上面命令回车——自动检测架构、下载对应版本、安装到 /usr/local/bin/bridge，然后按提示输入 8 位房间码启动。需要 root 权限（自动用 sudo）。',
+    dl_linux_way2_t: '方式二：手动安装（已下载二进制）', dl_linux_way2_d: '① 给执行权限：', dl_linux_way2_d2: '② 放入系统目录（任意目录也可，这里以 /usr/local/bin 为例）：', dl_linux_way2_d3: '③ 启动（把 ABC12345 换成你的房间码）：',
+    dl_linux_way3_t: '完成配对', dl_linux_way3_d: '看到 Connected 即连接成功，保持终端开启即可远程诊断。重启电脑后需重新启动桥接器（一次性使用，不驻留后台）。',
     dl_step1: '安装桥接器', dl_step2: '输入房间码', dl_step3: '对话诊断',
     dl_recommend: '推荐',
     dl_card_win_t: 'Windows 客户端 (.exe)', dl_card_win_desc: '下载后双击运行，输入 8 位房间码即连接。主力方案，最省心。', dl_card_win_btn: '⬇ 下载 bridge-win64.exe (4.8MB)', dl_card_win_note: '双击自动请求管理员权限（UAC 弹窗点「是」即可）',
@@ -1143,6 +1169,10 @@ const I18N = {
     dl_ps_step3_d: '看到綠色 Connected 即連線成功，保持視窗開啟，回到本工作台進入對話即可遠端診斷',
     dl_ps_foot: '命令版與 .exe 版完全相容（連線 / 遠端命令 / 檔案傳輸）。如提示指令碼被系統攔截，可改為下載後執行：powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345',
     dl_ps_foot2: '如提示指令碼被系統攔截，可改為下載後執行：',
+    dl_linux_more: '查看安裝說明',
+    dl_linux_way1_t: '方式一：一鍵安裝（推薦）', dl_linux_way1_d: '在客戶機終端貼上上面命令按 Enter——自動偵測架構、下載對應版本、安裝到 /usr/local/bin/bridge，然後依提示輸入 8 位房間碼啟動。需要 root 權限（自動用 sudo）。',
+    dl_linux_way2_t: '方式二：手動安裝（已下載二進位檔）', dl_linux_way2_d: '① 賦予執行權限：', dl_linux_way2_d2: '② 放入系統目錄（任意目錄也可，這裡以 /usr/local/bin 為例）：', dl_linux_way2_d3: '③ 啟動（把 ABC12345 換成你的房間碼）：',
+    dl_linux_way3_t: '完成配對', dl_linux_way3_d: '看到 Connected 即連線成功，保持終端開啟即可遠端診斷。重啟電腦後需重新啟動橋接器（一次性使用，不駐留背景）。',
     dl_step1: '安裝橋接器', dl_step2: '輸入房間碼', dl_step3: '對話診斷',
     dl_recommend: '推薦',
     dl_card_win_t: 'Windows 用戶端 (.exe)', dl_card_win_desc: '下載後雙擊執行，輸入 8 位房間碼即連線。主力方案，最省心。', dl_card_win_btn: '⬇ 下載 bridge-win64.exe (4.8MB)', dl_card_win_note: '雙擊自動請求系統管理員權限（UAC 彈窗按「是」即可）',
@@ -1309,6 +1339,10 @@ const I18N = {
     dl_ps_step3_d: 'A green "Connected" means success. Keep the window open, return to this dashboard and start remote diagnostics',
     dl_ps_foot: 'The command edition is fully compatible with the .exe edition (connect / remote commands / file transfer). If the script is blocked, download and run it instead: powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345',
     dl_ps_foot2: 'If the script is blocked, download and run it instead:',
+    dl_linux_more: 'View install instructions',
+    dl_linux_way1_t: 'Option 1: One-line install (recommended)', dl_linux_way1_d: 'Paste the command above into the target terminal and press Enter - it auto-detects the CPU architecture, downloads the matching build, installs to /usr/local/bin/bridge, then prompts for the 8-digit room code. Needs root (sudo is used automatically).',
+    dl_linux_way2_t: 'Option 2: Manual install (binary already downloaded)', dl_linux_way2_d: '1) Make it executable:', dl_linux_way2_d2: '2) Move it into a system directory (any dir works; /usr/local/bin used here):', dl_linux_way2_d3: '3) Start it (replace ABC12345 with your room code):',
+    dl_linux_way3_t: 'Pairing done', dl_linux_way3_d: 'A green "Connected" means success. Keep the terminal open to diagnose. The bridge is one-shot - restart it manually after a reboot (no background service).',
     dl_step1: 'Install bridge', dl_step2: 'Enter room code', dl_step3: 'Diagnose by chat',
     dl_recommend: 'Recommended',
     dl_card_win_t: 'Windows Client (.exe)', dl_card_win_desc: 'Download, double-click, enter the 8-digit room code. The primary option - simplest.', dl_card_win_btn: '⬇ Download bridge-win64.exe (4.8MB)', dl_card_win_note: 'Auto-requests admin rights on launch (click Yes on the UAC prompt)',
