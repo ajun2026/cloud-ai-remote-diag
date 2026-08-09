@@ -397,7 +397,7 @@
         <div class="home-actions">
           <button class="btn-main" data-i18n="nav_create" onclick="switchTab('create')">➕ 创建房间</button>
           <button class="btn-main btn-green" data-i18n="nav_download" onclick="switchTab('download')">📦 下载桥接器</button>
-          <button class="btn-main" data-i18n="nav_tools" onclick="switchTab('tools')">🔧 工具模式</button>
+          <button class="btn-main" data-i18n="nav_tools_win" onclick="switchTab('tools-win')">🪟 Windows 工具</button>
         </div>
       </section>
 
@@ -1421,7 +1421,8 @@ let currentChatRoom = null;
 function switchTab(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById('page-' + name).classList.add('active');
+  const page = document.getElementById('page-' + name);
+  if (page) page.classList.add('active');
   const nav = document.querySelector('.nav-item[onclick="switchTab(\'' + name + '\')"]');
   if (nav) nav.classList.add('active');
   if (name === 'workorders') loadRooms();
