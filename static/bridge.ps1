@@ -50,22 +50,26 @@ Write-Host " Connecting to $wsUri"
 Write-Host "==================================================" -ForegroundColor Cyan
 
 # ---- audit log (local) ----
-$logDir = Join-Path $env:TEMP "clouddiag-ps"
-if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
-$logFile = Join-Path $logDir "bridge.log"
+$script:logDir = Join-Path $env:TEMP "clouddiag-ps"
+if (-not (Test-Path $script:logDir)) { New-Item -ItemType Directory -Path $script:logDir -Force | Out-Null }
+$script:logFile = Join-Path $script:logDir "bridge.log"
 function Write-Audit {
     param($Msg)
     try {
-        Add-Content -Path $logFile -Value ((Get-Date).ToString("yyyy-MM-dd HH:mm:ss") + "  " + $Msg) -Encoding UTF8
+        Add-Content -Path $script:logFile -Value ((Get-Date).ToString("yyyy-MM-dd HH:mm:ss") + "  " + $Msg) -Encoding UTF8
     } catch {}
 }
 
 # ---- send lock: ClientWebSocket does not allow concurrent sends ----
-$sendLock = New-Object System.Threading.Mutex
+# NOTE: must be $script: scoped! Background tasks (heartbeat / command runner)
+# have no script scope chain - bare $sendLock resolves to $null there and
+# .WaitOne() throws, silently killing the task (heartbeat stops, command
+# results never sent). Same for $script:logFile above.
+$script:sendLock = New-Object System.Threading.Mutex
 
 function Send-Json {
     param($Obj)
-    $sendLock.WaitOne() | Out-Null
+    $script:sendLock.WaitOne() | Out-Null
     try {
         if ($script:ws -eq $null -or $script:ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) { return }
         $json = $Obj | ConvertTo-Json -Compress -Depth 12
@@ -75,7 +79,7 @@ function Send-Json {
     } catch {
         Write-Host ("send error: " + $_.Exception.Message) -ForegroundColor Yellow
     } finally {
-        $sendLock.ReleaseMutex()
+        $script:sendLock.ReleaseMutex()
     }
 }
 
@@ -208,7 +212,8 @@ function Execute-CommandSpecFromJson {
         $spec = $JsonText | ConvertFrom-Json
         Execute-CommandSpec $spec
     } catch {
-        Write-Host ("command parse error: " + $_.Exception.Message) -ForegroundColor Yellow
+        Write-Host ("command task error: " + $_.Exception.Message) -ForegroundColor Yellow
+        Write-Audit ("command task error: " + $_.Exception.ToString())
     }
 }
 
@@ -282,10 +287,15 @@ function Run-Bridge {
     $heartbeat = [System.Threading.Tasks.Task]::Run([Action]{
         $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
         while (-not $script:exiting) {
-            Start-Sleep -Seconds 25
-            if ($script:ws -eq $null -or $script:ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) { break }
-            $ts = [int64]([DateTime]::UtcNow - $epoch).TotalSeconds
-            Send-Json @{ type = "heartbeat"; ts = $ts }
+            try {
+                Start-Sleep -Seconds 25
+                if ($script:ws -eq $null -or $script:ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) { break }
+                $ts = [int64]([DateTime]::UtcNow - $epoch).TotalSeconds
+                Send-Json @{ type = "heartbeat"; ts = $ts }
+            } catch {
+                Write-Host ("heartbeat error: " + $_.Exception.Message) -ForegroundColor Yellow
+                Write-Audit ("heartbeat task error: " + $_.Exception.ToString())
+            }
         }
     })
 
