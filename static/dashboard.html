@@ -455,9 +455,9 @@
             <div class="dl-step wide">
               <div class="dl-step-title"><span class="num">2</span><span data-i18n="dl_ps_step2_t">粘贴一行命令</span></div>
               <div data-i18n="dl_ps_step2_d">回车后按提示输入 8 位房间码：</div>
-              <div class="dl-cmd-block"><span class="dl-cmd-text">iex (iwr http://106.54.193.9:8000/static/bridge.ps1).Content</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+              <div class="dl-cmd-block"><span class="dl-cmd-text">iex (New-Object Net.WebClient).DownloadString("http://106.54.193.9:8000/static/bridge.ps1")</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
               <div class="dl-step-note" data-i18n="dl_ps_step2_note">也可以提前写入房间码，免交互直接连（把 ABC12345 换成你的房间码）：</div>
-              <div class="dl-cmd-block"><span class="dl-cmd-text">$env:BRIDGE_ROOM = "ABC12345"; iex (iwr http://106.54.193.9:8000/static/bridge.ps1).Content</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+              <div class="dl-cmd-block"><span class="dl-cmd-text">$env:BRIDGE_ROOM = "ABC12345"; iex (New-Object Net.WebClient).DownloadString("http://106.54.193.9:8000/static/bridge.ps1")</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
             </div>
           </div>
           <div class="dl-guide-foot" data-i18n="dl_ps_foot">命令版与 .exe 版完全兼容（连接 / 远程命令 / 文件传输）。如提示脚本被系统拦截，可改为下载后运行：<code>powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345</code></div>

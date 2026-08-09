@@ -21,7 +21,7 @@ from typing import Optional
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
@@ -1069,6 +1069,16 @@ async def admin_delete_room(request: Request):
 
 static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(exist_ok=True)
+
+# bridge.ps1 必须按文本返回：Linux 的 mimetypes 不认识 .ps1，StaticFiles 会把它当
+# application/octet-stream，PowerShell 5.1 的 iwr 因此把 .Content 当作 Byte[]，
+# iex 报 "无法将 System.Byte[] 转换..."（2026-08-09 真机实测踩坑）。
+# ⚠️ 必须注册在 app.mount("/static", ...) 之前——Mount 是前缀匹配，
+#    先注册的 mount 会吞掉 /static/* 全部请求，路由永远不生效。
+@app.api_route("/static/bridge.ps1", methods=["GET", "HEAD"], include_in_schema=False)
+async def bridge_ps1_script():
+    return FileResponse(static_dir / "bridge.ps1", media_type="text/plain; charset=utf-8")
+
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 

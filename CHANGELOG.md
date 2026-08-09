@@ -34,6 +34,20 @@
 
 服务器端 `SNMTM_TMP_DIR = C:\Windows\Temp\sntools`，FileUpload 推送后 Go bridge 实际把文件写到 `%TEMP%\clouddiag\`（file.go 的 `os.TempDir()/clouddiag`）——**SN/MTM 刷写命令 `cd /d C:\Windows\Temp\sntools` 与文件实际落点不一致**，现有 Go bridge 也会踩。命令版 ps1 与 Go bridge 落点一致（对齐行为）。建议后续二选一修复：服务器端 FileUpload 指定落点目录 / bridge 端按 path 目录写入。
 
+### 真机实测修复（v0.9.1 内，用户 Windows 实测报错后修复）
+
+**症状**：用户执行 `iex (iwr ...).Content` 报 `Invoke-Expression : 无法将"System.Byte[]"转换...`。
+
+**根因链**：
+1. Linux 的 mimetypes 不认识 `.ps1` 扩展名 → Starlette StaticFiles 返回 `application/octet-stream`
+2. PowerShell 5.1 的 `iwr` 对非文本 Content-Type 把 `.Content` 当作 `Byte[]`（不是字符串）
+3. `iex` 无法执行字节数组 → 报错
+
+**修复（三处）**：
+1. **服务器端**：`server.py` 加显式路由 `/static/bridge.ps1` → `FileResponse(media_type="text/plain; charset=utf-8")`。⚠️ **必须注册在 `app.mount("/static", ...)` 之前**——Mount 是前缀匹配，先注册的 mount 会吞掉 /static/* 全部请求（实测第一次放 mount 后不生效）；用 `@app.api_route(methods=["GET","HEAD"])` 覆盖两种方法（**HEAD 请求实测不走 GET 路由会被 Mount 吞掉**，curl -sI 验证会误判）
+2. **下载页命令改 `Net.WebClient.DownloadString`**：`iex (New-Object Net.WebClient).DownloadString("http://.../bridge.ps1")`——WebClient 总是返回字符串（不依赖 Content-Type），且**没有 PS 5.1 iwr 的"脚本执行风险"安全警告弹窗**
+3. **验证教训**：验证 Content-Type 必须 GET 和 HEAD 都测，`curl -sI` 单独用会假阴性
+
 ---
 
 ## v0.9.0 — 2026-08-09（工具模式大扩展：3 个新工具 + Windows/Linux 分区 + 网格布局）
