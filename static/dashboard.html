@@ -175,6 +175,11 @@
     width: min(760px, 92vw); height: min(82vh, 700px); background: var(--surface);
     border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden;
   }
+  .modal-lg-wide { width: min(880px, 94vw); }
+  .modal-close {
+    background: none; border: none; color: var(--text2); font-size: 18px; cursor: pointer; padding: 2px 8px; border-radius: 6px;
+  }
+  .modal-close:hover { background: var(--surface2); color: var(--text); }
   .modal-head {
     display: flex; align-items: center; justify-content: space-between;
     padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--surface2);
@@ -475,15 +480,9 @@
 
           <div id="bios-result" style="display:none;">
             <div class="bios-info" id="bios-info"></div>
-            <div class="toolbar">
-              <input id="bios-search" data-i18n-placeholder="bios_search_ph" placeholder="搜索设置项（如 WakeOnLAN）" oninput="renderBiosItems()">
-              <span class="count" id="bios-count"></span>
-              <button class="btn-sm" data-i18n="copy" onclick="copyBiosItems()">复制全部</button>
+            <div class="tool-actions" style="margin-top:10px;">
+              <button class="btn-main" id="bios-view-btn" onclick="openBiosModal()">📄 <span data-i18n="bios_view_all">查看全部设置</span> (<span id="bios-count2">0</span>)</button>
             </div>
-            <table>
-              <thead><tr><th data-i18n="bios_th_item">设置项</th><th data-i18n="bios_th_value">当前值</th></tr></thead>
-              <tbody id="bios-tbody"></tbody>
-            </table>
           </div>
         </div>
       </section>
@@ -547,6 +546,30 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- BIOS 设置弹窗：查看全部设置项 + 搜索 + 复制 + 下载 -->
+<div class="modal-overlay" id="bios-modal">
+  <div class="modal-lg modal-lg-wide">
+    <div class="modal-head">
+      <div class="modal-title">🖥 <span data-i18n="bios_modal_title">BIOS 设置项（全量）</span></div>
+      <button class="modal-close" onclick="closeBiosModal()">✕</button>
+    </div>
+    <div class="history-body" style="display:flex; flex-direction:column;">
+      <div class="toolbar" style="margin-bottom:10px; flex-shrink:0;">
+        <input id="bios-search" data-i18n-placeholder="bios_search_ph" placeholder="搜索设置项（如 WakeOnLAN）" oninput="renderBiosItems()">
+        <span class="count" id="bios-count"></span>
+        <button class="btn-sm" onclick="copyBiosItems()" data-i18n="copy">复制全部</button>
+        <button class="btn-sm" onclick="downloadBiosTxt()" data-i18n="bios_download">下载 .txt</button>
+      </div>
+      <div style="flex:1; overflow:auto; border:1px solid var(--border); border-radius:8px;">
+        <table style="margin:0;">
+          <thead><tr><th data-i18n="bios_th_item">设置项</th><th data-i18n="bios_th_value">当前值</th></tr></thead>
+          <tbody id="bios-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const I18N = {
   'zh-CN': {
@@ -600,7 +623,11 @@ const I18N = {
     bios_th_item: '设置项', bios_th_value: '当前值',
     bios_no_match: '无匹配的设置项',
     bios_elevate_title: '🔒 需管理员权限：bridge 当前为普通权限运行，无法读取完整 BIOS 设置',
-    bios_elevate_hint: '请在客户机上重启 bridge：双击运行时按 Y 确认提权，或用命令行 bridge -server ws://106.54.193.9:8000 -room 房间码 --elevate',
+    bios_elevate_hint: '请在客户机上重启 bridge（双击会自动请求管理员权限，UAC 弹窗点"是"即可）',
+    bios_view_all: '查看全部设置',
+    bios_modal_title: 'BIOS 设置项（全量）',
+    bios_download: '下载 .txt',
+    bios_downloaded: 'BIOS 配置已下载',
     logout: '退出登录',
     wo_desc: '当前账号处理过的诊断房间',
     search_ph: '按 SN / 工单号 / 型号 / 房间码搜索',
@@ -705,7 +732,11 @@ const I18N = {
     bios_th_item: '設置項', bios_th_value: '當前值',
     bios_no_match: '無匹配的設置項',
     bios_elevate_title: '🔒 需管理員權限：bridge 當前為普通權限執行，無法讀取完整 BIOS 設置',
-    bios_elevate_hint: '請在客戶機上重啟 bridge：雙擊執行時按 Y 確認提權，或用命令列 bridge -server ws://106.54.193.9:8000 -room 房間碼 --elevate',
+    bios_elevate_hint: '請在客戶機上重啟 bridge（雙擊會自動請求管理員權限，UAC 彈窗點「是」即可）',
+    bios_view_all: '查看全部設置',
+    bios_modal_title: 'BIOS 設置項（全量）',
+    bios_download: '下載 .txt',
+    bios_downloaded: 'BIOS 配置已下載',
     logout: '退出登錄',
     wo_desc: '當前帳號處理過的診斷房間',
     search_ph: '按 SN / 工單號 / 型號 / 房間碼搜索',
@@ -810,7 +841,11 @@ const I18N = {
     bios_th_item: 'Setting', bios_th_value: 'Current Value',
     bios_no_match: 'No matching settings',
     bios_elevate_title: '🔒 Admin required: bridge is running without elevation, full BIOS settings unavailable',
-    bios_elevate_hint: 'Restart bridge on the client: press Y at startup, or run: bridge -server ws://106.54.193.9:8000 -room ROOMCODE --elevate',
+    bios_elevate_hint: 'Restart bridge on the client (double-click auto-requests admin, click "Yes" on the UAC prompt)',
+    bios_view_all: 'View All Settings',
+    bios_modal_title: 'BIOS Settings (full)',
+    bios_download: 'Download .txt',
+    bios_downloaded: 'BIOS config downloaded',
     logout: 'Logout',
     wo_desc: 'Diagnosis rooms handled by this account',
     search_ph: 'Search by SN / ticket / model / room code',
@@ -1450,6 +1485,7 @@ async function oa3Activate() {
 // ===== BIOS 信息读取 =====
 let biosItems = [];
 let biosRawText = '';
+let biosPwdState = '';
 
 function fillBiosRoom() {
   const sel = document.getElementById('bios-room');
@@ -1481,6 +1517,7 @@ async function biosRead() {
     const data = await resp.json();
     if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
     biosItems = data.items || [];
+    biosPwdState = data.password_state || '';
     const info = data.info || {};
     document.getElementById('bios-info').textContent =
       (info.vendor || '-') + ' | ' + (info.version || '-') + (info.serial ? ' | SN: ' + info.serial : '') + (info.date ? ' | ' + info.date : '');
@@ -1499,6 +1536,7 @@ async function biosRead() {
       msg.className = 'msg-box ok';
     }
     document.getElementById('bios-result').style.display = 'block';
+    document.getElementById('bios-count2').textContent = biosItems.length;
     biosRawText = biosItems.map(i => i.name + ',' + i.value).join('\n');
     renderBiosItems();
   } catch (e) {
@@ -1506,6 +1544,37 @@ async function biosRead() {
     msg.className = 'msg-box err';
   }
   btn.disabled = false;
+}
+
+function openBiosModal() {
+  renderBiosItems();
+  document.getElementById('bios-modal').classList.add('show');
+}
+
+function closeBiosModal() {
+  document.getElementById('bios-modal').classList.remove('show');
+}
+
+function downloadBiosTxt() {
+  if (!biosItems.length) return;
+  const info = (document.getElementById('bios-info').textContent || '').trim();
+  const lines = [];
+  lines.push('=== BIOS 配置快照 ===');
+  lines.push('机器: ' + info);
+  lines.push('时间: ' + new Date().toLocaleString());
+  lines.push('密码状态: ' + (typeof biosPwdState !== 'undefined' ? biosPwdState : ''));
+  lines.push('---------------------');
+  lines.push(biosRawText || '(无设置项)');
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'bios-config-' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  showToast(t('bios_downloaded'));
 }
 
 function renderBiosItems() {
@@ -1562,6 +1631,7 @@ document.getElementById('f-join').addEventListener('keydown', (e) => { if (e.key
 document.getElementById('f-sn').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRoom(); });
 document.getElementById('f-ticket').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRoom(); });
 document.getElementById('history-modal').addEventListener('click', (e) => { if (e.target.id === 'history-modal') closeHistory(); });
+document.getElementById('bios-modal').addEventListener('click', (e) => { if (e.target.id === 'bios-modal') closeBiosModal(); });
 
 // ===== Init =====
 applyLang(currentLang);

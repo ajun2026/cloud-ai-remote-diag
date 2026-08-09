@@ -23,7 +23,7 @@ import (
 )
 
 // Version 桥接器版本号（构建时可用 -ldflags 覆盖）
-var Version = "0.6.2"
+var Version = "0.6.3"
 
 // ClientInfo 上报给服务器的本机身份信息
 type ClientInfo struct {
@@ -40,10 +40,11 @@ type ClientInfo struct {
 
 func main() {
 	var serverURL, roomCode string
-	var elevate, elevated bool
+	var elevate, elevated, noElevate bool
 	flag.StringVar(&serverURL, "server", "ws://localhost:8000", "服务器地址 (ws:// 或 wss://)")
 	flag.StringVar(&roomCode, "room", "", "房间码（必填）")
 	flag.BoolVar(&elevate, "elevate", false, "自动请求管理员权限（Windows UAC 提权）")
+	flag.BoolVar(&noElevate, "no-elevate", false, "禁止自动提权（特殊情况用，默认双击自动提权）")
 	flag.BoolVar(&elevated, "elevated", false, "内部标志：已处于提权后的进程")
 	flag.Parse()
 
@@ -85,30 +86,24 @@ func main() {
 	}
 
 	// 管理员提权（仅 Windows 有意义）：
-	//   条件：非管理员 + 尚未提权 + (命令行 --elevate 或 交互模式询问确认)
-	//   提权后新进程带 --elevated 标志自动跳过，防递归
-	if !isAdmin() && !elevated {
-		shouldElevate := elevate
-		if !shouldElevate && flag.NFlag() == 0 {
-			// 交互模式（无任何参数）：询问用户是否提权
-			reader := bufio.NewReader(os.Stdin)
-			fmt.Print(" 当前不是管理员权限，部分功能受限（如读取完整 BIOS 设置）。\n 是否以管理员身份重新启动？[Y/n]: ")
-			answer, _ := reader.ReadString('\n')
-			answer = strings.TrimSpace(strings.ToLower(answer))
-			shouldElevate = answer != "n" && answer != "no" // 回车/其他 = 默认提权
-		}
+	//   方案 A：双击（交互模式）→ 自动请求管理员权限，不再询问；
+	//   命令行显式 --elevate 也提权；--no-elevate 可禁止（特殊情况）。
+	//   提权后新进程带 --elevated 标志自动跳过，防递归。
+	//   用户拒绝 UAC（点"否"）→ 提权失败 → 继续以普通权限运行。
+	if !isAdmin() && !elevated && !noElevate {
+		shouldElevate := elevate || flag.NFlag() == 0
 		if shouldElevate {
 			fmt.Println(" 正在请求管理员权限（UAC 弹窗确认后自动继续）…")
 			if err := elevateSelf(serverURL, roomCode); err != nil {
-				fmt.Fprintf(os.Stderr, " 提权失败: %v\n", err)
-				fmt.Println(" 继续以普通权限运行（部分功能受限）…")
+				fmt.Fprintf(os.Stderr, " 提权失败（可能拒绝了 UAC）: %v\n", err)
+				fmt.Println(" 继续以普通权限运行（部分功能受限，如 BIOS 全量读取）。")
 			} else {
 				// 提权成功：新进程已启动，本进程退出
 				fmt.Println(" 已触发提权，请在新的管理员窗口中查看连接状态。")
 				os.Exit(0)
 			}
 		} else {
-			fmt.Println(" 已选择普通权限运行（部分功能受限，如 BIOS 全量读取）。")
+			fmt.Println(" 当前为普通权限运行（部分功能受限，如 BIOS 全量读取）。如需提权请加 --elevate 参数。")
 		}
 	}
 
