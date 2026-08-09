@@ -403,7 +403,7 @@
 
       <!-- 我的工单 -->
       <section class="page" id="page-workorders">
-        <div class="page-title">📋 <span data-i18n="nav_workorders">我的工单</span></div>
+        <div class="page-title"><span data-i18n="nav_workorders">我的工单</span></div>
         <div class="page-desc" data-i18n="wo_desc">当前账号处理过的诊断房间</div>
         <div class="toolbar">
           <input id="search-input" data-i18n-placeholder="search_ph" placeholder="按 SN / 工单号 / 型号 / 房间码搜索" oninput="renderRooms()">
@@ -420,7 +420,7 @@
       <!-- 对话（iframe 嵌入聊天页） -->
       <section class="page" id="page-chat">
         <div class="chat-head">
-          <div class="page-title">💬 <span data-i18n="nav_chat">对话</span></div>
+          <div class="page-title"><span data-i18n="nav_chat">对话</span></div>
           <span class="room-tag" id="chat-room-tag"></span>
         </div>
         <div class="chat-frame-wrap" id="chat-frame-wrap" style="display:none;">
@@ -435,7 +435,7 @@
 
       <!-- 创建房间 -->
       <section class="page" id="page-create">
-        <div class="page-title">➕ <span data-i18n="nav_create">创建房间</span></div>
+        <div class="page-title"><span data-i18n="nav_create">创建房间</span></div>
         <div class="page-desc" data-i18n="create_desc">需绑定电脑 SN 与报修工单号，生成 8 位房间码用于桥接器配对</div>
         <div class="panel">
           <div class="msg-box" id="create-msg"></div>
@@ -456,7 +456,7 @@
 
       <!-- 加入房间 -->
       <section class="page" id="page-join">
-        <div class="page-title">⇄ <span data-i18n="nav_join">加入房间</span></div>
+        <div class="page-title"><span data-i18n="nav_join">加入房间</span></div>
         <div class="page-desc" data-i18n="join_desc">输入 8 位房间码，进入已有诊断会话</div>
         <div class="panel">
           <div class="field"><label data-i18n="lbl_room_code">房间码</label><input id="f-join" maxlength="8" data-i18n-placeholder="ph_room_code" placeholder="如 AB12CDEF" style="text-transform:uppercase;letter-spacing:3px;font-size:18px;"></div>
@@ -466,7 +466,7 @@
 
       <!-- 下载桥接器 -->
       <section class="page" id="page-download">
-        <div class="page-title">📦 <span data-i18n="nav_download">下载桥接器</span></div>
+        <div class="page-title"><span data-i18n="nav_download">下载桥接器</span></div>
         <div class="page-desc" data-i18n="dl_desc">在需要诊断的电脑上运行桥接器，输入房间码完成配对</div>
         <div class="dl-steps">
           <span class="s"><span class="num">1</span><span data-i18n="dl_step1">安装桥接器</span></span>
@@ -560,7 +560,7 @@
 
       <!-- Windows 工具（非 AI 工具集合） -->
       <section class="page" id="page-tools-win">
-        <div class="page-title">🪟 <span data-i18n="nav_tools_win">Windows 工具</span></div>
+        <div class="page-title"><span data-i18n="nav_tools_win">Windows 工具</span></div>
         <div class="page-desc" data-i18n="tools_win_desc">Windows 客户机专用工具集合，通过桥接器远程推送到客户机执行</div>
 
         <div class="tool-grid">
@@ -736,7 +736,7 @@
 
       <!-- Linux 工具 -->
       <section class="page" id="page-tools-linux">
-        <div class="page-title">🐧 <span data-i18n="nav_tools_linux">Linux 工具</span></div>
+        <div class="page-title"><span data-i18n="nav_tools_linux">Linux 工具</span></div>
         <div class="page-desc" data-i18n="tools_linux_desc">Linux 客户机专用工具集合（Ubuntu / UOS / KOS / 麒麟 / 龙芯等），通过桥接器远程推送到客户机执行</div>
 
         <div class="tool-grid">
@@ -770,7 +770,7 @@
 
       <!-- 修改密码 -->
       <section class="page" id="page-password">
-        <div class="page-title">🔒 <span data-i18n="nav_password">修改密码</span></div>
+        <div class="page-title"><span data-i18n="nav_password">修改密码</span></div>
         <div class="page-desc" data-i18n="pwd_desc">定期修改密码保护账号安全</div>
         <div class="panel">
           <div class="msg-box" id="pwd-msg"></div>
@@ -783,7 +783,7 @@
 
       <!-- 账号管理（仅管理员） -->
       <section class="page" id="page-users">
-        <div class="page-title">👥 <span data-i18n="nav_users">账号管理</span></div>
+        <div class="page-title"><span data-i18n="nav_users">账号管理</span></div>
         <div class="page-desc" data-i18n="users_desc">创建工程师账号、停用/启用、重置密码</div>
         <div class="toolbar">
           <button class="btn-main" data-i18n="btn_new_user" onclick="showCreateUser()">+ 新建账号</button>
