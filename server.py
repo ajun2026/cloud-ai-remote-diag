@@ -2452,6 +2452,117 @@ async def tools_oa3_activate(request: Request):
 
 
 # ============================================================
+# 工具模式 — BIOS 信息读取（联想 WMI 接口全量采集）
+# 依据：Lenovo BIOS WMI Interface Guide（docs.lenovocdrt.com）
+#   Lenovo_BiosSetting  查询全部 BIOS 设置（"Item,Value" 格式）
+#   Lenovo_BiosPasswordSettings  查询密码状态（位掩码）
+#   Win32_BIOS          基础信息（厂商/版本/日期）
+# ============================================================
+BIOS_READ_CMD = (
+    # 0) 管理员权限检测（Lenovo_BiosSetting 需要管理员，Win32_BIOS 不需要）
+    "$adm = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent(); "
+    "$isAdmin = $adm.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); "
+    "Write-Output ('IS_ADMIN=' + $isAdmin); "
+    # 1) 基础信息
+    "$b = Get-CimInstance -ClassName Win32_BIOS; "
+    "Write-Output ('BIOS_Vendor=' + $b.Manufacturer); "
+    "Write-Output ('BIOS_Version=' + $b.SMBIOSBIOSVersion); "
+    "Write-Output ('BIOS_Serial=' + $b.SerialNumber); "
+    "Write-Output ('BIOS_Date=' + $b.ReleaseDate); "
+    # 2) 全量 BIOS 设置（Lenovo_BiosSetting，仅管理员可用）
+    "if ($isAdmin) { "
+    "try { $items = Get-CimInstance -Namespace root/wmi -ClassName Lenovo_BiosSetting | "
+    "Where-Object { $_.CurrentSetting -ne '' }; "
+    "foreach ($i in $items) { Write-Output ('BIOS_ITEM=' + $i.CurrentSetting) } } "
+    "catch { Write-Output ('BIOS_ITEM_ERROR=' + $_.Exception.Message) }; "
+    "try { $p = Get-CimInstance -Namespace root/wmi -ClassName Lenovo_BiosPasswordSettings; "
+    "Write-Output ('BIOS_PasswordState=' + $p.PasswordState) } "
+    "catch { Write-Output ('BIOS_PasswordError=' + $_.Exception.Message) } "
+    "} else { Write-Output ('NEED_ADMIN=Admin required: full BIOS settings need Administrator. Please run the bridge as Administrator') }"
+)
+
+
+@app.post("/api/tools/bios/read")
+async def tools_bios_read(request: Request):
+    """读取目标机器 BIOS 全量配置（只读，免审批）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    try:
+        result = await execute_bridge_command(room, "RunCommand",
+                                              {"command": BIOS_READ_CMD, "timeout": 60, "cwd": ""},
+                                              f"bios_read_{int(time.time())}", tier=1)
+        run_logger.info(f"[{room_code}] BIOS read done: {len(result or '')} chars")
+
+        # 解析
+        info = {}
+        items = []
+        item_error = ""
+        pwd_state = ""
+        is_admin = ""
+        need_admin = ""
+        for line in (result or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("IS_ADMIN="):
+                is_admin = line.split("=", 1)[1].strip()
+            elif line.startswith("NEED_ADMIN="):
+                need_admin = line.split("=", 1)[1].strip()
+            elif line.startswith("BIOS_Vendor="):
+                info["vendor"] = line.split("=", 1)[1].strip()
+            elif line.startswith("BIOS_Version="):
+                info["version"] = line.split("=", 1)[1].strip()
+            elif line.startswith("BIOS_Serial="):
+                info["serial"] = line.split("=", 1)[1].strip()
+            elif line.startswith("BIOS_Date="):
+                info["date"] = line.split("=", 1)[1].strip()
+            elif line.startswith("BIOS_ITEM_ERROR="):
+                item_error = line.split("=", 1)[1].strip()
+            elif line.startswith("BIOS_PasswordState="):
+                pwd_state = line.split("=", 1)[1].strip()
+            elif line.startswith("BIOS_ITEM="):
+                val = line.split("=", 1)[1].strip()
+                # "Item,Value" 格式，逗号分隔（值内可能含逗号，只按第一个逗号切）
+                if "," in val:
+                    name, value = val.split(",", 1)
+                    items.append({"name": name.strip(), "value": value.strip()})
+                else:
+                    items.append({"name": val, "value": ""})
+
+        save_message(room_code, "tool",
+                     f"[BIOS 读取] 用户={user.get('username')} 项数={len(items)} admin={is_admin}",
+                     "BIOS_Read", 1)
+        return JSONResponse({
+            "status": "ok",
+            "info": info,
+            "items": items,
+            "item_count": len(items),
+            "password_state": pwd_state,
+            "is_admin": is_admin,
+            "need_admin": need_admin,
+            "item_error": item_error,
+            "raw": (result or "")[:3000],
+        })
+    except Exception as e:
+        run_logger.error(f"[{room_code}] BIOS read error: {e}", exc_info=True)
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
+# ============================================================
 # WebSocket endpoints
 # ============================================================
 @app.websocket("/ws/browser/{room_code}")
