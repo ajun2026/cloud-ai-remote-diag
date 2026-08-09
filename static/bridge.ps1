@@ -1,6 +1,6 @@
 # ============================================================================
 #  Cloud AI Remote Diagnostics - PowerShell Bridge (ps-pipe)
-#  Version 1.0.1
+#  Version 1.0.2
 #
 #  A file-less PowerShell client that connects to the cloud server and
 #  executes diagnostic commands on this Windows PC - no .exe needed.
@@ -25,7 +25,7 @@ param(
     [string]$Room   = $env:BRIDGE_ROOM
 )
 
-$Version   = "1.0.1"
+$Version   = "1.0.2"
 $ServerUrl = if ($Server) { $Server } else { "ws://106.54.193.9:8000" }
 $script:ws = $null
 $script:exiting = $false
@@ -84,17 +84,11 @@ function Send-Json {
 }
 
 function Receive-Text {
-    param($Cts)
     $buffer = New-Object byte[] 65536
     $ms = New-Object System.IO.MemoryStream
-    $first = $true
     while ($true) {
         $seg = New-Object 'System.ArraySegment[byte]' -ArgumentList (,[byte[]]$buffer)
-        # Only the first segment waits with the timeout token (25s heartbeat beat);
-        # once a message starts arriving, no timeout - avoid truncating large messages
-        $ct = if ($first) { $Cts.Token } else { [System.Threading.CancellationToken]::None }
-        $res = $script:ws.ReceiveAsync($seg, $ct).GetAwaiter().GetResult()
-        $first = $false
+        $res = $script:ws.ReceiveAsync($seg, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
         if ($res.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
             return $null
         }
@@ -286,34 +280,38 @@ function Handle-FileUpload {
 # (KJTFF8HA/A7P7J38W reproduced). Sync mode is safe: ClientWebSocket has no
 # read deadline (server never kicks us for a heartbeat gap); messages queue
 # in the TCP buffer while a command runs and are processed afterwards.
+#
+# Keepalive design (v1.0.2): NEVER cancel ReceiveAsync to send heartbeats -
+# cancelling kills the connection (reproduced: disconnect code=1005 exactly
+# 25s after connect, every cycle). Instead:
+#   - ClientWebSocketOptions.KeepAliveInterval sends protocol-level WebSocket
+#     ping frames internally (.NET handles them, no app code, no main thread)
+#   - a JSON heartbeat is piggy-backed whenever a message arrives and 25s
+#     have passed, so the server's heartbeat_age stays fresh during diagnosis
 function Run-Bridge {
     param($Uri)
     $script:ws = New-Object System.Net.WebSockets.ClientWebSocket
+    $script:ws.Options.KeepAliveInterval = [TimeSpan]::FromSeconds(25)
     [void]($script:ws.ConnectAsync($Uri, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult())
     Write-Host "Connected. Waiting for server..." -ForegroundColor Green
     Write-Audit "connected to $Uri"
     Send-Identify
 
     $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
+    $lastHb = Get-Date
 
     while (-not $script:exiting -and $script:ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-        # heartbeat beat: if no message arrives within 25s, send a heartbeat
-        $cts = New-Object System.Threading.CancellationTokenSource
-        $cts.CancelAfter(25000)
-        $text = $null
-        try {
-            $text = Receive-Text $cts
-        } catch [System.OperationCanceledException] {
-            $ts = [int64]([DateTime]::UtcNow - $epoch).TotalSeconds
-            Send-Json @{ type = "heartbeat"; ts = $ts }
-            continue
-        } catch {
-            Write-Host ("receive error: " + $_.Exception.Message) -ForegroundColor Yellow
-            Write-Audit ("receive error: " + $_.Exception.ToString())
-            break
-        }
+        $text = Receive-Text
         if ($null -eq $text) { break }
         if (-not $text) { continue }
+
+        # opportunistic heartbeat: piggy-back on any server message
+        if (([DateTime]::UtcNow - $lastHb.ToUniversalTime()).TotalSeconds -ge 25) {
+            $ts = [int64]([DateTime]::UtcNow - $epoch).TotalSeconds
+            Send-Json @{ type = "heartbeat"; ts = $ts }
+            $lastHb = Get-Date
+        }
+
         $msg = $null
         try { $msg = $text | ConvertFrom-Json } catch { continue }
 
