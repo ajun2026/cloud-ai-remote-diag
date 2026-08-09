@@ -9,7 +9,7 @@
 A cloud-based AI remote diagnostics system for Windows computers. Users describe PC problems in natural language through a browser, and the cloud AI remotely executes diagnostic and repair commands via a lightweight bridge program, then provides analysis reports.
 
 > **Live Demo:** http://106.54.193.9:8000  
-> **Admin Dashboard:** http://106.54.193.9:8000/admin （默认账号：admin / admin）
+> **Admin Dashboard:** http://106.54.193.9:8000/admin （需登录）
 > **Update Log:** 详见 [CHANGELOG.md](CHANGELOG.md)
 > **Project Evolution:** 项目演进史（Python → Go 重写原因、架构变化）详见 [HISTORY.md](HISTORY.md)
 > **Hermes 大脑集成记录:** [docs/Hermes大脑集成与调试记录.md](docs/Hermes大脑集成与调试记录.md)
