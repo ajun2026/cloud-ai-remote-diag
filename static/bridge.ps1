@@ -90,8 +90,8 @@ function Receive-Text {
     $first = $true
     while ($true) {
         $seg = New-Object 'System.ArraySegment[byte]' -ArgumentList (,[byte[]]$buffer)
-        # 仅第一段等待用超时令牌（25s 心跳节拍）；消息一旦开始接收就不设超时，
-        # 避免大消息（如文件块）被取消导致数据不完整
+        # Only the first segment waits with the timeout token (25s heartbeat beat);
+        # once a message starts arriving, no timeout - avoid truncating large messages
         $ct = if ($first) { $Cts.Token } else { [System.Threading.CancellationToken]::None }
         $res = $script:ws.ReceiveAsync($seg, $ct).GetAwaiter().GetResult()
         $first = $false
@@ -280,11 +280,12 @@ function Handle-FileUpload {
 }
 
 # ---- main connection loop (one connect + read loop) ----
-# 设计（v2 修正）：全部主线程同步执行，不用后台线程。
-# 原因：PowerShell 的 Task.Run/StartNew 后台 scriptblock 没有脚本作用域链，
-# 访问 $script: 变量会静默失败 → 心跳/命令结果发不出去（KJTFF8HA/A7P7J38W 实测）。
-# 同步模式可行是因为 ClientWebSocket 没有读超时（服务器不会因心跳暂停踢 bridge），
-# 命令执行期间消息会在 TCP 缓冲排队，命令完继续处理。
+# v2 fix: everything runs on the main thread (no background tasks).
+# Why: PowerShell Task.Run/StartNew scriptblocks have no script scope chain,
+# accessing $script: vars silently fails -> heartbeat/command results never sent
+# (KJTFF8HA/A7P7J38W reproduced). Sync mode is safe: ClientWebSocket has no
+# read deadline (server never kicks us for a heartbeat gap); messages queue
+# in the TCP buffer while a command runs and are processed afterwards.
 function Run-Bridge {
     param($Uri)
     $script:ws = New-Object System.Net.WebSockets.ClientWebSocket
@@ -296,7 +297,7 @@ function Run-Bridge {
     $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
 
     while (-not $script:exiting -and $script:ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-        # 心跳节拍：25s 内无任何消息到达 → 主动发心跳
+        # heartbeat beat: if no message arrives within 25s, send a heartbeat
         $cts = New-Object System.Threading.CancellationTokenSource
         $cts.CancelAfter(25000)
         $text = $null
@@ -321,7 +322,7 @@ function Run-Bridge {
             "ping"             { Send-Json @{ type = "pong" } }
             "pong"             { }  # server's reply to heartbeat, ignore
             "status"           { Write-Host ("[server] " + $msg.content) -ForegroundColor DarkCyan }
-            "command"          { Execute-CommandSpecFromJson $text }  # 同步执行（串行安全，agent 一次只发一条）
+            "command"          { Execute-CommandSpecFromJson $text }  # synchronous (agent sends one at a time)
             "file_download"    { Handle-FileDownload $msg }
             "file_upload"      { Handle-FileUpload $msg }
             "close" {
