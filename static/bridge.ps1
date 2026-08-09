@@ -71,7 +71,7 @@ function Send-Json {
         $json = $Obj | ConvertTo-Json -Compress -Depth 12
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
         $seg = New-Object 'System.ArraySegment[byte]' -ArgumentList (,[byte[]]$bytes)
-        $script:ws.SendAsync($seg, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        [void]($script:ws.SendAsync($seg, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult())
     } catch {
         Write-Host ("send error: " + $_.Exception.Message) -ForegroundColor Yellow
     } finally {
@@ -272,7 +272,7 @@ function Handle-FileUpload {
 function Run-Bridge {
     param($Uri)
     $script:ws = New-Object System.Net.WebSockets.ClientWebSocket
-    $script:ws.ConnectAsync($Uri, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
+    [void]($script:ws.ConnectAsync($Uri, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult())
     Write-Host "Connected. Waiting for server..." -ForegroundColor Green
     Write-Audit "connected to $Uri"
     Send-Identify
@@ -321,7 +321,7 @@ function Run-Bridge {
 
     try {
         if ($script:ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-            $script:ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "bye", [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
+            [void]($script:ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "bye", [System.Threading.CancellationToken]::None).GetAwaiter().GetResult())
         }
     } catch {}
     $script:ws.Dispose()
