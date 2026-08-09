@@ -222,6 +222,19 @@
   .tool-step { font-size: 12px; color: var(--text2); font-family: "Consolas", monospace; padding: 3px 0; border-bottom: 1px dashed var(--border); white-space: pre-wrap; word-break: break-all; }
   .tool-step-verify { color: var(--success); }
   .tool-hint { font-size: 12px; color: var(--warn); margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(255,165,0,.4); background: rgba(255,165,0,.08); border-radius: 6px; }
+
+  /* ===== 首页 ===== */
+  .home-hero { padding: 28px 24px; border-radius: 12px; background: linear-gradient(135deg, rgba(52,120,246,.15), rgba(52,120,246,.04)); border: 1px solid rgba(52,120,246,.25); margin-bottom: 20px; }
+  .home-title { font-size: 22px; font-weight: 700; }
+  .home-sub { font-size: 13px; color: var(--text2); margin-top: 6px; }
+  .home-section { margin-bottom: 20px; }
+  .home-section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+  .home-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .home-step { display: flex; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  .step-num { width: 26px; height: 26px; min-width: 26px; border-radius: 50%; background: var(--info); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+  .home-step b { font-size: 13px; }
+  .step-desc { font-size: 12px; color: var(--text2); margin-top: 4px; line-height: 1.5; }
+  .home-actions { display: flex; gap: 12px; flex-wrap: wrap; }
   .toast {
     position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 200;
     background: var(--surface2); color: var(--text); border: 1px solid var(--border);
@@ -255,14 +268,16 @@
   <div class="main">
     <aside class="sidebar">
       <nav>
-        <div class="nav-item active" onclick="switchTab('workorders')"><span data-i18n="nav_workorders">📋 我的工单</span></div>
-        <div class="nav-item" id="nav-chat" onclick="switchTab('chat')"><span data-i18n="nav_chat">💬 对话</span></div>
+        <div class="nav-item active" onclick="switchTab('home')"><span data-i18n="nav_home">🏠 首页</span></div>
         <div class="nav-item" onclick="switchTab('create')"><span data-i18n="nav_create">➕ 创建房间</span></div>
         <div class="nav-item" onclick="switchTab('join')"><span data-i18n="nav_join">⇄ 加入房间</span></div>
+        <div class="nav-item" id="nav-chat" onclick="switchTab('chat')"><span data-i18n="nav_chat">💬 对话</span></div>
         <div class="nav-item" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
-        <div class="nav-item" onclick="switchTab('tools')"><span data-i18n="nav_tools">🔧 工具模式</span></div>
-        <div class="nav-item" onclick="switchTab('password')"><span data-i18n="nav_password">🔒 修改密码</span></div>
         <div class="nav-divider"></div>
+        <div class="nav-item" onclick="switchTab('workorders')"><span data-i18n="nav_workorders">📋 我的工单</span></div>
+        <div class="nav-item" onclick="switchTab('tools')"><span data-i18n="nav_tools">🔧 工具模式</span></div>
+        <div class="nav-divider"></div>
+        <div class="nav-item" onclick="switchTab('password')"><span data-i18n="nav_password">🔒 修改密码</span></div>
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
@@ -271,8 +286,32 @@
 
     <main class="content">
 
+      <!-- 首页（默认页） -->
+      <section class="page active" id="page-home">
+        <div class="home-hero">
+          <div class="home-title">🤖 云端 AI 远程运维助手</div>
+          <div class="home-sub" data-i18n="home_sub">远程诊断 Windows 电脑问题 · 无需到现场</div>
+        </div>
+
+        <div class="home-section">
+          <div class="home-section-title" data-i18n="home_howto">快速上手</div>
+          <div class="home-steps">
+            <div class="home-step"><span class="step-num">1</span><div><b data-i18n="home_step1_t">创建房间</b><div class="step-desc" data-i18n="home_step1_d">填写电脑 SN 与报修工单号，生成 8 位房间码</div></div></div>
+            <div class="home-step"><span class="step-num">2</span><div><b data-i18n="home_step2_t">客户运行桥接器</b><div class="step-desc" data-i18n="home_step2_d">在需诊断的电脑上运行桥接器并输入房间码，完成连接</div></div></div>
+            <div class="home-step"><span class="step-num">3</span><div><b data-i18n="home_step3_t">对话诊断</b><div class="step-desc" data-i18n="home_step3_d">用自然语言描述电脑问题，AI 远程执行诊断命令并分析</div></div></div>
+            <div class="home-step"><span class="step-num">4</span><div><b data-i18n="home_step4_t">查看结果</b><div class="step-desc" data-i18n="home_step4_d">在「我的工单」查看历史记录，或在「工具模式」执行刷写/激活</div></div></div>
+          </div>
+        </div>
+
+        <div class="home-actions">
+          <button class="btn-main" data-i18n="nav_create" onclick="switchTab('create')">➕ 创建房间</button>
+          <button class="btn-main btn-green" data-i18n="nav_download" onclick="switchTab('download')">📦 下载桥接器</button>
+          <button class="btn-main" data-i18n="nav_tools" onclick="switchTab('tools')">🔧 工具模式</button>
+        </div>
+      </section>
+
       <!-- 我的工单 -->
-      <section class="page active" id="page-workorders">
+      <section class="page" id="page-workorders">
         <div class="page-title">📋 <span data-i18n="nav_workorders">我的工单</span></div>
         <div class="page-desc" data-i18n="wo_desc">当前账号处理过的诊断房间</div>
         <div class="toolbar">
@@ -482,6 +521,13 @@ const I18N = {
   'zh-CN': {
     nav_workorders: '我的工单', nav_chat: '对话', nav_create: '创建房间', nav_join: '加入房间',
     nav_download: '下载桥接器', nav_tools: '工具模式', nav_password: '修改密码', nav_users: '账号管理', nav_admin: '管理后台',
+    nav_home: '首页',
+    home_sub: '远程诊断 Windows 电脑问题 · 无需到现场',
+    home_howto: '快速上手',
+    home_step1_t: '创建房间', home_step1_d: '填写电脑 SN 与报修工单号，生成 8 位房间码',
+    home_step2_t: '客户运行桥接器', home_step2_d: '在需诊断的电脑上运行桥接器并输入房间码，完成连接',
+    home_step3_t: '对话诊断', home_step3_d: '用自然语言描述电脑问题，AI 远程执行诊断命令并分析',
+    home_step4_t: '查看结果', home_step4_d: '在「我的工单」查看历史记录，或在「工具模式」执行刷写/激活',
     tools_desc: '无需 AI 对话的本地工具集合，通过桥接器远程推送到客户机执行',
     tools_write: '写入类 · 需审批',
     snmtm_desc: 'ThinkStation 工作站更换主板后，将正确的序列号(SN)与机型型号(MTM)写入 BIOS DMI 区',
@@ -568,6 +614,13 @@ const I18N = {
   'zh-TW': {
     nav_workorders: '我的工單', nav_chat: '對話', nav_create: '創建房間', nav_join: '加入房間',
     nav_download: '下載橋接器', nav_tools: '工具模式', nav_password: '修改密碼', nav_users: '帳號管理', nav_admin: '管理後台',
+    nav_home: '首頁',
+    home_sub: '遠程診斷 Windows 電腦問題 · 無需到現場',
+    home_howto: '快速上手',
+    home_step1_t: '創建房間', home_step1_d: '填寫電腦 SN 與報修工單號，生成 8 位房間碼',
+    home_step2_t: '客戶運行橋接器', home_step2_d: '在需診斷的電腦上運行橋接器並輸入房間碼，完成連接',
+    home_step3_t: '對話診斷', home_step3_d: '用自然語言描述電腦問題，AI 遠程執行診斷命令並分析',
+    home_step4_t: '查看結果', home_step4_d: '在「我的工單」查看歷史記錄，或在「工具模式」執行刷寫/啟動',
     tools_desc: '無需 AI 對話的本地工具集合，通過橋接器遠程推送到客戶機執行',
     tools_write: '寫入類 · 需審批',
     snmtm_desc: 'ThinkStation 工作站更換主板後，將正確的序號(SN)與機型型號(MTM)寫入 BIOS DMI 區',
@@ -654,6 +707,13 @@ const I18N = {
   'en': {
     nav_workorders: 'Work Orders', nav_chat: 'Chat', nav_create: 'Create Room', nav_join: 'Join Room',
     nav_download: 'Download Bridge', nav_tools: 'Tool Mode', nav_password: 'Change Password', nav_users: 'Accounts', nav_admin: 'Admin Console',
+    nav_home: 'Home',
+    home_sub: 'Remotely diagnose Windows PC issues · No on-site visit needed',
+    home_howto: 'Quick Start',
+    home_step1_t: 'Create Room', home_step1_d: 'Enter the PC SN and repair ticket no. to generate an 8-digit room code',
+    home_step2_t: 'Run Bridge on Client', home_step2_d: 'Run the bridge on the PC to diagnose and enter the room code to connect',
+    home_step3_t: 'Chat to Diagnose', home_step3_d: 'Describe the issue in natural language; AI runs diagnostic commands remotely',
+    home_step4_t: 'View Results', home_step4_d: 'Check history in "Work Orders", or use "Tool Mode" for flashing/activation',
     tools_desc: 'Local tool collection without AI chat — pushed to the client PC via the bridge',
     tools_write: 'Write · Approval',
     snmtm_desc: 'For ThinkStation workstations after motherboard replacement: write the correct Serial Number (SN) and Machine Type Model (MTM) into the BIOS DMI area',
