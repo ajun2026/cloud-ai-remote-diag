@@ -193,7 +193,7 @@ GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o bridge-linux-amd64 .
 编译后在需要诊断的电脑上运行：
 - Windows：双击 `bridge-win64.exe`（单文件，无需安装 Python）
 - Linux：`chmod +x bridge-linux-amd64 && ./bridge-linux-amd64`
-- 然后输入网页上的 6 位房间码即可连接
+- 然后输入网页上的 8 位房间码即可连接
 
 > 注意：仓库不包含编译好的二进制（`.gitignore` 忽略 `static/*.exe` / `static/bridge-linux-*`）。部署新服务器后需按上面编译并放入 `static/`，否则网页"下载桥接器"会 404。
 
@@ -201,7 +201,7 @@ GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o bridge-linux-amd64 .
 
 ```bash
 pip install psutil Pillow pyautogui pywin32 tabulate thefuzz
-python bridge.py   # 输入 6 位房间码
+python bridge.py   # 输入 8 位房间码
 ```
 
 ### Build bridge.exe (legacy Python bridge)
