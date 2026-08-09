@@ -156,7 +156,7 @@
   .dl-steps .s { display: inline-flex; align-items: center; gap: 6px; }
   .dl-steps .s .num { display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; background: var(--info); color: #fff; border-radius: 50%; font-size: 11px; font-weight: 700; }
   .dl-steps .arrow { color: var(--border); }
-  .dl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; align-items: stretch; }
+  .dl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: stretch; }
   .dl-card {
     background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
     padding: 18px 20px; display: flex; flex-direction: column;
@@ -272,7 +272,7 @@
   /* ===== 工具模式 ===== */
   .tool-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 16px;
     align-items: start;
   }
