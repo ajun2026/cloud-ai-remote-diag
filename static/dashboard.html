@@ -127,6 +127,29 @@
   .dl-copy:hover { color: var(--text); }
   .dl-note { font-size: 11px; color: var(--text2); line-height: 1.8; margin-top: 6px; }
 
+  /* PowerShell 命令版步骤卡片 */
+  .dl-guide { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .dl-guide-head { font-size: 13px; font-weight: 700; color: var(--info); margin-bottom: 2px; grid-column: 1 / -1; }
+  .dl-step {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.7;
+  }
+  .dl-step.wide { grid-column: 1 / -1; }
+  .dl-step-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .dl-step-title .num {
+    display: inline-block; min-width: 18px; height: 18px; line-height: 18px;
+    text-align: center; background: var(--accent); color: #fff;
+    border-radius: 50%; font-size: 11px; font-weight: 700; margin-right: 6px;
+  }
+  .dl-cmd-block {
+    display: block; background: rgba(0,0,0,0.45); color: var(--info);
+    padding: 8px 10px; border-radius: 6px; font-family: monospace;
+    font-size: 11px; white-space: pre-wrap; word-break: break-all; line-height: 1.5;
+    margin: 4px 0;
+  }
+  .dl-step-note { font-size: 11px; color: var(--text2); margin-top: 6px; }
+  .dl-guide-foot { font-size: 11px; color: var(--text2); border-top: 1px dashed var(--border); padding-top: 8px; margin-top: 2px; line-height: 1.7; }
+
   /* ===== 表格 ===== */
   .toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
   .toolbar input {
@@ -310,7 +333,7 @@
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
-      <div class="sidebar-footer">v0.9.0</div>
+      <div class="sidebar-footer">v0.9.1</div>
     </aside>
 
     <main class="content">
@@ -416,6 +439,28 @@
             </div>
           </div>
           <div class="dl-note" data-i18n="dl_note">Linux 其他架构（ARM64 / 龙芯）请从管理后台获取。<br>运行后按提示输入服务器地址与 8 位房间码即可连接。</div>
+        </div>
+        <div class="panel">
+          <div class="dl-guide-head">⚡ <span data-i18n="dl_ps_title">命令版（免安装 · Windows PowerShell）</span></div>
+          <div class="dl-note" data-i18n="dl_ps_desc">不想下载 .exe？在客户机的「管理员 PowerShell」窗口粘贴一行命令即可连接——不下载文件、不落盘，适合 .exe 被杀毒软件拦截的场景。</div>
+          <div class="dl-guide">
+            <div class="dl-step">
+              <div class="dl-step-title"><span class="num">1</span><span data-i18n="dl_ps_step1_t">打开管理员 PowerShell</span></div>
+              <div data-i18n="dl_ps_step1_d">在客户机上右键「开始」菜单 → 选择「Windows PowerShell (管理员)」</div>
+            </div>
+            <div class="dl-step">
+              <div class="dl-step-title"><span class="num">3</span><span data-i18n="dl_ps_step3_t">完成配对</span></div>
+              <div data-i18n="dl_ps_step3_d">看到绿色 Connected 即连接成功，保持窗口开启，回到本工作台进入对话即可远程诊断</div>
+            </div>
+            <div class="dl-step wide">
+              <div class="dl-step-title"><span class="num">2</span><span data-i18n="dl_ps_step2_t">粘贴一行命令</span></div>
+              <div data-i18n="dl_ps_step2_d">回车后按提示输入 8 位房间码：</div>
+              <div class="dl-cmd-block"><span class="dl-cmd-text">iex (iwr http://106.54.193.9:8000/static/bridge.ps1).Content</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+              <div class="dl-step-note" data-i18n="dl_ps_step2_note">也可以提前写入房间码，免交互直接连（把 ABC12345 换成你的房间码）：</div>
+              <div class="dl-cmd-block"><span class="dl-cmd-text">$env:BRIDGE_ROOM = "ABC12345"; iex (iwr http://106.54.193.9:8000/static/bridge.ps1).Content</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+            </div>
+          </div>
+          <div class="dl-guide-foot" data-i18n="dl_ps_foot">命令版与 .exe 版完全兼容（连接 / 远程命令 / 文件传输）。如提示脚本被系统拦截，可改为下载后运行：<code>powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345</code></div>
         </div>
       </section>
 
@@ -865,6 +910,16 @@ const I18N = {
     dl_win: '⬇ Windows 桥接器 (bridge-win64.exe, 4.8MB)', dl_linux: '⬇ Linux x86_64 桥接器',
     copy: '复制', copied_cmd: '命令已复制',
     dl_note: 'Linux 其他架构（ARM64 / 龙芯）请从管理后台获取。<br>运行后按提示输入服务器地址与 8 位房间码即可连接。',
+    dl_ps_title: '⚡ 命令版（免安装 · Windows PowerShell）',
+    dl_ps_desc: '不想下载 .exe？在客户机的「管理员 PowerShell」窗口粘贴一行命令即可连接——不下载文件、不落盘，适合 .exe 被杀毒软件拦截的场景。',
+    dl_ps_step1_t: '打开管理员 PowerShell',
+    dl_ps_step1_d: '在客户机上右键「开始」菜单 → 选择「Windows PowerShell (管理员)」',
+    dl_ps_step2_t: '粘贴一行命令',
+    dl_ps_step2_d: '回车后按提示输入 8 位房间码：',
+    dl_ps_step2_note: '也可以提前写入房间码，免交互直接连（把 ABC12345 换成你的房间码）：',
+    dl_ps_step3_t: '完成配对',
+    dl_ps_step3_d: '看到绿色 Connected 即连接成功，保持窗口开启，回到本工作台进入对话即可远程诊断',
+    dl_ps_foot: '命令版与 .exe 版完全兼容（连接 / 远程命令 / 文件传输）。如提示脚本被系统拦截，可改为下载后运行：powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345',
     pwd_desc: '定期修改密码保护账号安全',
     lbl_old: '旧密码', lbl_new: '新密码（至少 4 位）', lbl_confirm: '确认新密码',
     btn_change: '确认修改',
@@ -1013,6 +1068,16 @@ const I18N = {
     dl_win: '⬇ Windows 橋接器 (bridge-win64.exe, 4.8MB)', dl_linux: '⬇ Linux x86_64 橋接器',
     copy: '複製', copied_cmd: '命令已複製',
     dl_note: 'Linux 其他架構（ARM64 / 龍芯）請從管理後台獲取。<br>運行後按提示輸入服務器地址與 8 位房間碼即可連接。',
+    dl_ps_title: '⚡ 命令版（免安裝 · Windows PowerShell）',
+    dl_ps_desc: '不想下載 .exe？在客戶機的「系統管理員 PowerShell」視窗貼上一行命令即可連接——不下載檔案、不落盤，適合 .exe 被防毒軟體攔截的場景。',
+    dl_ps_step1_t: '開啟系統管理員 PowerShell',
+    dl_ps_step1_d: '在客戶機上按右鍵「開始」功能表 → 選擇「Windows PowerShell (系統管理員)」',
+    dl_ps_step2_t: '貼上一行命令',
+    dl_ps_step2_d: '按下 Enter 後依提示輸入 8 位房間碼：',
+    dl_ps_step2_note: '也可以預先寫入房間碼，免互動直接連（把 ABC12345 換成你的房間碼）：',
+    dl_ps_step3_t: '完成配對',
+    dl_ps_step3_d: '看到綠色 Connected 即連線成功，保持視窗開啟，回到本工作台進入對話即可遠端診斷',
+    dl_ps_foot: '命令版與 .exe 版完全相容（連線 / 遠端命令 / 檔案傳輸）。如提示指令碼被系統攔截，可改為下載後執行：powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345',
     pwd_desc: '定期修改密碼保護帳號安全',
     lbl_old: '舊密碼', lbl_new: '新密碼（至少 4 位）', lbl_confirm: '確認新密碼',
     btn_change: '確認修改',
@@ -1161,6 +1226,16 @@ const I18N = {
     dl_win: '⬇ Windows Bridge (bridge-win64.exe, 4.8MB)', dl_linux: '⬇ Linux x86_64 Bridge',
     copy: 'Copy', copied_cmd: 'Command copied',
     dl_note: 'Other Linux architectures (ARM64 / LoongArch) available from the admin console.<br>Run it and enter the server address and 8-digit room code.',
+    dl_ps_title: '⚡ Command edition (no install · Windows PowerShell)',
+    dl_ps_desc: 'No .exe to download? Paste one line into an Administrator PowerShell window on the target PC - nothing is downloaded or written to disk. Ideal when antivirus blocks the .exe.',
+    dl_ps_step1_t: 'Open Administrator PowerShell',
+    dl_ps_step1_d: 'Right-click the Start menu on the target PC -> "Windows PowerShell (Admin)"',
+    dl_ps_step2_t: 'Paste one line',
+    dl_ps_step2_d: 'Press Enter, then type the 8-digit room code when prompted:',
+    dl_ps_step2_note: 'Or pre-set the room code to skip the prompt (replace ABC12345 with your room code):',
+    dl_ps_step3_t: 'Pairing done',
+    dl_ps_step3_d: 'A green "Connected" means success. Keep the window open, return to this dashboard and start remote diagnostics',
+    dl_ps_foot: 'The command edition is fully compatible with the .exe edition (connect / remote commands / file transfer). If the script is blocked, download and run it instead: powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345',
     pwd_desc: 'Change your password regularly to keep your account safe',
     lbl_old: 'Current Password', lbl_new: 'New Password (min 4)', lbl_confirm: 'Confirm New Password',
     btn_change: 'Change Password',

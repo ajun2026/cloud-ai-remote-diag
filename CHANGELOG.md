@@ -4,6 +4,38 @@
 
 ---
 
+## v0.9.1 — 2026-08-09（命令版桥接器：免安装 PowerShell 一行连接）
+
+### 需求来源
+
+用户提出：.exe 桥接器存在被杀毒软件拦截/不允许运行的风险，希望支持「管理员 PowerShell 输入一条命令即可连接服务器」的无文件场景。方案确认后实现：**保留 .exe 版不变**，新增 PowerShell 命令版桥接器，放入下载页并附操作说明。
+
+### 新增：命令版桥接器 `static/bridge.ps1`（ps-pipe）
+
+- **无文件运行**：`iex (iwr http://106.54.193.9:8000/static/bridge.ps1).Content` —— 纯文本脚本在内存执行，不落盘、不生成 .exe，规避杀软对二进制/下载文件的拦截
+- **协议完全兼容**：实现 v2 管道化全部消息——`identify`（含 platform/is_admin 上报，服务器自动识别为 v2）、`heartbeat` 25s、`command` 执行 + `command_result` 回传、`file_download` 分块上传、`file_upload` 分块写入（落 `%TEMP%\clouddiag\`，与 Go bridge 一致）、`ping/pong`、`close`
+- **命令执行**：PowerShell 走 `-NoProfile -NonInteractive -EncodedCommand`（base64 UTF-16 编码，彻底避开引号/编码转义陷阱，比 Go 直接拼参数更稳）；cmd/bash 分支尽力支持；超时用 `taskkill /F /T /PID` 杀进程树；输出强制 UTF-8 读取（GBK 不乱码）；命令异步执行不阻塞接收循环（对齐 Go bridge 的读超时修复思路）
+- **交互/免交互双模式**：直接 iex 会提示输入 8 位房间码；`$env:BRIDGE_ROOM="ABC12345"` 预置后免交互直连；也支持下载后 `-File bridge.ps1 -Room XXXX` 运行
+- **断线自动重连**：3s 起步指数退避到 30s（对齐 Go bridge）
+- **本地审计**：`%TEMP%\clouddiag-ps\bridge.log` 记录连接/命令/结果（对齐 Go bridge 的 ~/.clouddiag/bridge.log）
+- **编码约定**：脚本内提示全英文（规避 PowerShell 5.1 无 BOM UTF-8 按 GBK 解析的中文乱码坑 + iex 字符串 BOM 风险），下载页说明负责中文引导
+
+### 下载页新增「命令版（免安装 · Windows PowerShell）」面板
+
+- 步骤卡片（`.dl-guide`/`.dl-step`/`.dl-cmd-block`，仿 Linux 安装教程样式）：
+  1. 右键开始菜单 → 管理员 PowerShell
+  2. 粘贴一行命令（两个版本：交互输入房间码 / `$env:BRIDGE_ROOM` 预置免交互）——命令块带复制按钮
+  3. 看到绿色 Connected 即配对成功
+- 底部提示：命令版与 .exe 版完全兼容（连接/远程命令/文件传输）；被拦时降级为下载后 `powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room XXXX` 运行
+- **i18n 三语**（zh-CN/zh-TW/en）新增 10 个 key；复制按钮复用 `copyCmd`——**命令文本必须用 `<span class="dl-cmd-text">` 包裹**（copyCmd 取 `parentElement.querySelector('span')`，若命令在 `<code>` 里会复制到"复制"两字）
+- static/*.html 热生效，无需重启；`bridge.ps1` 静态文件即改即用
+
+### 附带发现（未改，待用户决策）
+
+服务器端 `SNMTM_TMP_DIR = C:\Windows\Temp\sntools`，FileUpload 推送后 Go bridge 实际把文件写到 `%TEMP%\clouddiag\`（file.go 的 `os.TempDir()/clouddiag`）——**SN/MTM 刷写命令 `cd /d C:\Windows\Temp\sntools` 与文件实际落点不一致**，现有 Go bridge 也会踩。命令版 ps1 与 Go bridge 落点一致（对齐行为）。建议后续二选一修复：服务器端 FileUpload 指定落点目录 / bridge 端按 path 目录写入。
+
+---
+
 ## v0.9.0 — 2026-08-09（工具模式大扩展：3 个新工具 + Windows/Linux 分区 + 网格布局）
 
 ### 一、工具模式新增 3 个 Windows 工具
