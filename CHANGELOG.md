@@ -4,6 +4,70 @@
 
 ---
 
+## v0.9.0 — 2026-08-09（工具模式大扩展：3 个新工具 + Windows/Linux 分区 + 网格布局）
+
+### 一、工具模式新增 3 个 Windows 工具
+
+**需求来源**：用户提出 3 条常用诊断命令（powercfg 睡眠/能源报告、驱动版本查询），希望做成工具模式里的独立工具。
+
+**新增工具：**
+
+| 工具 | 命令 | 说明 |
+|---|---|---|
+| 😴 睡眠报告 | `powercfg /sleepstudy /duration 28` | 生成最近 28 天睡眠质量 HTML 报告，排查睡眠唤醒异常/耗电 |
+| ⚡ 能源效率报告 | `powercfg /energy /duration 60` | 60 秒采样生成能源效率诊断 HTML 报告，发现潜在耗电问题 |
+| 🖱 驱动版本信息 | `Get-WmiObject Win32_PnPSignedDriver` | 列出全部驱动 DeviceName/Manufacturer/DriverVersion |
+
+**关键技术点：**
+- **报告文件拉回**：powercfg 输出是 HTML 文件而非终端文本。方案 = 客户机生成报告 → **v2 文件通道（FileDownload）分块拉回服务器** → 保存到 `static/downloads/` → 前端提供下载链接。为此扩展了 `file_download_result` 处理：文件拼好后不再丢弃，落盘 `static/downloads/` 并返回 `saved=` URL
+- **GBK 乱码修复**：中文 Windows PowerShell 默认 GBK 输出，bridge 按 UTF-8 解析变乱码。命令开头强制 `[Console]::OutputEncoding=UTF8` 解决
+- **timeout 覆盖修复**：`build_v2_command` 模板写死 timeout=60，`powercfg /energy`（60 秒采样+生成）会被杀。改为 args 显式传 timeout 时覆盖模板默认值；`execute_bridge_command` 外层 wait_for 从 120s 放宽到 240s
+- **驱动列表结构化**：后端解析 PowerShell Format-Table 输出为结构化数组（name/manufacturer/version），前端渲染三列表格
+
+### 二、驱动版本工具改弹窗展示
+
+**背景**：229 条驱动直接渲染在页面下方，把页面拉得很长。
+
+**改法**：仿 BIOS 弹窗——主页面只留摘要（总驱动数 + 「查看全部驱动」按钮），点击弹出模态框：搜索框 + 三列表格 + 复制全部 + 下载 .txt（带文件头）。
+
+### 三、Windows / Linux 工具分区
+
+**需求来源**：用户提出左侧导航区分 Windows / Linux 两个工具入口，为 Linux 客户机（Ubuntu/UOS/KOS/麒麟/龙芯）预留工具位。
+
+**改法：**
+- 左侧导航：单个「🔧 工具模式」→ **「🪟 Windows 工具」+「🐧 Linux 工具」两个独立入口**
+- `/api/my_rooms` 返回新增 `platform` 字段（取 bridge 上报的 machine.platform），前端按平台过滤房间
+- **平台隔离双重校验**：Linux 工具页房间下拉只显示 `platform === 'linux'` 的在线房间；后端 API 对非 Linux 平台房间直接拒绝（400）
+
+**首个 Linux 工具：📦 打包系统日志**
+- 客户机执行 `tar -czf` 打包 `/var/log`
+- 文件名 = **机器 SN + 日期**（如 `M10XXXXXX_20260809_logs.tar.gz`），存放到**客户机桌面**
+- SN 获取：`dmidecode` 优先 → `hostnamectl` 回退 → `UNKNOWN`
+- 桌面路径自适应：`xdg-user-dir` 优先，兼容 `~/Desktop` 和中文环境 `~/桌面`
+- 排除旧压缩包避免递归变大；非 root 时明确提示无权限
+
+### 四、工具页网格布局重构
+
+**需求来源**：用户反馈工具纵向堆叠难看，未来工具会很多，要求考虑扩展性。
+
+**改法：**
+- 工具页改为**响应式卡片网格**：`grid-template-columns: repeat(auto-fill, minmax(320px, 1fr))`——大屏 3 列、窄屏自动降列，**未来加工具不换布局代码**
+- 卡片 = 名片式（emoji 图标 + 名称 + 类型徽章 + 一句话简介 + 「▶ 打开工具」按钮）
+- **原位展开**（accordion 互斥）：点击「打开工具」→ 卡片内展开操作区（房间下拉 + 表单 + 结果区），其他卡片自动收起；展开时自动刷新房间下拉
+- Windows / Linux 两页共用同一套网格体系
+
+### 五、修复：工具模式房间状态不刷新
+
+**背景**：工具面板的房间下拉用页面加载时的旧 `allRooms` 快照——bridge 上线后工具面板仍显示"无在线房间"。
+
+**改法**：`switchTab('tools-win'/'tools-linux')` 每次进入都 `loadRooms().then(initTools)` 强制重新拉取，桥接器在线状态实时准确。
+
+### 六、版本号
+
+- 服务端 / 前端 / 管理后台：v0.8.2 → **v0.9.0**
+
+---
+
 ## v0.8.2 — 2026-08-09（体验优化：提权简化 + BIOS 弹窗）
 
 ### 一、bridge v0.6.3：提权方案改为"双击自动提权"

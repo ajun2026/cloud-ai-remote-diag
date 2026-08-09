@@ -598,6 +598,9 @@ def build_v2_command(tool_name: str, args: dict, platform: str) -> tuple[str, in
                 .format(b64=b64, method=method, path=path)), 30
     if tool_name in templates:
         tmpl, timeout = templates[tool_name]
+        # 调用方显式传 timeout 时覆盖模板默认值（如 powercfg /energy 需 180s）
+        if "timeout" in args and isinstance(args.get("timeout"), (int, float)):
+            timeout = int(args["timeout"])
         try:
             cmd = tmpl.format(**{k: (v if v is not None else "") for k, v in args.items()})
         except (KeyError, ValueError):
@@ -813,7 +816,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.8.0")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.9.0")
 
 # ============================================================
 # Admin authentication — simple session cookie
@@ -1107,7 +1110,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.8.0"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.9.0"}
 
 
 @app.post("/api/debug_log")
@@ -1207,6 +1210,7 @@ async def my_rooms(request: Request):
             "last_seen": last_seen,
             "bridge_online": bridge_online,
             "browser_online": browser_online,
+            "platform": (room.machine or {}).get("platform", "") if room else "",
             "status": "连接中" if bridge_online else "已断开",
         })
     return {"rooms": result}
@@ -1306,7 +1310,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.8.0",
+        "version": "0.9.0",
     }
 
 
@@ -1486,7 +1490,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.8.0</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.9.0</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -1741,9 +1745,9 @@ async def execute_bridge_command(room: Room, fn_name: str, fn_args: dict, cmd_id
         future.set_result("[error] Bridge not connected")
 
     try:
-        result = await asyncio.wait_for(future, timeout=120.0)
+        result = await asyncio.wait_for(future, timeout=240.0)
     except asyncio.TimeoutError:
-        result = "[timeout] Command exceeded 120s"
+        result = "[timeout] Command exceeded 240s"
 
     room.pending_commands.pop(cmd_id, None)
     return result
@@ -2582,6 +2586,391 @@ async def tools_bios_read(request: Request):
 
 
 # ============================================================
+# 工具模式 — 睡眠报告（powercfg /sleepstudy）
+# ============================================================
+SLEEPSTUDY_CMD = (
+    # 0) 强制 UTF-8 输出（中文 Windows PowerShell 默认 GBK，bridge 按 UTF-8 解析会乱码）
+    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $OutputEncoding=[Text.Encoding]::UTF8; "
+    # 1) 管理员权限检测 + 生成睡眠报告（默认最近 28 天）
+    "$adm = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent(); "
+    "$isAdmin = $adm.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); "
+    "Write-Output ('IS_ADMIN=' + $isAdmin); "
+    "if ($isAdmin) { "
+    "$report = Join-Path $env:TEMP 'sleepstudy_report.html'; "
+    "$out = powercfg /sleepstudy /duration 28 /output $report 2>&1 | Out-String; "
+    "if (Test-Path $report) { Write-Output ('REPORT_PATH=' + $report); "
+    "Write-Output ('REPORT_SIZE=' + (Get-Item $report).Length) } "
+    "else { Write-Output ('REPORT_ERROR=' + $out) } "
+    "} else { Write-Output 'NEED_ADMIN=Sleep study requires Administrator. Please run the bridge as Administrator' }"
+)
+
+
+@app.post("/api/tools/sleepstudy/run")
+async def tools_sleepstudy_run(request: Request):
+    """生成目标机器的睡眠报告（powercfg /sleepstudy，最近 28 天，需管理员）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    machine_admin = room.machine.get("is_admin")
+    if machine_admin is False:
+        save_message(room_code, "tool",
+                     "[睡眠报告] 跳过：bridge 非管理员权限（工具已预判）",
+                     "SleepStudy", 1)
+        return JSONResponse({
+            "status": "ok", "is_admin": "False",
+            "need_admin": "Admin required: sleep study needs Administrator. Please run the bridge as Administrator",
+            "file_url": "", "file_name": "", "raw": "",
+        })
+
+    try:
+        result = await execute_bridge_command(room, "RunCommand",
+                                              {"command": SLEEPSTUDY_CMD, "timeout": 120, "cwd": ""},
+                                              f"sleepstudy_{int(time.time())}", tier=1)
+        run_logger.info(f"[{room_code}] sleepstudy done: {len(result or '')} chars")
+
+        is_admin = ""
+        need_admin = ""
+        report_path = ""
+        report_size = 0
+        report_error = ""
+        for line in (result or "").splitlines():
+            line = line.strip()
+            if line.startswith("IS_ADMIN="):
+                is_admin = line.split("=", 1)[1].strip()
+            elif line.startswith("NEED_ADMIN="):
+                need_admin = line.split("=", 1)[1].strip()
+            elif line.startswith("REPORT_PATH="):
+                report_path = line.split("=", 1)[1].strip()
+            elif line.startswith("REPORT_SIZE="):
+                try:
+                    report_size = int(line.split("=", 1)[1].strip())
+                except ValueError:
+                    report_size = 0
+            elif line.startswith("REPORT_ERROR="):
+                report_error = line.split("=", 1)[1].strip()
+
+        # 拉回报告文件到服务器 static/downloads/
+        file_url = ""
+        file_name = ""
+        if report_path:
+            dl_result = await execute_bridge_command(
+                room, "FileDownload", {"path": report_path},
+                f"sleepstudy_dl_{int(time.time())}", tier=1)
+            run_logger.info(f"[{room_code}] sleepstudy download: {dl_result}")
+            # 格式: [file_received] name=... size=N bytes saved=/static/downloads/...
+            for tok in (dl_result or "").split():
+                if tok.startswith("saved="):
+                    file_url = tok.split("=", 1)[1]
+                elif tok.startswith("name="):
+                    file_name = tok.split("=", 1)[1]
+
+        save_message(room_code, "tool",
+                     f"[睡眠报告] 用户={user.get('username')} admin={is_admin} size={report_size} file={file_url}",
+                     "SleepStudy", 1)
+        return JSONResponse({
+            "status": "ok",
+            "is_admin": is_admin,
+            "need_admin": need_admin,
+            "report_error": report_error,
+            "size": report_size,
+            "file_url": file_url,
+            "file_name": file_name,
+            "raw": (result or "")[:2000],
+        })
+    except Exception as e:
+        run_logger.error(f"[{room_code}] sleepstudy error: {e}", exc_info=True)
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
+# ============================================================
+# 工具模式 — 能源报告（powercfg /energy）
+# ============================================================
+ENERGY_CMD = (
+    # 0) 强制 UTF-8 输出（中文 Windows PowerShell 默认 GBK，bridge 按 UTF-8 解析会乱码）
+    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $OutputEncoding=[Text.Encoding]::UTF8; "
+    "$adm = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent(); "
+    "$isAdmin = $adm.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); "
+    "Write-Output ('IS_ADMIN=' + $isAdmin); "
+    "if ($isAdmin) { "
+    "$report = Join-Path $env:TEMP 'energy_report.html'; "
+    "Write-Output 'ENERGY_SAMPLING=正在采集 60 秒能耗数据...'; "
+    "$out = powercfg /energy /duration 60 /output $report 2>&1 | Out-String; "
+    "if (Test-Path $report) { Write-Output ('REPORT_PATH=' + $report); "
+    "Write-Output ('REPORT_SIZE=' + (Get-Item $report).Length) } "
+    "else { Write-Output ('REPORT_ERROR=' + $out) } "
+    "} else { Write-Output 'NEED_ADMIN=Energy report requires Administrator. Please run the bridge as Administrator' }"
+)
+
+
+@app.post("/api/tools/energy/run")
+async def tools_energy_run(request: Request):
+    """生成目标机器的能源效率诊断报告（powercfg /energy，60 秒采样，需管理员）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    machine_admin = room.machine.get("is_admin")
+    if machine_admin is False:
+        save_message(room_code, "tool",
+                     "[能源报告] 跳过：bridge 非管理员权限（工具已预判）",
+                     "EnergyReport", 1)
+        return JSONResponse({
+            "status": "ok", "is_admin": "False",
+            "need_admin": "Admin required: energy report needs Administrator. Please run the bridge as Administrator",
+            "file_url": "", "file_name": "", "raw": "",
+        })
+
+    try:
+        result = await execute_bridge_command(room, "RunCommand",
+                                              {"command": ENERGY_CMD, "timeout": 180, "cwd": ""},
+                                              f"energy_{int(time.time())}", tier=1)
+        run_logger.info(f"[{room_code}] energy done: {len(result or '')} chars")
+
+        is_admin = ""
+        need_admin = ""
+        report_path = ""
+        report_size = 0
+        report_error = ""
+        for line in (result or "").splitlines():
+            line = line.strip()
+            if line.startswith("IS_ADMIN="):
+                is_admin = line.split("=", 1)[1].strip()
+            elif line.startswith("NEED_ADMIN="):
+                need_admin = line.split("=", 1)[1].strip()
+            elif line.startswith("REPORT_PATH="):
+                report_path = line.split("=", 1)[1].strip()
+            elif line.startswith("REPORT_SIZE="):
+                try:
+                    report_size = int(line.split("=", 1)[1].strip())
+                except ValueError:
+                    report_size = 0
+            elif line.startswith("REPORT_ERROR="):
+                report_error = line.split("=", 1)[1].strip()
+
+        file_url = ""
+        file_name = ""
+        if report_path:
+            dl_result = await execute_bridge_command(
+                room, "FileDownload", {"path": report_path},
+                f"energy_dl_{int(time.time())}", tier=1)
+            run_logger.info(f"[{room_code}] energy download: {dl_result}")
+            for tok in (dl_result or "").split():
+                if tok.startswith("saved="):
+                    file_url = tok.split("=", 1)[1]
+                elif tok.startswith("name="):
+                    file_name = tok.split("=", 1)[1]
+
+        save_message(room_code, "tool",
+                     f"[能源报告] 用户={user.get('username')} admin={is_admin} size={report_size} file={file_url}",
+                     "EnergyReport", 1)
+        return JSONResponse({
+            "status": "ok",
+            "is_admin": is_admin,
+            "need_admin": need_admin,
+            "report_error": report_error,
+            "size": report_size,
+            "file_url": file_url,
+            "file_name": file_name,
+            "raw": (result or "")[:2000],
+        })
+    except Exception as e:
+        run_logger.error(f"[{room_code}] energy error: {e}", exc_info=True)
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
+# ============================================================
+# 工具模式 — 驱动版本信息（Win32_PnPSignedDriver）
+# ============================================================
+DRIVERS_CMD = (
+    "Get-WmiObject Win32_PnPSignedDriver | "
+    "Where-Object { $_.DeviceName } | "
+    "Select-Object DeviceName, Manufacturer, DriverVersion | "
+    "Format-Table -AutoSize | Out-String -Width 4096"
+)
+
+
+@app.post("/api/tools/drivers/list")
+async def tools_drivers_list(request: Request):
+    """读取目标机器已安装驱动版本信息（只读，免审批）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    try:
+        result = await execute_bridge_command(room, "RunCommand",
+                                              {"command": DRIVERS_CMD, "timeout": 90, "cwd": ""},
+                                              f"drivers_{int(time.time())}", tier=1)
+        run_logger.info(f"[{room_code}] drivers done: {len(result or '')} chars")
+
+        # 解析表格行（第一行表头，第二行分隔线，之后数据）
+        lines = [(l.rstrip()) for l in (result or "").splitlines() if l.strip()]
+        # 去掉可能的提示行（WMI 慢等），找表头
+        header_idx = None
+        for i, ln in enumerate(lines):
+            if "DeviceName" in ln and "DriverVersion" in ln:
+                header_idx = i
+                break
+        drivers = []
+        table_text = ""
+        if header_idx is not None:
+            # 表头 + 分隔 + 数据
+            data_lines = lines[header_idx:]
+            table_text = "\n".join(data_lines)
+            # 解析为结构化：按固定列切分（简单方式：拆分后取首列/末列）
+            for ln in data_lines[2:]:  # 跳过表头和分隔线
+                parts = [p.strip() for p in ln.split("  ") if p.strip()]
+                if len(parts) >= 2:
+                    name = parts[0]
+                    version = parts[-1]
+                    manufacturer = parts[1] if len(parts) >= 3 else ""
+                    drivers.append({
+                        "name": name,
+                        "manufacturer": manufacturer,
+                        "version": version,
+                    })
+
+        save_message(room_code, "tool",
+                     f"[驱动版本] 用户={user.get('username')} 驱动数={len(drivers)}",
+                     "DriversList", 1)
+        return JSONResponse({
+            "status": "ok",
+            "drivers": drivers[:500],
+            "count": len(drivers),
+            "raw": (result or "")[:8000],
+            "table": table_text,
+        })
+    except Exception as e:
+        run_logger.error(f"[{room_code}] drivers error: {e}", exc_info=True)
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
+# ============================================================
+# 工具模式 — Linux 日志打包（tar /var/log → 桌面，SN_日期 命名）
+# ============================================================
+LINUX_LOGPACK_CMD = (
+    # 1) 获取机器 SN（dmidecode 优先，回退 hostnamectl）
+    "SN=$(dmidecode -s system-serial-number 2>/dev/null | head -1); "
+    "[ -z \"$SN\" ] && SN=$(hostnamectl 2>/dev/null | grep -i 'Serial' | awk -F': ' '{print $2}' | head -1); "
+    "[ -z \"$SN\" ] && SN='UNKNOWN'; "
+    "SN=$(echo \"$SN\" | tr -d '[:space:]'); "
+    # 2) 日期
+    "DATE=$(date +%Y%m%d); "
+    # 3) 桌面路径（xdg-user-dir 优先，回退 ~/Desktop，中文环境 ~/桌面）
+    "DESK=$(xdg-user-dir DESKTOP 2>/dev/null); "
+    "[ -z \"$DESK\" ] && DESK=\"$HOME/Desktop\"; "
+    "[ ! -d \"$DESK\" ] && [ -d \"$HOME/桌面\" ] && DESK=\"$HOME/桌面\"; "
+    "mkdir -p \"$DESK\"; "
+    # 4) 打包 /var/log（排除旧压缩包避免递归变大）
+    "PKG=\"${SN}_${DATE}_logs.tar.gz\"; "
+    "tar -czf \"$DESK/$PKG\" --exclude='*.tar.gz' --exclude='*.tar' -C / var/log 2>/dev/null; "
+    "if [ -f \"$DESK/$PKG\" ]; then "
+    "echo \"PACK_PATH=$DESK/$PKG\"; "
+    "echo \"PACK_SIZE=$(stat -c %s \"$DESK/$PKG\" 2>/dev/null)\"; "
+    "echo \"PACK_SN=$SN\"; "
+    "else echo 'PACK_ERROR=打包失败（可能无权限读取 /var/log，请以 root 运行 bridge）'; fi"
+)
+
+
+@app.post("/api/tools/linux/logpack")
+async def tools_linux_logpack(request: Request):
+    """在 Linux 客户机上打包 /var/log 日志到桌面（SN_日期_logs.tar.gz）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    if (room.machine or {}).get("platform", room.platform) != "linux":
+        return JSONResponse({"error": "该房间不是 Linux 平台，无法执行日志打包"}, status_code=400)
+
+    try:
+        result = await execute_bridge_command(room, "RunCommand",
+                                              {"command": LINUX_LOGPACK_CMD, "timeout": 180, "cwd": ""},
+                                              f"linux_logpack_{int(time.time())}", tier=1)
+        run_logger.info(f"[{room_code}] linux logpack done: {len(result or '')} chars")
+
+        pack_path = ""
+        pack_size = 0
+        pack_sn = ""
+        pack_error = ""
+        for line in (result or "").splitlines():
+            line = line.strip()
+            if line.startswith("PACK_PATH="):
+                pack_path = line.split("=", 1)[1].strip()
+            elif line.startswith("PACK_SIZE="):
+                try:
+                    pack_size = int(line.split("=", 1)[1].strip())
+                except ValueError:
+                    pack_size = 0
+            elif line.startswith("PACK_SN="):
+                pack_sn = line.split("=", 1)[1].strip()
+            elif line.startswith("PACK_ERROR="):
+                pack_error = line.split("=", 1)[1].strip()
+
+        save_message(room_code, "tool",
+                     f"[Linux日志打包] 用户={user.get('username')} SN={pack_sn} size={pack_size} path={pack_path}",
+                     "LinuxLogPack", 1)
+        return JSONResponse({
+            "status": "ok",
+            "pack_path": pack_path,
+            "pack_size": pack_size,
+            "pack_sn": pack_sn,
+            "pack_error": pack_error,
+            "raw": (result or "")[:2000],
+        })
+    except Exception as e:
+        run_logger.error(f"[{room_code}] linux logpack error: {e}", exc_info=True)
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+
+# ============================================================
 # WebSocket endpoints
 # ============================================================
 @app.websocket("/ws/browser/{room_code}")
@@ -2788,8 +3177,22 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                         raw = b"".join(base64.b64decode(c) for c in buf["chunks"])
                         fut = room.pending_commands.get(fid)
                         run_logger.info(f"[{room_code}] file complete fid={fid} chunks={len(buf['chunks'])} rawlen={len(raw)}")
+                        # 保存到 static/downloads/ 供前端下载/预览（工具模式报告等）
+                        saved = ""
+                        name = buf.get("name", "")
+                        if raw and name:
+                            try:
+                                dl_dir = static_dir / "downloads"
+                                dl_dir.mkdir(exist_ok=True)
+                                safe_name = os.path.basename(name)
+                                target = dl_dir / safe_name
+                                target.write_bytes(raw)
+                                saved = f"/static/downloads/{safe_name}"
+                                run_logger.info(f"[{room_code}] file saved to {target} ({len(raw)} bytes)")
+                            except Exception as e:
+                                run_logger.error(f"[{room_code}] file save failed: {e}")
                         if fut and not fut.done():
-                            fut.set_result(f"[file_received] name={buf['name']} size={len(raw)} bytes")
+                            fut.set_result(f"[file_received] name={buf['name']} size={len(raw)} bytes saved={saved}")
                         else:
                             run_logger.warning(f"[{room_code}] file_download_result for unknown id {fid}")
                     except Exception as e:
@@ -2859,6 +3262,6 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.8.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.9.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info")

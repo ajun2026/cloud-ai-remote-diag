@@ -208,8 +208,30 @@
   .msg-box.warn { display: block; background: rgba(255,165,0,.1); border: 1px solid rgba(255,165,0,.4); color: var(--warn); }
 
   /* ===== 工具模式 ===== */
+  .tool-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+  .tool-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; display: flex; flex-direction: column;
+    transition: box-shadow .15s ease, border-color .15s ease;
+  }
+  .tool-card:hover { border-color: var(--info); box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  .tool-card.open { border-color: var(--info); }
   .tool-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-  .tool-card-title { font-size: 15px; font-weight: 600; }
+  .tool-card-title { font-size: 15px; font-weight: 600; flex: 1; }
+  .tool-card-icon { font-size: 20px; }
+  .tool-card-desc { font-size: 12px; color: var(--text2); margin-bottom: 12px; line-height: 1.6; }
+  .tool-card-open { align-self: flex-start; }
+  .tool-card-body {
+    display: none; border-top: 1px dashed var(--border); margin-top: 14px; padding-top: 14px;
+  }
+  .tool-card.open .tool-card-body { display: block; }
+  .tool-card-actions { margin: 12px 0; }
+  .tool-card .msg-box { margin-bottom: 12px; }
   .badge-write { background: rgba(248,81,73,.12); color: var(--error); border: 1px solid rgba(248,81,73,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
   .badge-read { background: rgba(52,120,246,.12); color: var(--info); border: 1px solid rgba(52,120,246,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
   .oa3-result { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 10px; background: var(--surface); }
@@ -281,13 +303,14 @@
         <div class="nav-item" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
         <div class="nav-divider"></div>
         <div class="nav-item" onclick="switchTab('workorders')"><span data-i18n="nav_workorders">📋 我的工单</span></div>
-        <div class="nav-item" onclick="switchTab('tools')"><span data-i18n="nav_tools">🔧 工具模式</span></div>
+        <div class="nav-item" onclick="switchTab('tools-win')"><span data-i18n="nav_tools_win">🪟 Windows 工具</span></div>
+        <div class="nav-item" onclick="switchTab('tools-linux')"><span data-i18n="nav_tools_linux">🐧 Linux 工具</span></div>
         <div class="nav-divider"></div>
         <div class="nav-item" onclick="switchTab('password')"><span data-i18n="nav_password">🔒 修改密码</span></div>
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
-      <div class="sidebar-footer">v0.8.0</div>
+      <div class="sidebar-footer">v0.9.0</div>
     </aside>
 
     <main class="content">
@@ -396,94 +419,213 @@
         </div>
       </section>
 
-      <!-- 工具模式（非 AI 工具集合） -->
-      <section class="page" id="page-tools">
-        <div class="page-title">🔧 <span data-i18n="nav_tools">工具模式</span></div>
-        <div class="page-desc" data-i18n="tools_desc">无需 AI 对话的本地工具集合，通过桥接器远程推送到客户机执行</div>
+      <!-- Windows 工具（非 AI 工具集合） -->
+      <section class="page" id="page-tools-win">
+        <div class="page-title">🪟 <span data-i18n="nav_tools_win">Windows 工具</span></div>
+        <div class="page-desc" data-i18n="tools_win_desc">Windows 客户机专用工具集合，通过桥接器远程推送到客户机执行</div>
 
-        <div class="panel">
-          <div class="tool-card-head">
-            <div class="tool-card-title">💾 SN/MTM 刷写</div>
-            <span class="badge badge-write" data-i18n="tools_write">写入类 · 需审批</span>
+        <div class="tool-grid">
+
+          <div class="tool-card" id="card-sntm">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">💾</div>
+              <div class="tool-card-title">SN/MTM 刷写</div>
+              <span class="badge badge-write" data-i18n="tools_write">写入类 · 需审批</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="snmtm_desc">ThinkStation 工作站更换主板后，将正确的序列号(SN)与机型型号(MTM)写入 BIOS DMI 区</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-sntm')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="sntm-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room">目标房间（需桥接器在线）</label>
+                <select id="sntm-room" onchange="sntmRefreshRoom()"></select>
+              </div>
+              <div class="field">
+                <label data-i18n="lbl_tool_model">机型型号</label>
+                <select id="sntm-model"></select>
+                <div class="field-hint" id="sntm-route-hint"></div>
+              </div>
+              <div class="field"><label data-i18n="lbl_tool_sn">序列号 SN</label><input id="sntm-sn" maxlength="32" data-i18n-placeholder="ph_tool_sn" placeholder="如 PC22XGDR"></div>
+              <div class="field"><label data-i18n="lbl_tool_mtm">机型型号 MTM</label><input id="sntm-mtm" maxlength="32" data-i18n-placeholder="ph_tool_mtm" placeholder="如 30E1S5NV00"></div>
+              <div class="tool-warn" data-i18n="snmtm_warn">⚠ 写入后无法撤销，请仔细核对 SN / MTM 再点击刷写</div>
+              <div class="tool-card-actions">
+                <button class="btn-main btn-danger" id="sntm-btn" data-i18n="btn_snmtm_flash" onclick="snmtmFlash()">✍️ 刷写 SN/MTM</button>
+              </div>
+              <div class="tool-steps" id="sntm-steps" style="display:none;"></div>
+            </div>
           </div>
-          <div class="tool-card-desc" data-i18n="snmtm_desc">ThinkStation 工作站更换主板后，将正确的序列号(SN)与机型型号(MTM)写入 BIOS DMI 区</div>
-          <div class="msg-box" id="sntm-msg"></div>
 
-          <div class="field">
-            <label data-i18n="lbl_tool_room">目标房间（需桥接器在线）</label>
-            <select id="sntm-room" onchange="sntmRefreshRoom()"></select>
+          <div class="tool-card" id="card-oa3">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">🔑</div>
+              <div class="tool-card-title">OA3 密钥读取 / 激活</div>
+              <span class="badge badge-read" data-i18n="tools_read">只读 + 写入</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="oa3_desc">读取主板内置 OA3 系统激活密钥（SoftwareLicensingService），并可导入密钥激活当前系统——换主板后重装/激活用</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-oa3')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="oa3-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room2">目标房间（需桥接器在线）</label>
+                <select id="oa3-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="oa3-read-btn" data-i18n="btn_oa3_read" onclick="oa3Read()">🔍 读取 OA3 密钥</button>
+              </div>
+              <div class="oa3-result" id="oa3-result" style="display:none;">
+                <div class="oa3-key-row">
+                  <span class="oa3-label" data-i18n="oa3_key">主板 OA3 密钥:</span>
+                  <span class="oa3-key mono" id="oa3-key"></span>
+                  <button class="btn-sm" data-i18n="copy" onclick="copyOa3Key()">复制</button>
+                </div>
+                <div class="oa3-meta" id="oa3-meta"></div>
+                <div class="tool-warn" data-i18n="oa3_activate_warn">⚠ 激活系统会导入密钥并尝试在线激活，请确认密钥与当前系统版本匹配</div>
+                <div class="tool-card-actions">
+                  <button class="btn-main btn-danger" id="oa3-act-btn" data-i18n="btn_oa3_activate" onclick="oa3Activate()">⚡ 导入密钥并激活系统</button>
+                </div>
+              </div>
+              <div class="tool-steps" id="oa3-steps" style="display:none;"></div>
+            </div>
           </div>
-          <div class="field">
-            <label data-i18n="lbl_tool_model">机型型号</label>
-            <select id="sntm-model"></select>
-            <div class="field-hint" id="sntm-route-hint"></div>
+
+          <div class="tool-card" id="card-bios">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">🖥</div>
+              <div class="tool-card-title">BIOS 信息读取</div>
+              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="bios_desc">通过联想 WMI 接口（Lenovo_BiosSetting）读取当前机器 BIOS 全量配置——不重启、不改设置，纯采集</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-bios')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="bios-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room3">目标房间（需桥接器在线）</label>
+                <select id="bios-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="bios-btn" data-i18n="btn_bios_read" onclick="biosRead()">🖥 读取 BIOS 配置</button>
+              </div>
+              <div id="bios-result" style="display:none;">
+                <div class="bios-info" id="bios-info"></div>
+                <div class="tool-card-actions">
+                  <button class="btn-main" id="bios-view-btn" onclick="openBiosModal()">📄 <span data-i18n="bios_view_all">查看全部设置</span> (<span id="bios-count2">0</span>)</button>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="field"><label data-i18n="lbl_tool_sn">序列号 SN</label><input id="sntm-sn" maxlength="32" data-i18n-placeholder="ph_tool_sn" placeholder="如 PC22XGDR"></div>
-          <div class="field"><label data-i18n="lbl_tool_mtm">机型型号 MTM</label><input id="sntm-mtm" maxlength="32" data-i18n-placeholder="ph_tool_mtm" placeholder="如 30E1S5NV00"></div>
 
-          <div class="tool-warn" data-i18n="snmtm_warn">⚠ 写入后无法撤销，请仔细核对 SN / MTM 再点击刷写</div>
-
-          <div class="tool-actions">
-            <button class="btn-main btn-danger" id="sntm-btn" data-i18n="btn_snmtm_flash" onclick="snmtmFlash()">✍️ 刷写 SN/MTM</button>
+          <div class="tool-card" id="card-sleep">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">😴</div>
+              <div class="tool-card-title">睡眠报告</div>
+              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="sleep_desc">用 powercfg /sleepstudy 生成最近 28 天的睡眠质量报告（HTML）——排查睡眠唤醒异常、耗电、休眠失败等问题</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-sleep')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="sleep-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room4">目标房间（需桥接器在线）</label>
+                <select id="sleep-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="sleep-btn" data-i18n="btn_sleep_run" onclick="sleepStudyRun()">😴 生成睡眠报告（28天）</button>
+              </div>
+              <div id="sleep-result" style="display:none;">
+                <div class="tool-warn" data-i18n="sleep_admin_hint">🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）</div>
+                <div class="tool-card-actions">
+                  <a class="btn-main" id="sleep-dl" href="#" download data-i18n="sleep_download">📥 下载睡眠报告 (.html)</a>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div class="tool-steps" id="sntm-steps" style="display:none;"></div>
+          <div class="tool-card" id="card-energy">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">⚡</div>
+              <div class="tool-card-title">能源效率报告</div>
+              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="energy_desc">用 powercfg /energy 采集 60 秒生成系统能源效率与电源设置诊断报告（HTML）——发现潜在的耗电问题</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-energy')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="energy-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room5">目标房间（需桥接器在线）</label>
+                <select id="energy-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="energy-btn" data-i18n="btn_energy_run" onclick="energyRun()">⚡ 生成能源报告（60秒）</button>
+              </div>
+              <div id="energy-result" style="display:none;">
+                <div class="tool-warn" data-i18n="energy_admin_hint">🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）</div>
+                <div class="tool-card-actions">
+                  <a class="btn-main" id="energy-dl" href="#" download data-i18n="energy_download">📥 下载能源报告 (.html)</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-drivers">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">🖱</div>
+              <div class="tool-card-title">驱动版本信息</div>
+              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="drivers_desc">读取系统已安装驱动的 DeviceName / Manufacturer / DriverVersion——核对驱动版本、排查驱动过期或不匹配</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-drivers')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="drivers-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room6">目标房间（需桥接器在线）</label>
+                <select id="drivers-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="drivers-btn" data-i18n="btn_drivers_list" onclick="driversList()">🖱 读取驱动版本</button>
+              </div>
+              <div id="drivers-result" style="display:none;">
+                <div class="bios-info" id="drivers-summary"></div>
+                <div class="tool-card-actions">
+                  <button class="btn-main" id="drivers-view-btn" onclick="openDriversModal()">📄 <span data-i18n="drivers_view_all">查看全部驱动</span> (<span id="drivers-count2">0</span>)</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </div>
+      </section>
 
-        <div class="panel" style="margin-top:20px;">
-          <div class="tool-card-head">
-            <div class="tool-card-title">🔑 OA3 密钥读取 / 激活系统</div>
-            <span class="badge badge-read" data-i18n="tools_read">只读 + 写入</span>
-          </div>
-          <div class="tool-card-desc" data-i18n="oa3_desc">读取主板内置 OA3 系统激活密钥（SoftwareLicensingService），并可导入密钥激活当前系统——换主板后重装/激活用</div>
-          <div class="msg-box" id="oa3-msg"></div>
+      <!-- Linux 工具 -->
+      <section class="page" id="page-tools-linux">
+        <div class="page-title">🐧 <span data-i18n="nav_tools_linux">Linux 工具</span></div>
+        <div class="page-desc" data-i18n="tools_linux_desc">Linux 客户机专用工具集合（Ubuntu / UOS / KOS / 麒麟 / 龙芯等），通过桥接器远程推送到客户机执行</div>
 
-          <div class="field">
-            <label data-i18n="lbl_tool_room2">目标房间（需桥接器在线）</label>
-            <select id="oa3-room"></select>
-          </div>
-          <div class="tool-actions">
-            <button class="btn-main" id="oa3-read-btn" data-i18n="btn_oa3_read" onclick="oa3Read()">🔍 读取 OA3 密钥</button>
-          </div>
+        <div class="tool-grid">
 
-          <div class="oa3-result" id="oa3-result" style="display:none;">
-            <div class="oa3-key-row">
-              <span class="oa3-label" data-i18n="oa3_key">主板 OA3 密钥:</span>
-              <span class="oa3-key mono" id="oa3-key"></span>
-              <button class="btn-sm" data-i18n="copy" onclick="copyOa3Key()">复制</button>
+          <div class="tool-card" id="card-linux-logpack">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">📦</div>
+              <div class="tool-card-title">打包系统日志</div>
+              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
             </div>
-            <div class="oa3-meta" id="oa3-meta"></div>
-            <div class="tool-warn" data-i18n="oa3_activate_warn">⚠ 激活系统会导入密钥并尝试在线激活，请确认密钥与当前系统版本匹配</div>
-            <div class="tool-actions">
-              <button class="btn-main btn-danger" id="oa3-act-btn" data-i18n="btn_oa3_activate" onclick="oa3Activate()">⚡ 导入密钥并激活系统</button>
-            </div>
-          </div>
-
-          <div class="tool-steps" id="oa3-steps" style="display:none;"></div>
-        </div>
-
-        <div class="panel" style="margin-top:20px;">
-          <div class="tool-card-head">
-            <div class="tool-card-title">🖥 BIOS 信息读取</div>
-            <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
-          </div>
-          <div class="tool-card-desc" data-i18n="bios_desc">通过联想 WMI 接口（Lenovo_BiosSetting）读取当前机器 BIOS 全量配置——不重启、不改设置，纯采集</div>
-          <div class="msg-box" id="bios-msg"></div>
-
-          <div class="field">
-            <label data-i18n="lbl_tool_room3">目标房间（需桥接器在线）</label>
-            <select id="bios-room"></select>
-          </div>
-          <div class="tool-actions">
-            <button class="btn-main" id="bios-btn" data-i18n="btn_bios_read" onclick="biosRead()">🖥 读取 BIOS 配置</button>
-          </div>
-
-          <div id="bios-result" style="display:none;">
-            <div class="bios-info" id="bios-info"></div>
-            <div class="tool-actions" style="margin-top:10px;">
-              <button class="btn-main" id="bios-view-btn" onclick="openBiosModal()">📄 <span data-i18n="bios_view_all">查看全部设置</span> (<span id="bios-count2">0</span>)</button>
+            <div class="tool-card-desc" data-i18n="linux_logpack_desc">将 /var/log 日志打包为 tar.gz 保存到客户机桌面，文件名以机器 SN + 日期命名（如 SN_20260809_logs.tar.gz）——故障排查时快速收集日志</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-linux-logpack')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="linux-logpack-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room_linux">目标房间（需 Linux 桥接器在线）</label>
+                <select id="linux-logpack-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="linux-logpack-btn" data-i18n="btn_linux_logpack" onclick="linuxLogPack()">📦 打包日志到桌面</button>
+              </div>
+              <div id="linux-logpack-result" style="display:none;">
+                <div class="bios-info" id="linux-logpack-info"></div>
+                <div class="tool-warn" data-i18n="linux_logpack_tip">💡 压缩包已保存到客户机桌面，可直接拷贝/发送；如需服务器下载请告知</div>
+              </div>
             </div>
           </div>
+
         </div>
       </section>
 
@@ -570,6 +712,30 @@
   </div>
 </div>
 
+<!-- 驱动版本弹窗：查看全部驱动 + 搜索 + 复制 + 下载 -->
+<div class="modal-overlay" id="drivers-modal">
+  <div class="modal-lg modal-lg-wide">
+    <div class="modal-head">
+      <div class="modal-title">🖱 <span data-i18n="drivers_modal_title">驱动版本信息（全量）</span></div>
+      <button class="modal-close" onclick="closeDriversModal()">✕</button>
+    </div>
+    <div class="history-body" style="display:flex; flex-direction:column;">
+      <div class="toolbar" style="margin-bottom:10px; flex-shrink:0;">
+        <input id="drivers-search" data-i18n-placeholder="drivers_search_ph" placeholder="搜索驱动（如 GPU / 网卡）" oninput="renderDriversItems()">
+        <span class="count" id="drivers-count"></span>
+        <button class="btn-sm" onclick="copyDriversText()" data-i18n="copy">复制全部</button>
+        <button class="btn-sm" onclick="downloadDriversTxt()" data-i18n="bios_download">下载 .txt</button>
+      </div>
+      <div style="flex:1; overflow:auto; border:1px solid var(--border); border-radius:8px;">
+        <table style="margin:0;">
+          <thead><tr><th data-i18n="drivers_th_name">设备名</th><th data-i18n="drivers_th_manu">厂商</th><th data-i18n="drivers_th_ver">驱动版本</th></tr></thead>
+          <tbody id="drivers-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const I18N = {
   'zh-CN': {
@@ -583,6 +749,18 @@ const I18N = {
     home_step3_t: '对话诊断', home_step3_d: '用自然语言描述电脑问题，AI 远程执行诊断命令并分析',
     home_step4_t: '查看结果', home_step4_d: '在「我的工单」查看历史记录，或在「工具模式」执行刷写/激活',
     tools_desc: '无需 AI 对话的本地工具集合，通过桥接器远程推送到客户机执行',
+    btn_open_tool: '打开工具', btn_close_tool: '收起',
+    nav_tools_win: 'Windows 工具', nav_tools_linux: 'Linux 工具',
+    tools_win_desc: 'Windows 客户机专用工具集合，通过桥接器远程推送到客户机执行',
+    tools_linux_desc: 'Linux 客户机专用工具集合（Ubuntu / UOS / KOS / 麒麟 / 龙芯等），通过桥接器远程推送到客户机执行',
+    lbl_tool_room_linux: '目标房间（需 Linux 桥接器在线）',
+    btn_linux_logpack: '📦 打包日志到桌面',
+    linux_logpack_desc: '将 /var/log 日志打包为 tar.gz 保存到客户机桌面，文件名以机器 SN + 日期命名（如 SN_20260809_logs.tar.gz）——故障排查时快速收集日志',
+    linux_logpack_running: '正在打包 /var/log 日志（视日志大小可能需要 1-3 分钟）...',
+    linux_logpack_done: '日志打包完成',
+    linux_logpack_file: '压缩包路径: ',
+    linux_logpack_empty: '未获取到打包结果',
+    linux_logpack_tip: '💡 压缩包已保存到客户机桌面，可直接拷贝/发送；如需服务器下载请告知',
     tools_write: '写入类 · 需审批',
     snmtm_desc: 'ThinkStation 工作站更换主板后，将正确的序列号(SN)与机型型号(MTM)写入 BIOS DMI 区',
     lbl_tool_room: '目标房间（需桥接器在线）', lbl_tool_model: '机型型号',
@@ -628,6 +806,33 @@ const I18N = {
     bios_modal_title: 'BIOS 设置项（全量）',
     bios_download: '下载 .txt',
     bios_downloaded: 'BIOS 配置已下载',
+    sleep_desc: '用 powercfg /sleepstudy 生成最近 28 天的睡眠质量报告（HTML）——排查睡眠唤醒异常、耗电、休眠失败等问题',
+    lbl_tool_room4: '目标房间（需桥接器在线）',
+    btn_sleep_run: '😴 生成睡眠报告（28天）',
+    sleep_admin_hint: '🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）',
+    sleep_download: '📥 下载睡眠报告 (.html)',
+    sleep_running: '正在生成睡眠报告（读取最近 28 天睡眠历史）...',
+    sleep_done: '睡眠报告已生成',
+    sleep_empty: '未生成报告（系统可能无睡眠历史或组件缺失）',
+    energy_desc: '用 powercfg /energy 采集 60 秒生成系统能源效率与电源设置诊断报告（HTML）——发现潜在的耗电问题',
+    lbl_tool_room5: '目标房间（需桥接器在线）',
+    btn_energy_run: '⚡ 生成能源报告（60秒）',
+    energy_admin_hint: '🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）',
+    energy_download: '📥 下载能源报告 (.html)',
+    energy_running: '正在采集 60 秒能耗数据并生成报告（约需 1-2 分钟）...',
+    energy_done: '能源报告已生成',
+    energy_empty: '未生成报告（采样失败或系统组件缺失）',
+    drivers_desc: '读取系统已安装驱动的 DeviceName / Manufacturer / DriverVersion——核对驱动版本、排查驱动过期或不匹配',
+    lbl_tool_room6: '目标房间（需桥接器在线）',
+    btn_drivers_list: '🖱 读取驱动版本',
+    drivers_reading: '正在读取驱动版本信息...',
+    drivers_done: '驱动版本读取成功',
+    drivers_empty: '未读取到驱动信息',
+    drivers_view_all: '查看全部驱动',
+    drivers_modal_title: '驱动版本信息（全量）',
+    drivers_search_ph: '搜索驱动（如 GPU / 网卡）',
+    drivers_th_name: '设备名', drivers_th_manu: '厂商', drivers_th_ver: '驱动版本',
+    drivers_summary: '共 ', drivers_summary_suffix: ' 个驱动，点击下方按钮查看全部',
     logout: '退出登录',
     wo_desc: '当前账号处理过的诊断房间',
     search_ph: '按 SN / 工单号 / 型号 / 房间码搜索',
@@ -692,6 +897,18 @@ const I18N = {
     home_step3_t: '對話診斷', home_step3_d: '用自然語言描述電腦問題，AI 遠程執行診斷命令並分析',
     home_step4_t: '查看結果', home_step4_d: '在「我的工單」查看歷史記錄，或在「工具模式」執行刷寫/啟動',
     tools_desc: '無需 AI 對話的本地工具集合，通過橋接器遠程推送到客戶機執行',
+    btn_open_tool: '打開工具', btn_close_tool: '收起',
+    nav_tools_win: 'Windows 工具', nav_tools_linux: 'Linux 工具',
+    tools_win_desc: 'Windows 客戶機專用工具集合，通過橋接器遠程推送到客戶機執行',
+    tools_linux_desc: 'Linux 客戶機專用工具集合（Ubuntu / UOS / KOS / 麒麟 / 龍芯等），通過橋接器遠程推送到客戶機執行',
+    lbl_tool_room_linux: '目標房間（需 Linux 橋接器在線）',
+    btn_linux_logpack: '📦 打包日誌到桌面',
+    linux_logpack_desc: '將 /var/log 日誌打包為 tar.gz 保存到客戶機桌面，檔名以機器 SN + 日期命名（如 SN_20260809_logs.tar.gz）——故障排查時快速收集日誌',
+    linux_logpack_running: '正在打包 /var/log 日誌（視日誌大小可能需要 1-3 分鐘）...',
+    linux_logpack_done: '日誌打包完成',
+    linux_logpack_file: '壓縮包路徑: ',
+    linux_logpack_empty: '未獲取到打包結果',
+    linux_logpack_tip: '💡 壓縮包已保存到客戶機桌面，可直接拷貝/發送；如需伺服器下載請告知',
     tools_write: '寫入類 · 需審批',
     snmtm_desc: 'ThinkStation 工作站更換主板後，將正確的序號(SN)與機型型號(MTM)寫入 BIOS DMI 區',
     lbl_tool_room: '目標房間（需橋接器在線）', lbl_tool_model: '機型型號',
@@ -737,6 +954,33 @@ const I18N = {
     bios_modal_title: 'BIOS 設置項（全量）',
     bios_download: '下載 .txt',
     bios_downloaded: 'BIOS 配置已下載',
+    sleep_desc: '用 powercfg /sleepstudy 生成最近 28 天的睡眠品質報告（HTML）——排查睡眠喚醒異常、耗電、休眠失敗等問題',
+    lbl_tool_room4: '目標房間（需橋接器在線）',
+    btn_sleep_run: '😴 生成睡眠報告（28天）',
+    sleep_admin_hint: '🔒 需要管理員權限：請確認客戶機 bridge 以管理員運行（雙擊自動請求 UAC）',
+    sleep_download: '📥 下載睡眠報告 (.html)',
+    sleep_running: '正在生成睡眠報告（讀取最近 28 天睡眠歷史）...',
+    sleep_done: '睡眠報告已生成',
+    sleep_empty: '未生成報告（系統可能無睡眠歷史或元件缺失）',
+    energy_desc: '用 powercfg /energy 採集 60 秒生成系統能源效率與電源設定診斷報告（HTML）——發現潛在的耗電問題',
+    lbl_tool_room5: '目標房間（需橋接器在線）',
+    btn_energy_run: '⚡ 生成能源報告（60秒）',
+    energy_admin_hint: '🔒 需要管理員權限：請確認客戶機 bridge 以管理員運行（雙擊自動請求 UAC）',
+    energy_download: '📥 下載能源報告 (.html)',
+    energy_running: '正在採集 60 秒能耗數據並生成報告（約需 1-2 分鐘）...',
+    energy_done: '能源報告已生成',
+    energy_empty: '未生成報告（採樣失敗或系統元件缺失）',
+    drivers_desc: '讀取系統已安裝驅動的 DeviceName / Manufacturer / DriverVersion——核對驅動版本、排查驅動過期或不匹配',
+    lbl_tool_room6: '目標房間（需橋接器在線）',
+    btn_drivers_list: '🖱 讀取驅動版本',
+    drivers_reading: '正在讀取驅動版本資訊...',
+    drivers_done: '驅動版本讀取成功',
+    drivers_empty: '未讀取到驅動資訊',
+    drivers_view_all: '查看全部驅動',
+    drivers_modal_title: '驅動版本資訊（全量）',
+    drivers_search_ph: '搜尋驅動（如 GPU / 網卡）',
+    drivers_th_name: '設備名', drivers_th_manu: '廠商', drivers_th_ver: '驅動版本',
+    drivers_summary: '共 ', drivers_summary_suffix: ' 個驅動，點擊下方按鈕查看全部',
     logout: '退出登錄',
     wo_desc: '當前帳號處理過的診斷房間',
     search_ph: '按 SN / 工單號 / 型號 / 房間碼搜索',
@@ -801,6 +1045,18 @@ const I18N = {
     home_step3_t: 'Chat to Diagnose', home_step3_d: 'Describe the issue in natural language; AI runs diagnostic commands remotely',
     home_step4_t: 'View Results', home_step4_d: 'Check history in "Work Orders", or use "Tool Mode" for flashing/activation',
     tools_desc: 'Local tool collection without AI chat — pushed to the client PC via the bridge',
+    btn_open_tool: 'Open Tool', btn_close_tool: 'Collapse',
+    nav_tools_win: 'Windows Tools', nav_tools_linux: 'Linux Tools',
+    tools_win_desc: 'Windows client tools — pushed to the client PC via the bridge',
+    tools_linux_desc: 'Linux client tools (Ubuntu / UOS / KOS / Kylin / LoongArch etc.) — pushed to the client PC via the bridge',
+    lbl_tool_room_linux: 'Target Room (Linux bridge online required)',
+    btn_linux_logpack: '📦 Pack Logs to Desktop',
+    linux_logpack_desc: 'Pack /var/log into a tar.gz on the client desktop, named with machine SN + date (e.g. SN_20260809_logs.tar.gz) — collect logs quickly for troubleshooting',
+    linux_logpack_running: 'Packing /var/log (1-3 min depending on log size)...',
+    linux_logpack_done: 'Logs packed',
+    linux_logpack_file: 'Package path: ',
+    linux_logpack_empty: 'No pack result',
+    linux_logpack_tip: '💡 Package saved to the client desktop — copy/send directly; ask if you want it downloaded to the server',
     tools_write: 'Write · Approval',
     snmtm_desc: 'For ThinkStation workstations after motherboard replacement: write the correct Serial Number (SN) and Machine Type Model (MTM) into the BIOS DMI area',
     lbl_tool_room: 'Target Room (bridge online required)', lbl_tool_model: 'Machine Model',
@@ -846,6 +1102,33 @@ const I18N = {
     bios_modal_title: 'BIOS Settings (full)',
     bios_download: 'Download .txt',
     bios_downloaded: 'BIOS config downloaded',
+    sleep_desc: 'Generate a 28-day sleep quality report (HTML) via powercfg /sleepstudy — troubleshoot wake anomalies, power drain, hibernate failures',
+    lbl_tool_room4: 'Target Room (bridge online required)',
+    btn_sleep_run: '😴 Generate Sleep Report (28d)',
+    sleep_admin_hint: '🔒 Admin required: make sure the client bridge runs as Administrator (double-click auto-requests UAC)',
+    sleep_download: '📥 Download Sleep Report (.html)',
+    sleep_running: 'Generating sleep report (reading 28-day sleep history)...',
+    sleep_done: 'Sleep report generated',
+    sleep_empty: 'No report generated (no sleep history or missing components)',
+    energy_desc: 'Capture 60s via powercfg /energy to generate an energy-efficiency & power-settings diagnostic report (HTML) — find potential power drain issues',
+    lbl_tool_room5: 'Target Room (bridge online required)',
+    btn_energy_run: '⚡ Generate Energy Report (60s)',
+    energy_admin_hint: '🔒 Admin required: make sure the client bridge runs as Administrator (double-click auto-requests UAC)',
+    energy_download: '📥 Download Energy Report (.html)',
+    energy_running: 'Capturing 60s of power data and generating report (1-2 min)...',
+    energy_done: 'Energy report generated',
+    energy_empty: 'No report generated (sampling failed or missing components)',
+    drivers_desc: 'List installed drivers (DeviceName / Manufacturer / DriverVersion) — check driver versions, outdated or mismatched drivers',
+    lbl_tool_room6: 'Target Room (bridge online required)',
+    btn_drivers_list: '🖱 List Driver Versions',
+    drivers_reading: 'Reading driver versions...',
+    drivers_done: 'Driver versions loaded',
+    drivers_empty: 'No driver info found',
+    drivers_view_all: 'View All Drivers',
+    drivers_modal_title: 'Driver Versions (all)',
+    drivers_search_ph: 'Search drivers (e.g. GPU / NIC)',
+    drivers_th_name: 'Device Name', drivers_th_manu: 'Manufacturer', drivers_th_ver: 'Driver Version',
+    drivers_summary: '', drivers_summary_suffix: ' drivers total. Click below to view all.',
     logout: 'Logout',
     wo_desc: 'Diagnosis rooms handled by this account',
     search_ph: 'Search by SN / ticket / model / room code',
@@ -936,9 +1219,11 @@ function switchTab(name) {
   document.getElementById('page-' + name).classList.add('active');
   const nav = document.querySelector('.nav-item[onclick="switchTab(\'' + name + '\')"]');
   if (nav) nav.classList.add('active');
-  if (name === 'workorders' && !allRooms.length) loadRooms();
+  if (name === 'workorders') loadRooms();
   if (name === 'users') loadUsers();
-  if (name === 'tools') initTools();
+  // 工具模式依赖桥接器在线状态：每次进入都重新拉取房间列表，避免用页面加载时的旧快照
+  if (name === 'tools-win') loadRooms().then(() => initTools());
+  if (name === 'tools-linux') loadRooms().then(() => initLinuxTools());
 }
 
 // 打开对话（iframe 加载 /chat?room=XXX，不跳页）
@@ -1277,15 +1562,7 @@ async function initTools() {
   const msg = document.getElementById('sntm-msg');
   msg.className = 'msg-box';
   // 房间下拉（取在线房间）
-  const roomSel = document.getElementById('sntm-room');
-  const online = allRooms.filter(r => r.bridge_online);
-  if (!online.length) {
-    roomSel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
-  } else {
-    roomSel.innerHTML = online.map(r =>
-      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
-    ).join('');
-  }
+  fillSntmRoom();
   // 机型下拉
   try {
     const resp = await fetch('/api/tools/snmtm/models');
@@ -1303,6 +1580,21 @@ async function initTools() {
   }
   fillOa3Room();
   fillBiosRoom();
+  fillSleepRoom();
+  fillEnergyRoom();
+  fillDriversRoom();
+}
+
+function fillSntmRoom() {
+  const roomSel = document.getElementById('sntm-room');
+  const online = allRooms.filter(r => r.bridge_online);
+  if (!online.length) {
+    roomSel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    roomSel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
 }
 
 // 根据房间的 machine_model 预选机型
@@ -1595,6 +1887,333 @@ function copyBiosItems() {
   copyText(biosRawText).then(() => showToast(t('copied_cmd')));
 }
 
+// ===== 工具：睡眠报告 =====
+function fillSleepRoom() {
+  const sel = document.getElementById('sleep-room');
+  const online = allRooms.filter(r => r.bridge_online);
+  if (!online.length) {
+    sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    sel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+async function sleepStudyRun() {
+  const msg = document.getElementById('sleep-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('sleep-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  const btn = document.getElementById('sleep-btn');
+  btn.disabled = true;
+  msg.textContent = t('sleep_running');
+  msg.className = 'msg-box info';
+  document.getElementById('sleep-result').style.display = 'none';
+  try {
+    const resp = await fetch('/api/tools/sleepstudy/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    if (data.need_admin) {
+      msg.textContent = '⚠ ' + t('sleep_admin_hint');
+      msg.className = 'msg-box warn';
+    } else if (data.report_error) {
+      msg.textContent = '⚠ ' + data.report_error;
+      msg.className = 'msg-box warn';
+    } else if (data.file_url) {
+      msg.textContent = '✅ ' + t('sleep_done') + ' (' + (data.size || 0) + ' bytes)';
+      msg.className = 'msg-box ok';
+      const dl = document.getElementById('sleep-dl');
+      dl.href = data.file_url;
+      dl.setAttribute('download', data.file_name || 'sleepstudy_report.html');
+      document.getElementById('sleep-result').style.display = 'block';
+    } else {
+      msg.textContent = '⚠ ' + t('sleep_empty');
+      msg.className = 'msg-box warn';
+    }
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+}
+
+// ===== 工具：能源效率报告 =====
+function fillEnergyRoom() {
+  const sel = document.getElementById('energy-room');
+  const online = allRooms.filter(r => r.bridge_online);
+  if (!online.length) {
+    sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    sel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+async function energyRun() {
+  const msg = document.getElementById('energy-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('energy-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  const btn = document.getElementById('energy-btn');
+  btn.disabled = true;
+  msg.textContent = t('energy_running');
+  msg.className = 'msg-box info';
+  document.getElementById('energy-result').style.display = 'none';
+  try {
+    const resp = await fetch('/api/tools/energy/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    if (data.need_admin) {
+      msg.textContent = '⚠ ' + t('energy_admin_hint');
+      msg.className = 'msg-box warn';
+    } else if (data.report_error) {
+      msg.textContent = '⚠ ' + data.report_error;
+      msg.className = 'msg-box warn';
+    } else if (data.file_url) {
+      msg.textContent = '✅ ' + t('energy_done') + ' (' + (data.size || 0) + ' bytes)';
+      msg.className = 'msg-box ok';
+      const dl = document.getElementById('energy-dl');
+      dl.href = data.file_url;
+      dl.setAttribute('download', data.file_name || 'energy_report.html');
+      document.getElementById('energy-result').style.display = 'block';
+    } else {
+      msg.textContent = '⚠ ' + t('energy_empty');
+      msg.className = 'msg-box warn';
+    }
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+}
+
+// ===== 工具：驱动版本信息 =====
+function fillDriversRoom() {
+  const sel = document.getElementById('drivers-room');
+  const online = allRooms.filter(r => r.bridge_online);
+  if (!online.length) {
+    sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    sel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+let driversItems = [];
+let driversRawText = '';
+
+async function driversList() {
+  const msg = document.getElementById('drivers-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('drivers-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  const btn = document.getElementById('drivers-btn');
+  btn.disabled = true;
+  msg.textContent = t('drivers_reading');
+  msg.className = 'msg-box info';
+  document.getElementById('drivers-result').style.display = 'none';
+  try {
+    const resp = await fetch('/api/tools/drivers/list', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    driversItems = data.drivers || [];
+    driversRawText = data.table || data.raw || '';
+    if (!driversItems.length && !driversRawText) {
+      msg.textContent = '⚠ ' + t('drivers_empty');
+      msg.className = 'msg-box warn';
+      return;
+    }
+    msg.textContent = '✅ ' + t('drivers_done') + ' (' + (data.count || driversItems.length) + ')';
+    msg.className = 'msg-box ok';
+    document.getElementById('drivers-summary').textContent =
+      t('drivers_summary') + (data.count || driversItems.length) + t('drivers_summary_suffix');
+    document.getElementById('drivers-count2').textContent = data.count || driversItems.length;
+    document.getElementById('drivers-result').style.display = 'block';
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+}
+
+function renderDriversItems() {
+  const kw = (document.getElementById('drivers-search').value || '').trim().toLowerCase();
+  let list = driversItems;
+  if (!list.length) {
+    // 后端没解析出结构化数据时，退回文本模式（按行过滤）
+    const lines = (driversRawText || '').split('\n').filter(l => l.trim());
+    document.getElementById('drivers-count').textContent = t('count_prefix') + lines.length + t('count_suffix');
+    const body = document.getElementById('drivers-tbody');
+    if (!lines.length) {
+      body.innerHTML = '<tr><td colspan="3" class="empty">' + t('drivers_empty') + '</td></tr>';
+      return;
+    }
+    body.innerHTML = lines.map(l => {
+      const hit = !kw || l.toLowerCase().includes(kw);
+      return hit ? '<tr><td colspan="3" class="mono">' + escapeHtml(l) + '</td></tr>' : '';
+    }).join('');
+    return;
+  }
+  const filtered = list.filter(d => !kw
+    || (d.name || '').toLowerCase().includes(kw)
+    || (d.manufacturer || '').toLowerCase().includes(kw)
+    || (d.version || '').toLowerCase().includes(kw));
+  document.getElementById('drivers-count').textContent = t('count_prefix') + filtered.length + t('count_suffix');
+  const body = document.getElementById('drivers-tbody');
+  if (!filtered.length) {
+    body.innerHTML = '<tr><td colspan="3" class="empty">' + t('bios_no_match') + '</td></tr>';
+    return;
+  }
+  body.innerHTML = filtered.map(d =>
+    '<tr><td class="mono">' + escapeHtml(d.name || '') + '</td><td>' + escapeHtml(d.manufacturer || '') + '</td><td class="mono">' + escapeHtml(d.version || '') + '</td></tr>'
+  ).join('');
+}
+
+function openDriversModal() {
+  renderDriversItems();
+  document.getElementById('drivers-modal').classList.add('show');
+}
+
+function closeDriversModal() {
+  document.getElementById('drivers-modal').classList.remove('show');
+}
+
+function copyDriversText() {
+  const txt = driversRawText || (driversItems || []).map(d => [d.name, d.manufacturer, d.version].filter(Boolean).join('\t')).join('\n');
+  if (!txt) return;
+  copyText(txt).then(() => showToast(t('copied_cmd')));
+}
+
+function downloadDriversTxt() {
+  const lines = [];
+  lines.push('=== 驱动版本信息 ===');
+  lines.push('时间: ' + new Date().toLocaleString());
+  lines.push('驱动数量: ' + (driversItems.length || '—'));
+  lines.push('---------------------');
+  if (driversItems.length) {
+    lines.push('设备名\t厂商\t驱动版本');
+    driversItems.forEach(d => lines.push([d.name, d.manufacturer, d.version].join('\t')));
+  } else {
+    lines.push(driversRawText || '(无数据)');
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'drivers-' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  showToast(t('bios_downloaded'));
+}
+
+// ===== 工具卡片：原位展开/收起 =====
+function toggleTool(cardId) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  const isOpen = card.classList.contains('open');
+  // 先收起同一页面其他展开的卡片
+  const grid = card.closest('.tool-grid');
+  if (grid) {
+    grid.querySelectorAll('.tool-card.open').forEach(c => {
+      if (c.id !== cardId) {
+        c.classList.remove('open');
+        const btn = c.querySelector('.tool-card-open');
+        if (btn) btn.textContent = '▶ ' + t('btn_open_tool');
+      }
+    });
+  }
+  if (isOpen) {
+    card.classList.remove('open');
+    card.querySelector('.tool-card-open').textContent = '▶ ' + t('btn_open_tool');
+  } else {
+    card.classList.add('open');
+    card.querySelector('.tool-card-open').textContent = '▼ ' + t('btn_close_tool');
+    // 展开后刷新房间下拉（确保刚上线/下线的桥接器状态正确）
+    if (cardId === 'card-sntm') fillSntmRoom();
+    else if (cardId === 'card-oa3') fillOa3Room();
+    else if (cardId === 'card-bios') fillBiosRoom();
+    else if (cardId === 'card-sleep') fillSleepRoom();
+    else if (cardId === 'card-energy') fillEnergyRoom();
+    else if (cardId === 'card-drivers') fillDriversRoom();
+    else if (cardId === 'card-linux-logpack') fillLinuxLogPackRoom();
+  }
+}
+
+// ===== Linux 工具 =====
+function initLinuxTools() {
+  const msg = document.getElementById('linux-logpack-msg');
+  if (msg) msg.className = 'msg-box';
+  fillLinuxLogPackRoom();
+}
+
+function fillLinuxLogPackRoom() {
+  const sel = document.getElementById('linux-logpack-room');
+  const online = allRooms.filter(r => r.bridge_online && r.platform === 'linux');
+  if (!online.length) {
+    sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    sel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+async function linuxLogPack() {
+  const msg = document.getElementById('linux-logpack-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('linux-logpack-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  const btn = document.getElementById('linux-logpack-btn');
+  btn.disabled = true;
+  msg.textContent = t('linux_logpack_running');
+  msg.className = 'msg-box info';
+  document.getElementById('linux-logpack-result').style.display = 'none';
+  try {
+    const resp = await fetch('/api/tools/linux/logpack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    if (data.pack_error) {
+      msg.textContent = '⚠ ' + data.pack_error;
+      msg.className = 'msg-box warn';
+    } else if (data.pack_path) {
+      const sizeMB = (data.pack_size / 1024 / 1024).toFixed(2);
+      msg.textContent = '✅ ' + t('linux_logpack_done');
+      msg.className = 'msg-box ok';
+      document.getElementById('linux-logpack-info').textContent =
+        t('linux_logpack_file') + data.pack_path + '  (' + sizeMB + ' MB)';
+      document.getElementById('linux-logpack-result').style.display = 'block';
+    } else {
+      msg.textContent = '⚠ ' + t('linux_logpack_empty');
+      msg.className = 'msg-box warn';
+    }
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+}
+
 // ===== 工具 =====
 function showToast(msg) {
   const t = document.getElementById('toast');
@@ -1632,6 +2251,7 @@ document.getElementById('f-sn').addEventListener('keydown', (e) => { if (e.key =
 document.getElementById('f-ticket').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRoom(); });
 document.getElementById('history-modal').addEventListener('click', (e) => { if (e.target.id === 'history-modal') closeHistory(); });
 document.getElementById('bios-modal').addEventListener('click', (e) => { if (e.target.id === 'bios-modal') closeBiosModal(); });
+document.getElementById('drivers-modal').addEventListener('click', (e) => { if (e.target.id === 'drivers-modal') closeDriversModal(); });
 
 // ===== Init =====
 applyLang(currentLang);
