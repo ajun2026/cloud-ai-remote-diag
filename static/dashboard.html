@@ -599,6 +599,8 @@ const I18N = {
     bios_search_ph: '搜索设置项（如 WakeOnLAN）',
     bios_th_item: '设置项', bios_th_value: '当前值',
     bios_no_match: '无匹配的设置项',
+    bios_elevate_title: '🔒 需管理员权限：bridge 当前为普通权限运行，无法读取完整 BIOS 设置',
+    bios_elevate_hint: '请在客户机上重启 bridge：双击运行时按 Y 确认提权，或用命令行 bridge -server ws://106.54.193.9:8000 -room 房间码 --elevate',
     logout: '退出登录',
     wo_desc: '当前账号处理过的诊断房间',
     search_ph: '按 SN / 工单号 / 型号 / 房间码搜索',
@@ -702,6 +704,8 @@ const I18N = {
     bios_search_ph: '搜索設置項（如 WakeOnLAN）',
     bios_th_item: '設置項', bios_th_value: '當前值',
     bios_no_match: '無匹配的設置項',
+    bios_elevate_title: '🔒 需管理員權限：bridge 當前為普通權限執行，無法讀取完整 BIOS 設置',
+    bios_elevate_hint: '請在客戶機上重啟 bridge：雙擊執行時按 Y 確認提權，或用命令列 bridge -server ws://106.54.193.9:8000 -room 房間碼 --elevate',
     logout: '退出登錄',
     wo_desc: '當前帳號處理過的診斷房間',
     search_ph: '按 SN / 工單號 / 型號 / 房間碼搜索',
@@ -805,6 +809,8 @@ const I18N = {
     bios_search_ph: 'Search settings (e.g. WakeOnLAN)',
     bios_th_item: 'Setting', bios_th_value: 'Current Value',
     bios_no_match: 'No matching settings',
+    bios_elevate_title: '🔒 Admin required: bridge is running without elevation, full BIOS settings unavailable',
+    bios_elevate_hint: 'Restart bridge on the client: press Y at startup, or run: bridge -server ws://106.54.193.9:8000 -room ROOMCODE --elevate',
     logout: 'Logout',
     wo_desc: 'Diagnosis rooms handled by this account',
     search_ph: 'Search by SN / ticket / model / room code',
@@ -1482,8 +1488,9 @@ async function biosRead() {
       msg.textContent = '⚠ ' + data.item_error;
       msg.className = 'msg-box warn';
     } else if (data.need_admin) {
-      msg.textContent = '⚠ ' + data.need_admin;
+      msg.textContent = '⚠ ' + data.need_admin + ' — ' + t('bios_elevate_hint');
       msg.className = 'msg-box warn';
+      document.getElementById('bios-info').textContent = t('bios_elevate_title');
     } else if (!biosItems.length) {
       msg.textContent = '⚠ ' + t('bios_empty');
       msg.className = 'msg-box warn';

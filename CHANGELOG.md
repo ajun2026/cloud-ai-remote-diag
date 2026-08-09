@@ -4,6 +4,34 @@
 
 ---
 
+## v0.8.1 — 2026-08-09（bridge 管理员提权能力）
+
+### 一、bridge（Go）v0.6.2：运行时管理员提权
+
+**需求来源**：工具模式的 BIOS 信息读取实测发现——`Lenovo_BiosSetting` 全量设置项需要管理员权限，而 bridge 一直以普通权限运行，返回 `PermissionDenied (0x80041003)`。要让"远程读/改 BIOS"跑通，bridge 必须具备提权能力。
+
+**实现**（`bridge/elevate_windows.go` + `main.go`）：
+
+- **提权原理**：`ShellExecuteW + "runas"` → 触发 UAC 弹窗 → 用户确认 → 以管理员启动新进程（带 `--elevated` 内部标志防递归）→ 新进程自动重连同一房间
+- **两种触发方式**：
+  - 命令行：`bridge -server ws://106.54.193.9:8000 -room 房间码 --elevate`
+  - 交互模式（双击）：启动时检测非管理员，询问"是否以管理员身份重新启动？[Y/n]"，回车默认提权
+- **权限检测**：Windows 用进程 Token Elevation（`windows.GetCurrentProcessToken().IsElevated()`），比 `whoami /groups` 更可靠；Linux/macOS 不支持自动提权（返回提示，手动 sudo）
+- **克制原则**：默认不提权，仅用户确认/显式请求时提权，维持"行为面最小"设计
+- **版本号**：bridge `0.5.0 → 0.6.2`；go.mod 保持 go 1.22.2（x/sys v0.28.0 兼容，不被工具链自动升级）
+
+### 二、服务器端：is_admin 上报 + BIOS 工具预判
+
+- bridge `identify` 消息新增 `is_admin` 字段（`room.machine` 自动存储）
+- `POST /api/tools/bios/read`：预判 `room.machine.is_admin=False` → **直接返回提权指引**（不再空跑 60s 命令）；命令内检测保留兜底
+- 前端 BIOS 工具：非管理员时显示 🔒 提示 + 提权操作指引（三语 i18n）
+
+### 三、产物更新
+
+- `static/bridge-win64.exe` 更新为 v0.6.2（5.05MB，含提权能力）
+
+---
+
 ## v0.8.0 — 2026-08-08（登录体系 + 工作台 + 房间业务绑定 + 对话上下文）
 
 ### 一、用户登录体系（原无登录，人人可创建房间）

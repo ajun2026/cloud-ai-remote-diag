@@ -2501,6 +2501,25 @@ async def tools_bios_read(request: Request):
     if not room or not room.bridge_ws:
         return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
 
+    # 预判：bridge 已上报 is_admin=false（v0.6.2+ 上报）→ 直接提示，不必空跑 60s 命令
+    machine_admin = room.machine.get("is_admin")
+    if machine_admin is False:
+        run_logger.info(f"[{room_code}] BIOS read skipped: bridge not elevated")
+        save_message(room_code, "tool",
+                     "[BIOS 读取] 跳过：bridge 非管理员权限（工具已预判）",
+                     "BIOS_Read", 1)
+        return JSONResponse({
+            "status": "ok",
+            "info": {},
+            "items": [],
+            "item_count": 0,
+            "password_state": "",
+            "is_admin": "False",
+            "need_admin": "Admin required: full BIOS settings need Administrator. Please run the bridge as Administrator",
+            "item_error": "",
+            "raw": "SKIPPED: bridge reports is_admin=False. Full BIOS settings require an elevated bridge (run with --elevate or answer Y at startup).",
+        })
+
     try:
         result = await execute_bridge_command(room, "RunCommand",
                                               {"command": BIOS_READ_CMD, "timeout": 60, "cwd": ""},

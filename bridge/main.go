@@ -23,7 +23,7 @@ import (
 )
 
 // Version 桥接器版本号（构建时可用 -ldflags 覆盖）
-var Version = "0.5.0"
+var Version = "0.6.2"
 
 // ClientInfo 上报给服务器的本机身份信息
 type ClientInfo struct {
@@ -35,12 +35,16 @@ type ClientInfo struct {
 	Username string `json:"username"`
 	Version  string `json:"version"`
 	Bridge   string `json:"bridge"` // "go-pipe"
+	IsAdmin  bool   `json:"is_admin"` // 当前是否以管理员权限运行
 }
 
 func main() {
 	var serverURL, roomCode string
+	var elevate, elevated bool
 	flag.StringVar(&serverURL, "server", "ws://localhost:8000", "服务器地址 (ws:// 或 wss://)")
 	flag.StringVar(&roomCode, "room", "", "房间码（必填）")
+	flag.BoolVar(&elevate, "elevate", false, "自动请求管理员权限（Windows UAC 提权）")
+	flag.BoolVar(&elevated, "elevated", false, "内部标志：已处于提权后的进程")
 	flag.Parse()
 
 	// 交互模式：双击运行 / 未提供房间码时，引导用户输入
@@ -78,6 +82,34 @@ func main() {
 		fmt.Printf(" 即将连接服务器 %s · 房间 %s\n", serverURL, roomCode)
 		fmt.Println("==============================================")
 		fmt.Println("")
+	}
+
+	// 管理员提权（仅 Windows 有意义）：
+	//   条件：非管理员 + 尚未提权 + (命令行 --elevate 或 交互模式询问确认)
+	//   提权后新进程带 --elevated 标志自动跳过，防递归
+	if !isAdmin() && !elevated {
+		shouldElevate := elevate
+		if !shouldElevate && flag.NFlag() == 0 {
+			// 交互模式（无任何参数）：询问用户是否提权
+			reader := bufio.NewReader(os.Stdin)
+			fmt.Print(" 当前不是管理员权限，部分功能受限（如读取完整 BIOS 设置）。\n 是否以管理员身份重新启动？[Y/n]: ")
+			answer, _ := reader.ReadString('\n')
+			answer = strings.TrimSpace(strings.ToLower(answer))
+			shouldElevate = answer != "n" && answer != "no" // 回车/其他 = 默认提权
+		}
+		if shouldElevate {
+			fmt.Println(" 正在请求管理员权限（UAC 弹窗确认后自动继续）…")
+			if err := elevateSelf(serverURL, roomCode); err != nil {
+				fmt.Fprintf(os.Stderr, " 提权失败: %v\n", err)
+				fmt.Println(" 继续以普通权限运行（部分功能受限）…")
+			} else {
+				// 提权成功：新进程已启动，本进程退出
+				fmt.Println(" 已触发提权，请在新的管理员窗口中查看连接状态。")
+				os.Exit(0)
+			}
+		} else {
+			fmt.Println(" 已选择普通权限运行（部分功能受限，如 BIOS 全量读取）。")
+		}
 	}
 
 	serverURL = strings.TrimRight(serverURL, "/")
@@ -130,6 +162,7 @@ func collectClientInfo() ClientInfo {
 		Username: username,
 		Version:  Version,
 		Bridge:   "go-pipe",
+		IsAdmin:  isAdmin(),
 	}
 }
 

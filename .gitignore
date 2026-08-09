@@ -26,3 +26,4 @@ static/bridge-linux-*
 
 # Backup
 .git-backup-*/
+sntools/oa3/*.EXE
