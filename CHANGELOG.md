@@ -1,3 +1,17 @@
+## v0.10.2 — 2026-08-10（管理后台显示工程师信息）
+
+### 修改
+
+- **活跃房间表格**：新增「工程师」列（从 rooms 表映射 engineer_username），一眼看出房间归属
+- **历史聊天记录表格**：新增「工程师」+「SN」列，`/api/rooms/list` 改为 LEFT JOIN rooms 表返回 engineer_username / sn / ticket_no
+- 便于管理员追踪测试进度与责任人
+
+### 版本号
+
+v0.10.1 → v0.10.2（server.py 5 处 + dashboard.html 1 处）
+
+---
+
 ## v0.10.1 — 2026-08-10（桥接器交互优化）
 
 ### 修改

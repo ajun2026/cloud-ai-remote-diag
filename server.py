@@ -271,12 +271,16 @@ def get_all_rooms() -> list[dict]:
     try:
         conn = _db_connect()
         rows = conn.execute("""
-            SELECT room_code,
-                   MIN(created_at) AS first_seen,
-                   MAX(created_at) AS last_seen,
-                   COUNT(*) AS msg_count
-            FROM messages
-            GROUP BY room_code
+            SELECT m.room_code,
+                   MIN(m.created_at) AS first_seen,
+                   MAX(m.created_at) AS last_seen,
+                   COUNT(*) AS msg_count,
+                   r.engineer_username,
+                   r.sn,
+                   r.ticket_no
+            FROM messages m
+            LEFT JOIN rooms r ON r.room_code = m.room_code
+            GROUP BY m.room_code
             ORDER BY last_seen DESC
             LIMIT 100
         """).fetchall()
@@ -1015,7 +1019,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.10.1")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.10.2")
 
 # ============================================================
 # Admin authentication — simple session cookie
@@ -1431,7 +1435,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.10.1"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.10.2"}
 
 
 @app.post("/api/debug_log")
@@ -1614,9 +1618,18 @@ async def admin_stats(request: Request):
     if not _require_admin(request):
         return JSONResponse({"error": "未授权"}, status_code=401)
     active_rooms = []
+    # 预查房间归属（room_code -> 工程师），避免逐房间查库
+    room_owners = {}
+    try:
+        conn = _db_connect()
+        room_owners = {r[0]: r[1] for r in conn.execute("SELECT room_code, engineer_username FROM rooms").fetchall()}
+        conn.close()
+    except Exception:
+        pass
     for code, room in rooms.items():
         active_rooms.append({
             "room_code": code,
+            "engineer_username": room_owners.get(code, ""),
             "browser_connected": room.browser_ws is not None,
             "bridge_connected": room.bridge_ws is not None,
             "created_at": room.created_at.isoformat(),
@@ -1631,7 +1644,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.10.1",
+        "version": "0.10.2",
     }
 
 
@@ -1811,7 +1824,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.10.1</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.10.2</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -1827,13 +1840,13 @@ def _generate_admin_html():
 
 <h2>当前活跃房间</h2>
 <table id="rooms-table">
-  <thead><tr><th>房间码</th><th>主机名</th><th>系统</th><th>IP</th><th>用户</th><th>浏览器</th><th>桥接器</th><th>T2 自动</th><th>创建时间</th></tr></thead>
+  <thead><tr><th>房间码</th><th>工程师</th><th>主机名</th><th>系统</th><th>IP</th><th>用户</th><th>浏览器</th><th>桥接器</th><th>T2 自动</th><th>创建时间</th></tr></thead>
   <tbody></tbody>
 </table>
 
 <h2>历史聊天记录</h2>
 <table id="history-rooms">
-  <thead><tr><th>房间码</th><th>消息数</th><th>首次记录</th><th>最近记录</th><th>操作</th></tr></thead>
+  <thead><tr><th>房间码</th><th>工程师</th><th>SN</th><th>消息数</th><th>首次记录</th><th>最近记录</th><th>操作</th></tr></thead>
   <tbody></tbody>
 </table>
 
@@ -1871,6 +1884,7 @@ async function refresh() {
     const m = r.machine || {};
     tbody.innerHTML += '<tr>'
       + '<td><strong>' + r.room_code + '</strong></td>'
+      + '<td>' + esc(r.engineer_username || '-') + '</td>'
       + '<td>' + (m.hostname || '-') + '</td>'
       + '<td title="' + (m.os||'') + '">' + (m.os ? m.os.split(' ')[0] + ' ' + (m.os.split(' ')[1]||'') : '-') + '</td>'
       + '<td><code style="font-size:11px;color:var(--info)">' + (m.local_ip || '-') + '</code></td>'
@@ -1890,6 +1904,8 @@ async function refresh() {
   for (const r of roomsData.rooms || []) {
     htbody.innerHTML += '<tr>'
       + '<td><strong>' + r.room_code + '</strong></td>'
+      + '<td>' + esc(r.engineer_username || '-') + '</td>'
+      + '<td>' + esc(r.sn || '-') + '</td>'
       + '<td>' + r.msg_count + '</td>'
       + '<td>' + r.first_seen + '</td>'
       + '<td>' + r.last_seen + '</td>'
@@ -3660,6 +3676,6 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.10.1 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.10.2 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info")
