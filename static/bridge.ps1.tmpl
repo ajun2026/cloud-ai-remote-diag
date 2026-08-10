@@ -1,6 +1,6 @@
 # ============================================================================
 #  Cloud AI Remote Diagnostics - PowerShell Bridge (ps-pipe)
-#  Version 1.0.2
+#  Version 1.1.1 (raw WebSocket layer, big-endian fix)
 #
 #  A file-less PowerShell client that connects to the cloud server and
 #  executes diagnostic commands on this Windows PC - no .exe needed.
@@ -25,7 +25,7 @@ param(
     [string]$Room   = $env:BRIDGE_ROOM
 )
 
-$Version   = "1.0.2"
+$Version   = "1.1.1"
 $ServerUrl = if ($Server) { $Server } else { "{{WS_URL}}" }
 $script:ws = $null
 $script:exiting = $false
@@ -60,7 +60,156 @@ function Write-Audit {
     } catch {}
 }
 
-# ---- send lock: ClientWebSocket does not allow concurrent sends ----
+# ---- raw WebSocket layer (v1.1.0) ----
+# .NET Framework ClientWebSocket on some machines (esp. with VPN/proxy
+# virtual adapters) opens TCP but never sends the HTTP Upgrade request
+# while ConnectAsync falsely reports success -> "Connected. Waiting for
+# server..." + endless "Connection closed" reconnect loop. Raw TCP +
+# hand-rolled WS handshake/frame codec works on any machine with TCP.
+# NOTE: keep this section ASCII-only - Windows PowerShell 5.1 parses
+# the script with the system ANSI codepage (GBK), non-ASCII bytes in
+# comments/strings turn into garbage and break parsing.
+
+function Read-Exact {
+    param($Stream, $Count)
+    $buf = New-Object byte[] $Count
+    $off = 0
+    while ($off -lt $Count) {
+        $n = $Stream.Read($buf, $off, $Count - $off)
+        if ($n -le 0) { throw "Connection closed" }
+        $off += $n
+    }
+    return $buf
+}
+
+function Ws-Connect {
+    param($Uri)
+    if ($Uri.Scheme -ne "ws") { throw "Only ws:// is supported (got: $($Uri.Scheme))" }
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    $tcp.NoDelay = $true
+    $tcp.Connect($Uri.Host, $Uri.Port)
+    $stream = $tcp.GetStream()
+    $rng = New-Object byte[] 16
+    (New-Object System.Random).NextBytes($rng)
+    $key = [Convert]::ToBase64String($rng)
+    $path = $Uri.PathAndQuery
+    $CRLF = "`r`n"
+    $req = "GET $path HTTP/1.1" + $CRLF + "Host: $($Uri.Host):$($Uri.Port)" + $CRLF + "Upgrade: websocket" + $CRLF + "Connection: Upgrade" + $CRLF + "Sec-WebSocket-Key: $key" + $CRLF + "Sec-WebSocket-Version: 13" + $CRLF + "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" + $CRLF + $CRLF
+    $reqBytes = [System.Text.Encoding]::ASCII.GetBytes($req)
+    $stream.Write($reqBytes, 0, $reqBytes.Length)
+    $stream.Flush()
+    $resp = New-Object System.Text.StringBuilder
+    $one = New-Object byte[] 1
+    $found = $false
+    for ($i = 0; $i -lt 16384; $i++) {
+        $n = $stream.Read($one, 0, 1)
+        if ($n -le 0) { throw "Handshake failed: connection closed" }
+        [void]$resp.Append([char]$one[0])
+        if ($resp.ToString().EndsWith($CRLF + $CRLF)) { $found = $true; break }
+    }
+    if (-not $found) { throw "Handshake failed: no response header received" }
+    $respText = $resp.ToString()
+    if ($respText -notmatch "101") { throw "Handshake failed: server returned non-101" }
+    return [PSCustomObject]@{ Tcp = $tcp; Stream = $stream; Connected = $true }
+}
+
+function Ws-Send-Frame {
+    param($Conn, $Payload, $Opcode, $Fin)
+    $len = $Payload.Length
+    $ms = New-Object System.IO.MemoryStream
+    $b0 = [byte]($Opcode -bor 0x80)
+    if (-not $Fin) { $b0 = $b0 -band 0x7F }
+    $ms.WriteByte($b0)
+    $maskBit = 0x80
+    if ($len -le 125) {
+        $ms.WriteByte([byte]($maskBit -bor $len))
+    } elseif ($len -le 65535) {
+        $ms.WriteByte([byte]($maskBit -bor 126))
+        $lenBytes = [BitConverter]::GetBytes([uint16]$len)
+        [Array]::Reverse($lenBytes)  # WebSocket length is big-endian
+        $ms.Write($lenBytes, 0, 2)
+    } else {
+        $ms.WriteByte([byte]($maskBit -bor 127))
+        $lenBytes = [BitConverter]::GetBytes([uint64]$len)
+        [Array]::Reverse($lenBytes)  # big-endian
+        $ms.Write($lenBytes, 0, 8)
+    }
+    $mask = New-Object byte[] 4
+    (New-Object System.Random).NextBytes($mask)
+    $ms.Write($mask, 0, 4)
+    $masked = New-Object byte[] $len
+    for ($i = 0; $i -lt $len; $i++) { $masked[$i] = $Payload[$i] -bxor $mask[$i % 4] }
+    if ($len -gt 0) { $ms.Write($masked, 0, $len) }
+    $frame = $ms.ToArray()
+    $Conn.Stream.Write($frame, 0, $frame.Length)
+    $Conn.Stream.Flush()
+}
+
+function Ws-Send-Text {
+    param($Conn, $Text)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    $frameSize = 32768
+    $total = $bytes.Length
+    for ($i = 0; $i -lt $total; $i += $frameSize) {
+        $len = [Math]::Min($frameSize, $total - $i)
+        $chunk = New-Object byte[] $len
+        [Array]::Copy($bytes, $i, $chunk, 0, $len)
+        $opcode = 0x1
+        if ($i -gt 0) { $opcode = 0x0 }
+        $fin = ($i + $len) -ge $total
+        Ws-Send-Frame $Conn $chunk $opcode $fin
+    }
+}
+
+function Ws-Read-Frame {
+    param($Conn)
+    $h = Read-Exact $Conn.Stream 2
+    $b0 = $h[0]; $b1 = $h[1]
+    $fin = ($b0 -band 0x80) -ne 0
+    $opcode = $b0 -band 0x0F
+    $masked = ($b1 -band 0x80) -ne 0
+    $len = [int]($b1 -band 0x7F)
+    if ($len -eq 126) {
+        $ext = Read-Exact $Conn.Stream 2
+        [Array]::Reverse($ext)  # big-endian -> little-endian
+        $len = [BitConverter]::ToUInt16($ext, 0)
+    } elseif ($len -eq 127) {
+        $ext = Read-Exact $Conn.Stream 8
+        [Array]::Reverse($ext)  # big-endian -> little-endian
+        $len = [int][BitConverter]::ToUInt64($ext, 0)
+    }
+    $mask = $null
+    if ($masked) { $mask = Read-Exact $Conn.Stream 4 }
+    $payload = New-Object byte[] $len
+    if ($len -gt 0) {
+        $payload = Read-Exact $Conn.Stream $len
+        if ($masked) {
+            for ($i = 0; $i -lt $len; $i++) { $payload[$i] = $payload[$i] -bxor $mask[$i % 4] }
+        }
+    }
+    return [PSCustomObject]@{ Fin = $fin; Opcode = $opcode; Payload = $payload }
+}
+
+function Ws-Receive-Text {
+    param($Conn)
+    $ms = New-Object System.IO.MemoryStream
+    while ($true) {
+        $frame = Ws-Read-Frame $Conn
+        if ($frame.Opcode -eq 0x8) { return $null }
+        if ($frame.Opcode -eq 0x9) {
+            Ws-Send-Frame $Conn (New-Object byte[] 0) 0xA $true
+            continue
+        }
+        if ($frame.Opcode -eq 0xA) { continue }
+        if ($frame.Opcode -eq 0x1 -or $frame.Opcode -eq 0x0) {
+            if ($frame.Payload.Length -gt 0) { $ms.Write($frame.Payload, 0, $frame.Payload.Length) }
+            if ($frame.Fin) { break }
+        }
+    }
+    return [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
+}
+
+# ---- send lock: no concurrent writes allowed (raw layer included) ----
 # NOTE: must be $script: scoped! Background tasks (heartbeat / command runner)
 # have no script scope chain - bare $sendLock resolves to $null there and
 # .WaitOne() throws, silently killing the task (heartbeat stops, command
@@ -71,42 +220,19 @@ function Send-Json {
     param($Obj)
     $script:sendLock.WaitOne() | Out-Null
     try {
-        if ($script:ws -eq $null -or $script:ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) { return }
+        if ($script:ws -eq $null -or -not $script:ws.Connected) { return }
         $json = $Obj | ConvertTo-Json -Compress -Depth 12
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-        # 分帧发送（≤32KB/帧）：.NET Framework 的 ClientWebSocket 一次 SendAsync 发送
-        # 大消息（如文件块 base64 JSON ~350KB）会抛"特定协议操作的数据格式无效"，
-        # 小帧可规避（Go bridge 无此问题）。
-        $frameSize = 32768
-        $total = $bytes.Length
-        for ($i = 0; $i -lt $total; $i += $frameSize) {
-            $len = [Math]::Min($frameSize, $total - $i)
-            $frame = New-Object byte[] $len
-            [Array]::Copy($bytes, $i, $frame, 0, $len)
-            $seg = New-Object 'System.ArraySegment[byte]' -ArgumentList (,[byte[]]$frame)
-            $isEnd = ($i + $len) -ge $total
-            [void]($script:ws.SendAsync($seg, [System.Net.WebSockets.WebSocketMessageType]::Text, $isEnd, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult())
-        }
+        Ws-Send-Text $script:ws $json
     } catch {
         Write-Host ("send error: " + $_.Exception.Message) -ForegroundColor Yellow
+        Write-Audit "send error: $($_.Exception.Message)"
     } finally {
         $script:sendLock.ReleaseMutex()
     }
 }
 
 function Receive-Text {
-    $buffer = New-Object byte[] 65536
-    $ms = New-Object System.IO.MemoryStream
-    while ($true) {
-        $seg = New-Object 'System.ArraySegment[byte]' -ArgumentList (,[byte[]]$buffer)
-        $res = $script:ws.ReceiveAsync($seg, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
-        if ($res.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-            return $null
-        }
-        $ms.Write($buffer, 0, $res.Count)
-        if ($res.EndOfMessage) { break }
-    }
-    return [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
+    return Ws-Receive-Text $script:ws
 }
 
 # ---- machine identity ----
@@ -301,13 +427,7 @@ function Handle-FileUpload {
 #     have passed, so the server's heartbeat_age stays fresh during diagnosis
 function Run-Bridge {
     param($Uri)
-    $script:ws = New-Object System.Net.WebSockets.ClientWebSocket
-    $script:ws.Options.KeepAliveInterval = [TimeSpan]::FromSeconds(25)
-    # 关键：.NET Framework 默认 MaxReceiveBufferSize=64KB，服务器发来的大命令结果
-    # （单帧 >64KB，如进程列表/系统信息）会导致"特定协议操作的数据格式无效"断开；
-    # Go bridge 无此限制所以正常。调大到 4MB 兼容大消息（与发送侧分帧配合，双向兼容）。
-    $script:ws.Options.MaxReceiveBufferSize = 4194304
-    [void]($script:ws.ConnectAsync($Uri, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult())
+    $script:ws = Ws-Connect $Uri
     Write-Host "Connected. Waiting for server..." -ForegroundColor Green
     Write-Audit "connected to $Uri"
     Send-Identify
@@ -315,7 +435,7 @@ function Run-Bridge {
     $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
     $lastHb = Get-Date
 
-    while (-not $script:exiting -and $script:ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+    while (-not $script:exiting -and $script:ws.Connected) {
         $text = Receive-Text
         if ($null -eq $text) { break }
         if (-not $text) { continue }
@@ -348,11 +468,12 @@ function Run-Bridge {
     }
 
     try {
-        if ($script:ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-            [void]($script:ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "bye", [System.Threading.CancellationToken]::None).GetAwaiter().GetResult())
+        if ($script:ws.Connected) {
+            try { Ws-Send-Frame $script:ws (New-Object byte[] 0) 0x8 $true } catch {}
+            $script:ws.Stream.Close()
         }
     } catch {}
-    $script:ws.Dispose()
+    try { $script:ws.Tcp.Close() } catch {}
     $script:ws = $null
     Write-Audit "disconnected"
 }

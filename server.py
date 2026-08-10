@@ -1019,7 +1019,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.10.4")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.10.5")
 
 # ============================================================
 # Admin authentication — simple session cookie
@@ -1435,7 +1435,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.10.4"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.10.5"}
 
 
 @app.post("/api/debug_log")
@@ -1644,7 +1644,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.10.4",
+        "version": "0.10.5",
     }
 
 
@@ -1824,7 +1824,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.10.4</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.10.5</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -3571,7 +3571,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.10.4+）：
+    # 服务器主动定期发业务 ping（v0.10.5+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -3696,7 +3696,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.10.4 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.10.5 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0)

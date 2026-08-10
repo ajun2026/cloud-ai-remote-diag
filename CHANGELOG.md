@@ -1,3 +1,18 @@
+## v0.10.5 — 2026-08-10（bridge.ps1 手写 WebSocket 层 v1.1.1）
+
+### 修复（PowerShell 命令版桥接器兼容性根治）
+
+- **弃用 .NET Framework ClientWebSocket，改为手写 TCP + WebSocket 协议层**：.NET ClientWebSocket 在部分机器（尤其带 VPN/代理虚拟网卡）上 TCP 连接建立后不发送 HTTP Upgrade 请求（ConnectAsync 假成功），表现为"Connected. Waiting for server..." + 反复重连。手写握手/帧编解码后任何能建立 TCP 连接的机器都可用
+- **全 ASCII 化**：Windows PowerShell 5.1 按系统 ANSI 代码页（GBK）解析脚本，UTF-8 中文注释乱码会吞掉换行导致语法错误——新增代码全部英文
+- **大端字节序修复**：>125 字节消息（identify/命令）长度字段按 WebSocket 协议大端编解码（此前 BitConverter 小端导致发送失败/接收挂起）
+- 版本 v1.0.2 → v1.1.1
+
+### 版本号
+
+v0.10.4 → v0.10.5（server.py 5 处 + dashboard.html 1 处）
+
+---
+
 ## v0.10.4 — 2026-08-10（连接保活 + API 超时优化）
 
 ### 修复
