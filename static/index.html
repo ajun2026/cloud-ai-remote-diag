@@ -129,34 +129,43 @@
 
   /* ====== Approval Dialog ====== */
   #approval-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
     display: none; justify-content: center; align-items: center; z-index: 9999;
   }
   #approval-dialog {
-    background: var(--surface); border: 2px solid var(--error); border-radius: 16px;
+    background: var(--surface); border: 1px solid var(--info); border-radius: 14px;
     padding: 24px; width: 420px; max-width: 95vw;
-    box-shadow: 0 0 40px rgba(233,69,96,0.3);
+    box-shadow: 0 8px 40px rgba(0,0,0,0.35);
   }
-  #approval-dialog h3 { margin-bottom: 8px; color: var(--error); }
+  #approval-dialog h3 { margin-bottom: 8px; color: var(--text); font-size: 18px; }
+  #approval-dialog .human-desc {
+    font-size: 15px; font-weight: 600; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border);
+    padding: 12px 14px; border-radius: 8px; margin: 10px 0 6px;
+  }
+  #approval-dialog .detail-toggle {
+    background: none; border: none; color: var(--info); font-size: 12px;
+    cursor: pointer; padding: 4px 0; margin-top: 4px;
+  }
   #approval-dialog .tool-info {
-    background: var(--bg); padding: 12px; border-radius: 8px; margin: 12px 0;
-    font-size: 13px;
+    background: var(--bg); padding: 12px; border-radius: 8px; margin: 8px 0;
+    font-size: 13px; display: none;
   }
   #approval-dialog .tool-info code {
     background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 11px;
   }
   #approval-dialog .args-display {
-    font-size: 11px; color: var(--text2); word-break: break-all; max-height: 100px; overflow-y: auto;
+    font-size: 11px; color: var(--text2); word-break: break-all; max-height: 120px; overflow-y: auto;
   }
-  #approval-dialog .timer { font-size: 13px; color: var(--warn); margin: 8px 0; }
-  #approval-dialog .btn-row { display: flex; gap: 10px; margin-top: 16px; }
+  #approval-dialog .timer { font-size: 13px; color: var(--text2); margin: 10px 0; }
+  #approval-dialog .btn-row { display: flex; gap: 10px; margin-top: 12px; }
   #approval-dialog button {
-    flex: 1; padding: 14px; border: none; border-radius: 8px;
-    font-size: 16px; font-weight: 700; cursor: pointer;
+    flex: 1; padding: 12px; border: none; border-radius: 8px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
   }
-  #approval-dialog .btn-deny { background: rgba(248,113,113,0.3); color: var(--error); border: 1px solid var(--error); }
-  #approval-dialog .btn-deny:hover { background: rgba(248,113,113,0.5); }
-  #approval-dialog .btn-approve { background: var(--success); color: #000; font-weight: 700; }
+  #approval-dialog .btn-deny { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
+  #approval-dialog .btn-deny:hover { background: var(--bg); }
+  #approval-dialog .btn-approve { background: var(--info); color: #fff; font-weight: 700; }
   #approval-dialog .btn-approve:hover { opacity: 0.85; }
   #approval-dialog .deny-reason {
     width: 100%; padding: 8px; margin-top: 8px; border: 1px solid var(--border);
@@ -369,6 +378,33 @@
     </div>
   </div>
 
+  <div id="room-info-bar" style="display:none;padding:8px 14px;background:var(--surface2);border-bottom:1px solid var(--border);font-size:12px;color:var(--text2);align-items:center;flex-wrap:wrap;gap:6px 16px;">
+    <span>📋 房间 <b id="ri-code" style="color:var(--info);letter-spacing:1px;"></b></span>
+    <span>SN: <span id="ri-sn"></span></span>
+    <span>工单: <span id="ri-ticket"></span></span>
+    <span>桥接器: <span id="ri-bridge">--</span></span>
+    <span>有效期: <span id="ri-validity">--</span></span>
+    <button id="connect-toggle" onclick="toggleConnectPanel()" style="margin-left:auto;padding:3px 10px;font-size:12px;background:var(--surface);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;">📶 连接你的电脑</button>
+  </div>
+
+  <div id="connect-panel" style="display:none;padding:12px 14px;background:var(--surface2);border-bottom:1px solid var(--border);font-size:13px;">
+    <div style="display:flex;gap:6px;margin-bottom:10px;">
+      <button class="cp-tab" data-tab="ps" onclick="cpTab('ps')" style="padding:4px 12px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--info);border-radius:4px;cursor:pointer;">PowerShell</button>
+      <button class="cp-tab" data-tab="exe" onclick="cpTab('exe')" style="padding:4px 12px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;">Windows 双击版</button>
+      <button class="cp-tab" data-tab="linux" onclick="cpTab('linux')" style="padding:4px 12px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;">Linux</button>
+    </div>
+    <div style="position:relative;">
+      <pre id="cp-content" style="white-space:pre-wrap;word-break:break-all;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 80px 10px 10px;margin:0;font-size:12px;color:var(--text);overflow-x:auto;"></pre>
+      <button id="cp-copy" onclick="cpCopy()" style="position:absolute;top:8px;right:8px;padding:3px 10px;font-size:12px;background:var(--surface);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;">📋 复制</button>
+    </div>
+    <div style="margin-top:8px;display:flex;align-items:center;gap:10px;">
+      <a id="cp-dl-btn" href="#" download style="display:none;padding:12px 28px;font-size:14px;font-weight:600;background:var(--info);color:#fff;border-radius:8px;text-decoration:none;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25);">⬇️ 下载 一键连接.bat</a>
+      <span id="cp-dl-note" style="font-size:12px;color:var(--text2);display:none;">双击下载的 .bat → 自动下载桥接器并连接房间</span>
+    </div>
+    <div id="cp-meta" style="margin-top:8px;font-size:12px;color:var(--text2);"></div>
+    <div style="margin-top:4px;font-size:12px;color:#e0a800;">⚠️ 本连接含房间凭证，请勿转发</div>
+  </div>
+
   <div id="messages"></div>
 
   <div id="input-area">
@@ -427,16 +463,18 @@
 <!-- Approval Dialog -->
 <div id="approval-overlay">
   <div id="approval-dialog">
-    <h3 id="approval-title" data-i18n="approval_title">审批请求 — 工具调用需要你的授权</h3>
-    <p id="approval-desc" style="font-size:13px;color:var(--text2);" data-i18n="approval_desc">AI 想要执行以下 Tier <span id="approval-tier"></span> 操作：</p>
-    <div class="tool-info">
+    <h3 id="approval-title" data-i18n="approval_title">操作确认</h3>
+    <p id="approval-desc" style="font-size:13px;color:var(--text2);" data-i18n="approval_desc">助手想执行以下操作：</p>
+    <div class="human-desc" id="approval-human"></div>
+    <button class="detail-toggle" id="approval-toggle-detail" onclick="toggleApprovalDetail()">▸ 查看命令详情</button>
+    <div class="tool-info" id="approval-detail">
       <strong id="approval-tool" style="color:var(--info);"></strong>
       <div class="args-display" id="approval-args" style="margin-top: 8px;"></div>
     </div>
     <p class="timer" id="approval-timer"></p>
     <div class="btn-row">
-      <button class="btn-deny" onclick="respondApproval(false)" data-i18n="approval_deny">拒绝</button>
-      <button class="btn-approve" onclick="respondApproval(true)" data-i18n="approval_approve">同意执行</button>
+      <button class="btn-deny" onclick="respondApproval(false)" data-i18n="approval_deny">取消</button>
+      <button class="btn-approve" onclick="respondApproval(true)" data-i18n="approval_approve">允许</button>
     </div>
     <textarea class="deny-reason" id="deny-reason" data-i18n-placeholder="approval_reason_placeholder" placeholder="拒绝理由（可选）"></textarea>
   </div>
@@ -532,10 +570,10 @@ const I18N = {
     tool_tier3: 'Tier 3: 危险操作 — 需审批',
     tool_tier2: 'Tier 2: 交互操作',
     tool_tier1: 'Tier 1: 只读操作',
-    approval_title: '审批请求 — 工具调用需要你的授权',
-    approval_desc: 'AI 想要执行以下 Tier ',
-    approval_deny: '拒绝',
-    approval_approve: '同意执行',
+    approval_title: '操作确认',
+    approval_desc: '助手想执行以下操作：',
+    approval_deny: '取消',
+    approval_approve: '允许',
     approval_reason_placeholder: '拒绝理由（可选）',
     auto_approve_title: '自动通过 Tier 2 审批',
     auto_approve_enabled: 'T2 Auto: ON',
@@ -614,10 +652,10 @@ const I18N = {
     tool_tier3: 'Tier 3: 危險操作 — 需審批',
     tool_tier2: 'Tier 2: 互動操作',
     tool_tier1: 'Tier 1: 唯讀操作',
-    approval_title: '審批請求 — 工具呼叫需要你的授權',
-    approval_desc: 'AI 想要執行以下 Tier ',
-    approval_deny: '拒絕',
-    approval_approve: '同意執行',
+    approval_title: '操作確認',
+    approval_desc: '助手想執行以下操作：',
+    approval_deny: '取消',
+    approval_approve: '允許',
     approval_reason_placeholder: '拒絕理由（可選）',
     auto_approve_title: '自動通過 Tier 2 審批',
     auto_approve_enabled: 'T2 Auto: ON',
@@ -696,10 +734,10 @@ const I18N = {
     tool_tier3: 'Tier 3: Destructive — requires approval',
     tool_tier2: 'Tier 2: Interactive — user awareness needed',
     tool_tier1: 'Tier 1: Read-only',
-    approval_title: 'Approval Required — Tool call needs your authorization',
-    approval_desc: 'AI wants to execute this Tier ',
-    approval_deny: 'Deny',
-    approval_approve: 'Approve',
+    approval_title: 'Confirm Action',
+    approval_desc: 'The assistant wants to: ',
+    approval_deny: 'Cancel',
+    approval_approve: 'Allow',
     approval_reason_placeholder: 'Reason for denial (optional)',
     auto_approve_title: 'Auto-approve Tier 2',
     auto_approve_enabled: 'T2 Auto: ON',
@@ -847,6 +885,9 @@ function updateBridgeStatus(connected) {
   sendBtn.disabled = !connected;
   autoApproveBtn.style.display = connected ? 'inline-block' : 'none';
   updateAutoApproveBtnState();
+  // 一键连接信息栏的桥接器状态
+  const ri = document.getElementById('ri-bridge');
+  if (ri) { ri.innerHTML = connected ? '<span style="color:#2ecc71;">● 在线</span>' : '<span style="color:#888;">● 离线</span>'; }
 }
 
 function updateAutoApproveBtnState() {
@@ -871,6 +912,7 @@ function toggleAutoApprove() {
 function connect(room) {
   roomCode = room;
   roomDisplay.textContent = t('room_prefix') + room;
+  loadRoomConnect(room);  // 一键连接信息（信息栏 + 连接面板）
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = proto + '//' + location.host + '/ws/browser/' + room;
   setStatus('connecting');
@@ -937,6 +979,105 @@ async function loadHistory(room) {
   } catch (e) { console.error('loadHistory failed', e); }
 }
 
+// ===== 一键连接（信息栏 + 连接面板）=====
+let roomConnectData = null;
+let roomConnectTab = 'ps';
+
+async function loadRoomConnect(room) {
+  const bar = document.getElementById('room-info-bar');
+  if (!bar) return;
+  try {
+    const resp = await fetch('/api/room_connect/' + encodeURIComponent(room));
+    if (!resp.ok) return;
+    const d = await resp.json();
+    roomConnectData = d;
+    bar.style.display = 'flex';
+    document.getElementById('ri-code').textContent = d.room_code;
+    document.getElementById('ri-sn').textContent = d.sn || '-';
+    document.getElementById('ri-ticket').textContent = d.ticket_no || '-';
+    // 有效期显示（room_connect 返回 days_left）
+    const riVal = document.getElementById('ri-validity');
+    if (riVal) {
+      const dl = d.days_left;
+      if (dl === null || dl === undefined) riVal.innerHTML = '<span style="color:var(--text2);">永久</span>';
+      else if (dl < 0) riVal.innerHTML = '<span style="color:#e74c3c;font-weight:600;">已过期</span>';
+      else if (dl <= 3) riVal.innerHTML = '<span style="color:#e0a800;font-weight:600;">剩 ' + dl + ' 天</span>';
+      else riVal.innerHTML = '<span style="color:var(--text2);">剩 ' + dl + ' 天</span>';
+    }
+    document.getElementById('cp-meta').textContent = '标记: SN=' + (d.sn || '-') + ' · 工单=' + (d.ticket_no || '-') + ' · 创建人=' + d.engineer_username + ' · ' + (d.created_at || '');
+    if (new URLSearchParams(location.search).get('connect') === '1') toggleConnectPanel();
+  } catch (e) { console.error('loadRoomConnect failed', e); }
+}
+
+function toggleConnectPanel() {
+  const p = document.getElementById('connect-panel');
+  if (!p || !roomConnectData) return;
+  const show = p.style.display === 'none';
+  p.style.display = show ? 'block' : 'none';
+  if (show) renderConnectTab();
+}
+
+function cpTab(tab) {
+  roomConnectTab = tab;
+  document.querySelectorAll('.cp-tab').forEach(b => {
+    b.style.borderColor = b.dataset.tab === tab ? 'var(--info)' : 'var(--border)';
+  });
+  renderConnectTab();
+}
+
+function renderConnectTab() {
+  const pre = document.getElementById('cp-content');
+  const copy = document.getElementById('cp-copy');
+  if (!pre || !roomConnectData) return;
+  const c = roomConnectData.connect;
+  if (roomConnectTab === 'exe') {
+    // Windows：只需下载按钮（.bat 自动下载 exe + 连接），无需复制命令
+    pre.style.display = 'none';
+    copy.style.display = 'none';
+    const dl = document.getElementById('cp-dl-btn');
+    if (dl) {
+      dl.style.display = 'inline-block';
+      dl.href = '/api/room_bat/' + encodeURIComponent(roomConnectData.room_code);
+      dl.setAttribute('download', 'connect-' + roomConnectData.room_code + '.bat');
+      dl.textContent = '⬇️ 下载 一键连接.bat';
+    }
+    const note = document.getElementById('cp-dl-note');
+    if (note) note.style.display = 'inline';
+  } else {
+    pre.style.display = 'block';
+    copy.style.display = 'inline-block';
+    pre.textContent = roomConnectTab === 'ps' ? c.powershell : c.linux;
+    const dl = document.getElementById('cp-dl-btn');
+    if (dl) dl.style.display = 'none';
+    const note = document.getElementById('cp-dl-note');
+    if (note) note.style.display = 'none';
+  }
+}
+
+function cpCopy() {
+  const pre = document.getElementById('cp-content');
+  if (!pre || !pre.textContent) return;
+  const done = () => {
+    const b = document.getElementById('cp-copy');
+    b.textContent = '✅ 已复制';
+    setTimeout(() => { b.textContent = '📋 复制'; }, 1500);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(pre.textContent).then(done).catch(() => fallbackCopy(pre.textContent, done));
+  } else {
+    fallbackCopy(pre.textContent, done);
+  }
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) {}
+  document.body.removeChild(ta);
+}
+
 // 自动重连：指数退避，最多 5 次
 function scheduleReconnect() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -992,43 +1133,29 @@ function showApprovalDialog(msg) {
   pendingApprovalId = msg.id;
   approvalDeadline = Date.now() + (msg.timeout || 300) * 1000;
 
+  // 人话说明（后端 humanize_tool 生成；兜底用工具名）
+  const humanEl = document.getElementById('approval-human');
+  humanEl.textContent = msg.human_desc || (msg.tool || '执行操作');
+
+  // 命令详情默认折叠（想看的用户点开）
   document.getElementById('approval-tool').textContent = msg.tool;
-
-  // 确保 span#approval-tier 存在（applyLang 或 innerHTML 重建可能删除它）
-  let tierEl = document.getElementById('approval-tier');
-  if (!tierEl) {
-    const descEl = document.getElementById('approval-desc');
-    descEl.innerHTML = t('approval_desc') + '<span id="approval-tier"></span> ' + t('tool_tier' + (msg.tier || 2)) + ':';
-    tierEl = document.getElementById('approval-tier');
-  }
-  tierEl.textContent = 'T' + (msg.tier || 2);
-  tierEl.style.color = msg.tier === 3 ? 'var(--error)' : 'var(--warn)';
-
   const argsEl = document.getElementById('approval-args');
   argsEl.textContent = JSON.stringify(msg.args || {}, null, 2);
+  document.getElementById('approval-detail').style.display = 'none';
+  const toggleBtn = document.getElementById('approval-toggle-detail');
+  toggleBtn.textContent = '▸ 查看命令详情';
 
   document.getElementById('deny-reason').style.display = 'none';
   document.getElementById('deny-reason').value = '';
 
   approvalOverlay.style.display = 'flex';
   document.getElementById('approval-title').textContent = t('approval_title');
-  const descEl2 = document.getElementById('approval-desc');
-  descEl2.innerHTML = (t('approval_desc') + '<span id="approval-tier" style="color:' + (msg.tier === 3 ? 'var(--error)' : 'var(--warn)') + ';font-weight:700;">T' + (msg.tier || 2) + '</span> ' + t('tool_tier' + (msg.tier || 2)) + ':');
+  document.getElementById('approval-desc').textContent = t('approval_desc');
 
-  // Flash the page title to get user attention
+  // 温和的页面标题提示（不再闪烁 [!!!]）
   let originalTitle = document.title;
-  let count = 0;
-  const flashInterval = setInterval(function() {
-    document.title = (count % 2 === 0) ? '[!!!] ' + t('approval_title') : originalTitle;
-    count++;
-    if (count > 20 || pendingApprovalId === null) {
-      clearInterval(flashInterval);
-      document.title = originalTitle;
-    }
-  }, 500);
-
-  // Store for cleanup
-  approvalOverlay._flashInterval = flashInterval;
+  document.title = t('approval_title') + ' · ' + originalTitle;
+  setTimeout(function () { document.title = originalTitle; }, 3000);
   approvalOverlay._originalTitle = originalTitle;
 
   updateApprovalTimer();
@@ -1037,6 +1164,15 @@ function showApprovalDialog(msg) {
   // Show deny reason when hovering over deny button
   const denyBtn = document.querySelector('.btn-deny');
   denyBtn.onmouseenter = () => { document.getElementById('deny-reason').style.display = 'block'; };
+}
+
+// 折叠/展开命令详情
+function toggleApprovalDetail() {
+  const detail = document.getElementById('approval-detail');
+  const btn = document.getElementById('approval-toggle-detail');
+  const show = detail.style.display !== 'block';
+  detail.style.display = show ? 'block' : 'none';
+  btn.textContent = show ? '▾ 收起命令详情' : '▸ 查看命令详情';
 }
 
 function updateApprovalTimer() {

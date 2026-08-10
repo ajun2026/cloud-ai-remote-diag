@@ -14,7 +14,7 @@ import re
 import secrets
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -145,9 +145,11 @@ def init_db():
             ticket_no TEXT NOT NULL,
             machine_model TEXT DEFAULT '',
             engineer_username TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            expires_at TEXT DEFAULT NULL
         )
     """)
+    _ensure_column(conn, "rooms", "expires_at", "expires_at TEXT DEFAULT NULL")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_engineer ON rooms(engineer_username, created_at)")
     # 用户反馈表（测试反馈收集）
     conn.execute("""
@@ -1019,7 +1021,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.10.5")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.11.0")
 
 # ============================================================
 # Admin authentication — simple session cookie
@@ -1435,7 +1437,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.10.5"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.11.0"}
 
 
 @app.post("/api/debug_log")
@@ -1459,6 +1461,17 @@ async def create_room(request: Request):
     sn = (body.get("sn") or "").strip()
     ticket_no = (body.get("ticket_no") or "").strip()
     machine_model = (body.get("machine_model") or "").strip()
+    # 有效期：7 / 15 / 30 天，0=永久；默认 30 天（注意 0 是合法值，不能用 or 兜底）
+    vd_raw = body.get("validity_days")
+    if vd_raw is None or vd_raw == "":
+        validity_days = 30
+    else:
+        try:
+            validity_days = int(vd_raw)
+        except (TypeError, ValueError):
+            validity_days = 30
+    if validity_days not in (7, 15, 30, 0):
+        validity_days = 30
     if not sn:
         return JSONResponse({"error": "SN 序列号必填"}, status_code=400)
     if not ticket_no:
@@ -1472,12 +1485,13 @@ async def create_room(request: Request):
             break
     if not code:
         return JSONResponse({"error": "房间码生成失败，请重试"}, status_code=500)
+    expires_at = compute_expires_at(validity_days)
     rooms[code] = Room(code)
     try:
         conn = _db_connect()
         conn.execute(
-            "INSERT INTO rooms (room_code, sn, ticket_no, machine_model, engineer_username) VALUES (?, ?, ?, ?, ?)",
-            (code, sn, ticket_no, machine_model, user["username"]),
+            "INSERT INTO rooms (room_code, sn, ticket_no, machine_model, engineer_username, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (code, sn, ticket_no, machine_model, user["username"], expires_at),
         )
         conn.commit()
         conn.close()
@@ -1485,8 +1499,9 @@ async def create_room(request: Request):
         rooms.pop(code, None)
         run_logger.error(f"Room create DB error: {e}")
         return JSONResponse({"error": f"创建失败: {e}"}, status_code=500)
-    run_logger.info(f"Room created: {code} by {user['username']} (SN={sn}, ticket={ticket_no})")
-    return {"room_code": code, "sn": sn, "ticket_no": ticket_no, "machine_model": machine_model}
+    run_logger.info(f"Room created: {code} by {user['username']} (SN={sn}, ticket={ticket_no}, days={validity_days})")
+    return {"room_code": code, "sn": sn, "ticket_no": ticket_no, "machine_model": machine_model,
+            "expires_at": expires_at, "days_left": room_days_left(expires_at)}
 
 
 def room_record_exists(room_code: str) -> bool:
@@ -1495,6 +1510,49 @@ def room_record_exists(room_code: str) -> bool:
         row = conn.execute("SELECT 1 FROM rooms WHERE room_code = ?", (room_code,)).fetchone()
         conn.close()
         return row is not None
+    except Exception:
+        return False
+
+
+# ============================================================
+# 房间有效期（expires_at，NULL=永久）
+# ============================================================
+def compute_expires_at(validity_days: int):
+    """按有效天数计算过期时间（UTC）。validity_days<=0 → 永久(None)。"""
+    if not validity_days or validity_days <= 0:
+        return None
+    dt = datetime.now(timezone.utc) + timedelta(days=int(validity_days))
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def room_days_left(expires_at) -> Optional[int]:
+    """剩余天数（向上取整；负数=已过期；None=永久）。"""
+    if not expires_at:
+        return None
+    try:
+        exp = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        seconds = (exp - now).total_seconds()
+        import math
+        return math.ceil(seconds / 86400)
+    except Exception:
+        return None
+
+
+def room_expired(expires_at) -> bool:
+    dl = room_days_left(expires_at)
+    return dl is not None and dl < 0
+
+
+def room_expired_db(room_code: str) -> bool:
+    """查 DB 判断房间是否过期（连接/发消息前校验用）。"""
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT expires_at FROM rooms WHERE room_code = ?", (room_code,)).fetchone()
+        conn.close()
+        if not row:
+            return False
+        return room_expired(row["expires_at"])
     except Exception:
         return False
 
@@ -1534,6 +1592,8 @@ async def my_rooms(request: Request):
             "created_at": d["created_at"],
             "last_seen": last_seen,
             "bridge_online": bridge_online,
+            "expires_at": d.get("expires_at"),
+            "days_left": room_days_left(d.get("expires_at")),
             "browser_online": browser_online,
             "platform": (room.machine or {}).get("platform", "") if room else "",
             "status": "连接中" if bridge_online else "已断开",
@@ -1554,6 +1614,94 @@ async def check_room(request: Request, room_code: str):
 # ============================================================
 # Chat history API
 # ============================================================
+@app.get("/api/room_connect/{room_code}")
+async def room_connect(room_code: str, request: Request):
+    """一键连接信息：返回该房间预填的三种连接方式 + 房间标记信息。
+    仅房间所属工程师或管理员可获取（预填内容含房间凭证）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = room_code.upper()
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT * FROM rooms WHERE room_code = ?", (room_code,)).fetchone()
+        conn.close()
+    except Exception:
+        row = None
+    if not row:
+        return JSONResponse({"error": "房间不存在"}, status_code=404)
+    if user.get("role") != "admin" and row["engineer_username"] != user["username"]:
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+
+    public_url = get_public_url(request)
+    ps1_cmd = ('$env:BRIDGE_ROOM="' + room_code + '"; iex (iwr "' + public_url + '/static/bridge.ps1").Content')
+    bat = "@echo off\r\nbridge-win64.exe -room " + room_code + "\r\n"
+    linux_cmd = ("curl -sL \"" + public_url + "/static/install-linux.sh\" | bash -s -- " + room_code)
+
+    return {
+        "room_code": room_code,
+        "sn": row["sn"] or "",
+        "ticket_no": row["ticket_no"] or "",
+        "machine_model": row["machine_model"] or "",
+        "engineer_username": row["engineer_username"] or "",
+        "created_at": row["created_at"] or "",
+        "expires_at": row["expires_at"] if "expires_at" in row.keys() else None,
+        "days_left": room_days_left(row["expires_at"]) if "expires_at" in row.keys() else None,
+        "connect": {
+            "powershell": ps1_cmd,
+            "windows_bat": bat,
+            "linux": linux_cmd,
+        },
+        "downloads": {
+            "exe": public_url + "/static/bridge-win64.exe",
+            "ps1": public_url + "/static/bridge.ps1",
+            "linux_sh": public_url + "/static/install-linux.sh",
+        },
+    }
+
+
+@app.get("/api/room_bat/{room_code}")
+async def room_bat(room_code: str, request: Request):
+    """Windows 一键连接 .bat：单个文件，双击后自动下载 exe 并连接房间。
+    仅房间所属工程师或管理员可获取。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = room_code.upper()
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT engineer_username FROM rooms WHERE room_code = ?", (room_code,)).fetchone()
+        conn.close()
+    except Exception:
+        row = None
+    if not row:
+        return JSONResponse({"error": "房间不存在"}, status_code=404)
+    if user.get("role") != "admin" and row["engineer_username"] != user["username"]:
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+
+    public_url = get_public_url(request)
+    bat = ("@echo off\r\n"
+           "chcp 65001 >nul\r\n"
+           "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
+           "cd /d \"%~dp0\"\r\n"
+           "if not exist \"bridge-win64.exe\" (\r\n"
+           "    echo [1/2] First run: downloading bridge...\r\n"
+           "    curl -sL -o \"bridge-win64.exe\" \"" + public_url + "/static/bridge-win64.exe\"\r\n"
+           "    if errorlevel 1 (\r\n"
+           "        echo Download failed. Please check network and retry.\r\n"
+           "        pause\r\n"
+           "        exit /b 1\r\n"
+           "    )\r\n"
+           ")\r\n"
+           "echo [2/2] Connecting to room " + room_code + " ...\r\n"
+           "echo Keep this window open. Go back to the browser chat page.\r\n"
+           "echo.\r\n"
+           "\"bridge-win64.exe\" -room " + room_code + "\r\n"
+           "pause\r\n")
+    return Response(content=bat, media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="connect-{room_code}.bat"'})
+
+
 @app.get("/api/history/{room_code}")
 async def get_history(request: Request, room_code: str, limit: int = 200):
     """Get chat history for a room from SQLite.（登录用户可访问）"""
@@ -1644,7 +1792,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.10.5",
+        "version": "0.11.0",
     }
 
 
@@ -1824,7 +1972,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.10.5</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.11.0</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -2009,6 +2157,87 @@ setInterval(refresh, 15000);  // 每15秒自动刷新
 # ============================================================
 # Agent core — OpenAI-compatible tool calling loop with approval
 # ============================================================
+# ============================================================
+# 审批人话说明（T3 温和化：把工具调用翻译成用户看得懂的操作）
+# ============================================================
+TOOL_HUMAN = {
+    "run_systeminfo": "收集系统信息（操作系统 / 硬件 / 内存 / 网络）",
+    "run_dxdiag": "生成 DirectX 诊断报告（显卡 / 音频 / 驱动）",
+    "read_event_log": "读取系统事件日志",
+    "run_powershell": "执行 PowerShell 命令",
+    "GetSystemInfo": "获取系统信息",
+    "Snapshot": "截取屏幕画面",
+    "AnnotatedSnapshot": "截取屏幕画面（标注可点击元素）",
+    "GetClipboard": "读取剪贴板内容",
+    "SetClipboard": "写入剪贴板内容",
+    "Click": "模拟鼠标点击",
+    "Type": "模拟键盘输入",
+    "Move": "移动鼠标",
+    "Scroll": "滚动页面",
+    "Shortcut": "执行快捷键",
+    "Wait": "等待几秒",
+    "FocusWindow": "切换窗口",
+    "MinimizeAll": "最小化所有窗口",
+    "App": "启动 / 切换应用程序",
+    "ReconnectSession": "重新连接远程会话",
+    "Notification": "显示系统通知",
+    "PlaySound": "播放声音",
+    "LockScreen": "锁定屏幕",
+    "Shutdown": "关闭电脑",
+    "RunCommand": "执行命令",
+    "Shell": "执行命令",
+    "ListProcesses": "查看进程列表",
+    "KillProcess": "终止进程",
+    "FileRead": "读取文件",
+    "FileWrite": "写入 / 修改文件",
+    "FileList": "查看目录内容",
+    "FileSearch": "搜索文件",
+    "FileDownload": "下载文件",
+    "FileUpload": "上传文件",
+    "RegRead": "读取注册表",
+    "RegWrite": "写入注册表",
+    "ServiceList": "查看服务列表",
+    "ServiceStart": "启动服务",
+    "ServiceStop": "停止服务",
+    "TaskList": "查看计划任务",
+    "TaskCreate": "创建计划任务",
+    "TaskDelete": "删除计划任务",
+    "EventLog": "读取事件日志",
+    "Ping": "网络连通性测试",
+    "PortCheck": "检查端口连通性",
+    "NetConnections": "查看网络连接",
+    "OCR": "识别屏幕文字",
+    "ScreenRecord": "录制屏幕",
+    "Scrape": "抓取网页内容",
+    "CancelTask": "取消任务",
+    "GetTaskStatus": "查看任务状态",
+    "GetRunningTasks": "查看运行中的任务",
+}
+
+
+def humanize_tool(fn_name: str, fn_args: dict) -> str:
+    """把工具调用翻译成人话操作说明（供审批弹窗展示）。"""
+    name = fn_name or "工具"
+    base = TOOL_HUMAN.get(name, f"执行 {name} 操作")
+    if not isinstance(fn_args, dict):
+        return base
+    detail = ""
+    # 提取关键参数摘要（命令 / 路径 / 名称 / 目标）
+    if fn_args.get("command"):
+        detail = str(fn_args["command"])[:80]
+    elif fn_args.get("path"):
+        detail = str(fn_args["path"])
+    elif fn_args.get("name"):
+        detail = str(fn_args["name"])
+    elif fn_args.get("host"):
+        detail = str(fn_args["host"])
+    elif fn_args.get("text") and len(str(fn_args["text"])) <= 40:
+        detail = str(fn_args["text"])
+    if detail:
+        return f"{base}：{detail}"
+    return base
+
+
 async def request_approval(room: Room, fn_name: str, fn_args: dict, tier: int,
                             browser_ws: WebSocket, timeout: float = 300.0) -> tuple[bool, str]:
     """Request user approval for a Tier 2/3 tool. Returns (approved, reason).
@@ -2025,6 +2254,7 @@ async def request_approval(room: Room, fn_name: str, fn_args: dict, tier: int,
             "args": fn_args,
             "tier": tier,
             "timeout": timeout,
+            "human_desc": humanize_tool(fn_name, fn_args),
         })
         run_logger.info(f"[{room.code}] Sent approval_required for {fn_name} (tier {tier}), id={approval_id}")
 
@@ -3415,6 +3645,10 @@ async def ws_browser(websocket: WebSocket, room_code: str):
             msg_data = json.loads(raw)
 
             if msg_data.get("type") == "chat":
+                # 房间过期：禁止发新消息（历史可查看）
+                if room_expired_db(room_code):
+                    await websocket.send_json({"type": "error", "content": "房间已过期，仅可查看历史记录。如需继续诊断请创建新房间。"})
+                    continue
                 user_message = msg_data["content"]
                 # brain: deepseek（默认）| hermes —— 消息级覆盖环境变量 AGENT_BRAIN
                 brain = msg_data.get("brain") or AGENT_BRAIN
@@ -3536,6 +3770,13 @@ async def ws_browser(websocket: WebSocket, room_code: str):
 async def ws_bridge(websocket: WebSocket, room_code: str):
     await websocket.accept()
 
+    # 房间过期校验（每次连接都查 DB，不受内存缓存影响）：过期后禁止 bridge 连接
+    if room_expired_db(room_code):
+        run_logger.info(f"[bridge] rejected: room {room_code} expired")
+        await websocket.send_json({"type": "error", "content": "房间已过期，无法连接。如需继续诊断请创建新房间（历史记录仍可查看）。"})
+        await websocket.close()
+        return
+
     room = rooms.get(room_code)
     if not room:
         # 房间必须先在数据库中存在（工作台创建时绑定 SN/工单号）——防止绕过创建限制
@@ -3571,7 +3812,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.10.5+）：
+    # 服务器主动定期发业务 ping（v0.11.0+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -3696,7 +3937,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.10.5 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.11.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0)

@@ -85,6 +85,8 @@ echo -e "${GREEN}  已安装: $INSTALL_DIR/bridge ($(ls -la "$INSTALL_DIR/bridge
 # ---------- 4. 启动 ----------
 echo -e "${YELLOW}[4/4]${NC} 启动桥接器..."
 echo "----------------------------------------------"
+# 支持一键连接：bash -s -- 房间码（由房间页「连接你的电脑」生成）
+ROOM_ARG="${1:-}"
 echo -e "${GREEN}安装完成!${NC}"
 echo ""
 echo "  运行方式(一次性使用, 重启后手动启动即可):"
@@ -93,6 +95,12 @@ echo ""
 echo "  或指定服务器和房间码:"
 echo "   bridge -server {{WS_URL}} -room 房间码"
 echo ""
-echo "  现在为你启动交互模式, 请输入房间码:"
-echo "----------------------------------------------"
-exec "$INSTALL_DIR/bridge"
+if [ -n "$ROOM_ARG" ]; then
+  echo "  检测到房间码参数: $ROOM_ARG，直接连接..."
+  echo "----------------------------------------------"
+  exec "$INSTALL_DIR/bridge" -server {{WS_URL}} -room "$ROOM_ARG"
+else
+  echo "  现在为你启动交互模式, 请输入房间码:"
+  echo "----------------------------------------------"
+  exec "$INSTALL_DIR/bridge"
+fi

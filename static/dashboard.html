@@ -373,7 +373,7 @@
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
-      <div class="sidebar-footer">v0.10.5</div>
+      <div class="sidebar-footer">v0.11.0</div>
     </aside>
 
     <main class="content">
@@ -395,10 +395,22 @@
           </div>
         </div>
 
-        <div class="home-actions">
-          <button class="btn-main" data-i18n="nav_create" onclick="switchTab('create')">➕ 创建房间</button>
-          <button class="btn-main btn-green" data-i18n="nav_download" onclick="switchTab('download')">📦 下载桥接器</button>
-          <button class="btn-main" data-i18n="nav_tools_win" onclick="switchTab('tools-win')">🪟 Windows 工具</button>
+        <div class="home-section">
+          <div class="home-section-title">两种连接方式</div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;">
+            <div class="home-step" style="flex:1;min-width:280px;">
+              <span class="step-num" style="background:var(--info);">荐</span>
+              <div><b>方式一 · 房间专属一键连接</b>
+                <div class="step-desc">创建房间后，在「我的工单」点 <b>📶 连接</b> 或进入对话页点「📶 连接你的电脑」，直接获取该房间预填好房间码的一键命令 / 下载包——<b>复制即用、双击即连，无需再输入房间号</b></div>
+              </div>
+            </div>
+            <div class="home-step" style="flex:1;min-width:280px;">
+              <span class="step-num">2</span>
+              <div><b>方式二 · 传统方式</b>
+                <div class="step-desc">下载桥接器，在客户机上运行后<b>手动输入 8 位房间码</b>完成配对</div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -412,9 +424,9 @@
         </div>
         <table>
           <thead><tr>
-            <th data-i18n="th_room">房间码</th><th>SN</th><th data-i18n="th_model">型号</th><th data-i18n="th_ticket">工单号</th><th data-i18n="th_created">创建时间</th><th data-i18n="th_last">最后活动</th><th data-i18n="th_status">状态</th><th data-i18n="th_action">操作</th>
+            <th data-i18n="th_room">房间码</th><th>SN</th><th data-i18n="th_model">型号</th><th data-i18n="th_ticket">工单号</th><th data-i18n="th_created">创建时间</th><th data-i18n="th_last">最后活动</th><th data-i18n="th_status">状态</th><th>有效期</th><th data-i18n="th_action">操作</th>
           </tr></thead>
-          <tbody id="room-tbody"><tr><td colspan="8" class="empty" data-i18n="loading">加载中...</td></tr></tbody>
+          <tbody id="room-tbody"><tr><td colspan="9" class="empty" data-i18n="loading">加载中...</td></tr></tbody>
         </table>
       </section>
 
@@ -443,6 +455,7 @@
           <div class="field"><label data-i18n="lbl_sn">SN 序列号</label><input id="f-sn" data-i18n-placeholder="ph_sn" placeholder="如 PC204XF3"></div>
           <div class="field"><label data-i18n="lbl_ticket">报修工单号</label><input id="f-ticket" data-i18n-placeholder="ph_ticket" placeholder="如 202608063200477002"></div>
           <div class="field"><label data-i18n="lbl_model">机器型号（选填）</label><input id="f-model" data-i18n-placeholder="ph_model" placeholder="如 ThinkPad X1 Carbon"></div>
+          <div class="field"><label>有效期</label><select id="f-validity" style="width:100%;padding:9px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;"><option value="30" selected>30 天</option><option value="15">15 天</option><option value="7">7 天</option><option value="0">永久</option></select><div style="font-size:12px;color:var(--text2);margin-top:4px;">过期后房间只读（历史保留），管理员可见全部记录</div></div>
           <button class="btn-main" id="create-btn" data-i18n="btn_create" onclick="createRoom()">创建房间</button>
           <div class="room-result" id="room-result">
             <div class="tip" data-i18n="room_ok_tip">房间创建成功，请让客户电脑运行桥接器并输入房间码</div>
@@ -469,6 +482,7 @@
       <section class="page" id="page-download">
         <div class="page-title"><span data-i18n="nav_download">下载桥接器</span></div>
         <div class="page-desc" data-i18n="dl_desc">在需要诊断的电脑上运行桥接器，输入房间码完成配对</div>
+        <div style="margin:8px 0 14px;padding:8px 12px;background:var(--surface2);border:1px dashed var(--info);border-radius:6px;font-size:13px;color:var(--info);">💡 创建房间后可在「我的工单 → 📶 连接」或对话页获取<b>房间专属一键连接</b>（预填房间码，无需再输入）</div>
         <div class="dl-steps">
           <span class="s"><span class="num">1</span><span data-i18n="dl_step1">安装桥接器</span></span>
           <span class="arrow">→</span>
@@ -1458,8 +1472,13 @@ function openChat(room) {
   document.getElementById('chat-frame-wrap').style.display = 'block';
   document.getElementById('chat-empty').style.display = 'none';
   document.getElementById('chat-room-tag').textContent = t('room_prefix') + room;
-  document.getElementById('chat-frame').src = '/chat?room=' + room;
+  document.getElementById('chat-frame').src = '/chat?room=' + room + '&connect=1';
   switchTab('chat');
+}
+
+// 一键连接：打开对话页并自动展开连接面板（openChat 已带 connect=1）
+function connectRoom(room) {
+  openChat(room);
 }
 
 // 供对话页 iframe 内「← 工作台」按钮调用（同源父窗口访问）
@@ -1490,6 +1509,7 @@ async function createRoom() {
   const sn = document.getElementById('f-sn').value.trim();
   const ticket = document.getElementById('f-ticket').value.trim();
   const model = document.getElementById('f-model').value.trim();
+  const validity = parseInt(document.getElementById('f-validity').value || '30', 10);
   const msg = document.getElementById('create-msg');
   msg.className = 'msg-box';
   if (!sn) { msg.textContent = t('need_sn'); msg.className = 'msg-box err'; return; }
@@ -1500,7 +1520,7 @@ async function createRoom() {
     const resp = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sn, ticket_no: ticket, machine_model: model }),
+      body: JSON.stringify({ sn, ticket_no: ticket, machine_model: model, validity_days: validity }),
     });
     const data = await resp.json();
     if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; btn.disabled = false; btn.textContent = t('btn_create'); return; }
@@ -1541,7 +1561,7 @@ async function loadRooms() {
     allRooms = data.rooms || [];
     renderRooms();
   } catch (e) {
-    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="8" class="empty">' + t('load_fail') + ': ' + e.message + '</td></tr>';
+    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="9" class="empty">' + t('load_fail') + ': ' + e.message + '</td></tr>';
   }
 }
 
@@ -1554,7 +1574,7 @@ function renderRooms() {
     || r.room_code.toLowerCase().includes(kw));
   document.getElementById('room-count').textContent = t('count_prefix') + list.length + t('count_suffix');
   if (!list.length) {
-    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="8" class="empty">' + t('empty_rooms') + '</td></tr>';
+    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="9" class="empty">' + t('empty_rooms') + '</td></tr>';
     return;
   }
   document.getElementById('room-tbody').innerHTML = list.map(r => {
@@ -1567,13 +1587,23 @@ function renderRooms() {
       + '<td>' + (r.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td>' + (r.last_seen || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td>' + st + '</td>'
+      + '<td>' + validityBadge(r.days_left) + '</td>'
       + '<td><div class="row-actions">'
       + '<button class="btn-sm" onclick="openChat(\'' + r.room_code + '\')">' + t('enter_chat') + '</button>'
+      + '<button class="btn-sm" onclick="connectRoom(\'' + r.room_code + '\')" title="一键连接">📶 连接</button>'
       + '<button class="btn-sm" onclick="viewHistory(\'' + r.room_code + '\')">' + t('view_history') + '</button>'
       + '<button class="btn-sm" onclick="exportRoom(\'' + r.room_code + '\')">' + t('export_record') + '</button>'
       + '</div></td>'
       + '</tr>';
   }).join('');
+}
+
+// 有效期显示：剩余天数（黄=快过期，红=已过期，灰=永久）
+function validityBadge(daysLeft) {
+  if (daysLeft === null || daysLeft === undefined) return '<span style="color:var(--text2);">永久</span>';
+  if (daysLeft < 0) return '<span style="color:#e74c3c;font-weight:600;">已过期</span>';
+  if (daysLeft <= 3) return '<span style="color:#e0a800;font-weight:600;">剩 ' + daysLeft + ' 天</span>';
+  return '<span style="color:var(--text2);">剩 ' + daysLeft + ' 天</span>';
 }
 
 // ===== 修改密码 =====
