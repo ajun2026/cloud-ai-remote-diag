@@ -1,3 +1,17 @@
+## v0.10.4 — 2026-08-10（连接保活 + API 超时优化）
+
+### 修复
+
+- **bridge 40s 断线循环（PowerShell 命令版）**：uvicorn 协议级 ping（20s）+ .NET Framework ClientWebSocket 自动 pong 不可靠 → 服务器 ping 超时断开；已禁用 uvicorn 协议 ping，改为**服务器主动发业务 ping**（每 25s），bridge 显式回 pong 并触发 piggy-back JSON 心跳，连接保持稳定
+- **bridge.ps1 接收侧大消息**：`MaxReceiveBufferSize` 调至 4MB（.NET 默认 64KB 限制整条消息，命令结果 >64KB 即断开），与发送侧分帧配合，双向兼容大消息
+- **LLM 调用 90s 硬超时**：deepseek 通道 API 调用加 asyncio.wait_for(90s) + 3 次重试——网关拥堵/半响应时快速失败提示用户重试，避免干等 5 分钟（Hermes 通道保持 330s，其审批等待在调用内）
+
+### 版本号
+
+v0.10.3 → v0.10.4（server.py 5 处 + dashboard.html 1 处）
+
+---
+
 ## v0.10.3 — 2026-08-10（bridge.ps1 分帧修复 + 历史 401 友好提示）
 
 ### 修复

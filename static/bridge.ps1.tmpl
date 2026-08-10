@@ -303,6 +303,10 @@ function Run-Bridge {
     param($Uri)
     $script:ws = New-Object System.Net.WebSockets.ClientWebSocket
     $script:ws.Options.KeepAliveInterval = [TimeSpan]::FromSeconds(25)
+    # 关键：.NET Framework 默认 MaxReceiveBufferSize=64KB，服务器发来的大命令结果
+    # （单帧 >64KB，如进程列表/系统信息）会导致"特定协议操作的数据格式无效"断开；
+    # Go bridge 无此限制所以正常。调大到 4MB 兼容大消息（与发送侧分帧配合，双向兼容）。
+    $script:ws.Options.MaxReceiveBufferSize = 4194304
     [void]($script:ws.ConnectAsync($Uri, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult())
     Write-Host "Connected. Waiting for server..." -ForegroundColor Green
     Write-Audit "connected to $Uri"
