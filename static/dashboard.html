@@ -373,7 +373,7 @@
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
-      <div class="sidebar-footer">v0.10.0</div>
+      <div class="sidebar-footer">v0.10.1</div>
     </aside>
 
     <main class="content">
@@ -496,7 +496,7 @@
             </div>
             <div class="dl-card-desc" data-i18n="dl_card_ps_desc">管理员 PowerShell 粘贴一行命令即连接。不下载文件、不落盘，杀毒软件友好。</div>
             <div class="dl-card-actions">
-              <div class="dl-cmd-block"><span class="dl-cmd-text">iex (New-Object Net.WebClient).DownloadString("http://106.54.193.9:8000/static/bridge.ps1")</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+              <div class="dl-cmd-block"><span class="dl-cmd-text">iex (New-Object Net.WebClient).DownloadString("{{PUBLIC_URL}}/static/bridge.ps1")</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
               <details class="dl-more">
                 <summary data-i18n="dl_more_steps">查看详细步骤</summary>
                 <div class="dl-guide">
@@ -507,7 +507,7 @@
                   <div class="dl-step">
                     <div class="dl-step-title"><span class="num">2</span><span data-i18n="dl_ps_step2_t">粘贴命令</span></div>
                     <div data-i18n="dl_ps_step2_d">回车后按提示输入 8 位房间码</div>
-                    <div class="dl-step-note" data-i18n="dl_ps_step2_note">免交互（把 ABC12345 换成你的房间码）：<span class="dl-cmd-text">$env:BRIDGE_ROOM = "ABC12345"; iex (New-Object Net.WebClient).DownloadString("http://106.54.193.9:8000/static/bridge.ps1")</span></div>
+                    <div class="dl-step-note" data-i18n="dl_ps_step2_note">免交互（把 ABC12345 换成你的房间码）：<span class="dl-cmd-text">$env:BRIDGE_ROOM = "ABC12345"; iex (New-Object Net.WebClient).DownloadString("{{PUBLIC_URL}}/static/bridge.ps1")</span></div>
                   </div>
                   <div class="dl-step">
                     <div class="dl-step-title"><span class="num">3</span><span data-i18n="dl_ps_step3_t">完成配对</span></div>
@@ -526,7 +526,7 @@
             <div class="dl-card-desc" data-i18n="dl_card_linux_desc">Ubuntu / UOS / KOS / 麒麟 / 龙芯等发行版通用，一条命令安装。</div>
             <div class="dl-card-actions">
               <a class="dl-btn" href="/static/bridge-linux-amd64" download data-i18n="dl_card_linux_btn">⬇ 下载 x86_64 桥接器</a>
-              <div class="dl-cmd-block"><span class="dl-cmd-text">curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+              <div class="dl-cmd-block"><span class="dl-cmd-text">curl -sL {{PUBLIC_URL}}/static/install-linux.sh | bash</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
               <div class="dl-card-note" data-i18n="dl_card_linux_note">仅支持 x86_64 架构；ARM64 / 龙芯版本制作中</div>
               <details class="dl-more">
                 <summary data-i18n="dl_linux_more">查看安装说明</summary>
@@ -542,7 +542,7 @@
                     <div data-i18n="dl_linux_way2_d2">② 放入系统目录（任意目录也可，这里以 /usr/local/bin 为例）：</div>
                     <div class="dl-cmd-block"><span class="dl-cmd-text">sudo mv bridge-linux-amd64 /usr/local/bin/bridge</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
                     <div data-i18n="dl_linux_way2_d3">③ 启动（把 ABC12345 换成你的房间码）：</div>
-                    <div class="dl-cmd-block"><span class="dl-cmd-text">bridge -server ws://106.54.193.9:8000 -room ABC12345</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+                    <div class="dl-cmd-block"><span class="dl-cmd-text">bridge -server {{WS_URL}} -room ABC12345</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
                   </div>
                   <div class="dl-step">
                     <div class="dl-step-title"><span class="num">3</span><span data-i18n="dl_linux_way3_t">完成配对</span></div>
@@ -1700,8 +1700,7 @@ async function resetPwd(username) {
 }
 
 // ===== 历史记录（只读查看 + 导出） =====
-function escapeHtml(str) {
-  return String(str == null ? '' : str)
+function escapeHtml(str) {  return String(str == null ? '' : str)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }

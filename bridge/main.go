@@ -1,12 +1,12 @@
 // clouddiag-bridge — 云端AI远程运维助手 · 透明管道化桥接器
 //
 // 设计原则（v2 管道化）：
-//   1. 单一职责：只做「命令管道 + 文件通道」，把服务器的命令送进本地 shell，
-//      把结果送回来。不内置任何业务工具。
-//   2. 平台无关：同一份代码交叉编译出 Windows / Linux / macOS 版本。
-//   3. 透明可审计：本地日志记录每一条执行过的命令；控制台显示连接状态；
-//      不静默后台、不请求管理员权限、不自启动。
-//   4. 行为面最小：能靠执行命令实现的能力，一律不内置。
+//  1. 单一职责：只做「命令管道 + 文件通道」，把服务器的命令送进本地 shell，
+//     把结果送回来。不内置任何业务工具。
+//  2. 平台无关：同一份代码交叉编译出 Windows / Linux / macOS 版本。
+//  3. 透明可审计：本地日志记录每一条执行过的命令；控制台显示连接状态；
+//     不静默后台、不请求管理员权限、不自启动。
+//  4. 行为面最小：能靠执行命令实现的能力，一律不内置。
 package main
 
 import (
@@ -34,8 +34,29 @@ type ClientInfo struct {
 	LocalIP  string `json:"local_ip"`
 	Username string `json:"username"`
 	Version  string `json:"version"`
-	Bridge   string `json:"bridge"` // "go-pipe"
+	Bridge   string `json:"bridge"`   // "go-pipe"
 	IsAdmin  bool   `json:"is_admin"` // 当前是否以管理员权限运行
+}
+
+// normalizeServerURL 容错处理用户输入的服务器地址：
+//
+//	http://host:port  → ws://host:port
+//	https://host:port → wss://host:port
+//	host:port（无协议）→ ws://host:port
+//	ws:// / wss:// 原样保留
+func normalizeServerURL(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimRight(s, "/")
+	switch {
+	case strings.HasPrefix(s, "http://"):
+		return "ws://" + strings.TrimPrefix(s, "http://")
+	case strings.HasPrefix(s, "https://"):
+		return "wss://" + strings.TrimPrefix(s, "https://")
+	case strings.HasPrefix(s, "ws://"), strings.HasPrefix(s, "wss://"):
+		return s
+	default:
+		return "ws://" + s
+	}
 }
 
 func main() {
@@ -47,6 +68,18 @@ func main() {
 	flag.BoolVar(&noElevate, "no-elevate", false, "禁止自动提权（特殊情况用，默认双击自动提权）")
 	flag.BoolVar(&elevated, "elevated", false, "内部标志：已处于提权后的进程")
 	flag.Parse()
+	// 统一规范化服务器地址（交互输入与命令行参数都容错 http:// / 漏协议）
+	serverURL = normalizeServerURL(serverURL)
+
+	// 默认服务器地址：内置部署服务器，可用环境变量 CLOUDDIAG_SERVER 覆盖
+	const defaultServer = "ws://124.221.188.3:8000"
+	if serverURL == "" || serverURL == "ws://localhost:8000" {
+		if env := os.Getenv("CLOUDDIAG_SERVER"); env != "" {
+			serverURL = normalizeServerURL(env)
+		} else {
+			serverURL = defaultServer
+		}
+	}
 
 	// 交互模式：双击运行 / 未提供房间码时，引导用户输入
 	// 而不是直接报错退出（避免"闪退"）
@@ -55,21 +88,9 @@ func main() {
 		fmt.Println("==============================================")
 		fmt.Println(" 云端AI远程运维助手 · 桥接器 v" + Version)
 		fmt.Println("----------------------------------------------")
-		fmt.Println(" 未检测到房间码，请输入连接信息：")
-		fmt.Println("")
-
-		if serverURL == "ws://localhost:8000" || flag.NFlag() == 0 {
-			fmt.Print(" 服务器地址 [回车默认 ws://106.54.193.9:8000]: ")
-			input, _ := reader.ReadString('\n')
-			input = strings.TrimSpace(input)
-			if input != "" {
-				serverURL = input
-			} else {
-				serverURL = "ws://106.54.193.9:8000"
-			}
-		}
-
-		fmt.Print(" 房间码 (6位, 例如 MUJRWQ): ")
+		fmt.Printf(" 服务器: %s\n", serverURL)
+		fmt.Println("----------------------------------------------")
+		fmt.Print(" 房间码 (8位, 例如 ABC12345): ")
 		room, _ := reader.ReadString('\n')
 		room = strings.TrimSpace(strings.ToUpper(room))
 		if room == "" {

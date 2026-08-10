@@ -21,7 +21,7 @@ from typing import Optional
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
@@ -264,9 +264,6 @@ def get_recent_context(room_code: str, current_user_msg: str, max_msgs: int = 20
     # 最后一条 user 消息刚被保存、还没回复——跳过，避免与本次 user_message 重复
     if pairs and pairs[-1]["role"] == "user" and pairs[-1]["content"] == current_user_msg:
         pairs = pairs[:-1]
-    # 内部存储 role "ai"，API 边界映射为标准 role（OpenAI 规范只认 system/user/assistant/tool）。
-    # 修前：原样透传 "ai" → Hermes 通道静默丢弃（AI 记不住自己说过的话）、
-    #       DeepSeek 严格校验通道直接 400（第二次对话必挂）。
     ctx = [{"role": "assistant" if r["role"] == "ai" else r["role"], "content": (r["content"] or "")[:max_chars]} for r in pairs]
     return ctx[-max_msgs:]
 
@@ -1018,7 +1015,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.10.0")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.10.1")
 
 # ============================================================
 # Admin authentication — simple session cookie
@@ -1335,14 +1332,60 @@ async def admin_delete_room(request: Request):
 static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(exist_ok=True)
 
-# bridge.ps1 必须按文本返回：Linux 的 mimetypes 不认识 .ps1，StaticFiles 会把它当
-# application/octet-stream，PowerShell 5.1 的 iwr 因此把 .Content 当作 Byte[]，
-# iex 报 "无法将 System.Byte[] 转换..."（2026-08-09 真机实测踩坑）。
+
+def get_public_url(request: Request) -> str:
+    """部署地址：.env 的 PUBLIC_URL 优先，未配置则从请求 Host 自动推导。
+    仓库保持零硬编码，任何服务器部署无需改代码。"""
+    configured = os.getenv("PUBLIC_URL", "").strip().rstrip("/")
+    if configured:
+        return configured
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    return f"{scheme}://{request.headers.get('host', 'localhost:8000')}"
+
+
+def get_ws_url(request: Request) -> str:
+    """由 public_url 推导 WebSocket 地址（http→ws, https→wss）。"""
+    return get_public_url(request).replace("https://", "wss://").replace("http://", "ws://")
+
+
+# 脚本类文件（bridge.ps1 / install-linux.sh）动态渲染：
+# 模板以 {{PUBLIC_URL}} 占位，下载时由服务器注入实际部署地址，
+# 保证任何服务器部署下载到的脚本自带正确地址，仓库本身零硬编码。
 # ⚠️ 必须注册在 app.mount("/static", ...) 之前——Mount 是前缀匹配，
 #    先注册的 mount 会吞掉 /static/* 全部请求，路由永远不生效。
+_SCRIPT_TEMPLATES = {
+    "bridge.ps1": "text/plain; charset=utf-8",
+    "install-linux.sh": "text/x-shellscript; charset=utf-8",
+}
+
+
+async def _render_script(script_name: str, request: Request) -> Response:
+    """渲染脚本模板：{{PUBLIC_URL}} / {{WS_URL}} 由服务器注入实际部署地址。"""
+    tpl_path = static_dir / f"{script_name}.tmpl"
+    if not tpl_path.exists():
+        return JSONResponse({"error": f"template {script_name}.tmpl missing"}, status_code=500)
+    content = tpl_path.read_text(encoding="utf-8")
+    content = content.replace("{{PUBLIC_URL}}", get_public_url(request)).replace("{{WS_URL}}", get_ws_url(request))
+    return Response(content=content, media_type=_SCRIPT_TEMPLATES[script_name])
+
+
+# ⚠️ 必须用精确路径（不能 /static/{script_name} 通用路由）——通用路由会拦截
+#    mount("/static") 下的全部静态资源（exe 等），导致下载 404。
 @app.api_route("/static/bridge.ps1", methods=["GET", "HEAD"], include_in_schema=False)
-async def bridge_ps1_script():
-    return FileResponse(static_dir / "bridge.ps1", media_type="text/plain; charset=utf-8")
+async def static_bridge_ps1(request: Request):
+    return await _render_script("bridge.ps1", request)
+
+
+@app.api_route("/static/install-linux.sh", methods=["GET", "HEAD"], include_in_schema=False)
+async def static_install_linux(request: Request):
+    return await _render_script("install-linux.sh", request)
+
+
+@app.get("/api/config", include_in_schema=False)
+async def api_config(request: Request):
+    """部署配置：前端动态获取服务器地址，避免硬编码。"""
+    return {"public_url": get_public_url(request), "ws_url": get_ws_url(request)}
+
 
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -1355,37 +1398,40 @@ async def root(request: Request):
     return RedirectResponse(url="/dashboard")
 
 
-def _html_file(name: str, no_cache: bool = True) -> HTMLResponse:
-    """读取 static 下的页面文件。"""
+def _html_file(name: str, request: Request = None, no_cache: bool = True) -> HTMLResponse:
+    """读取 static 下的页面文件，支持 {{PUBLIC_URL}} / {{WS_URL}} 模板注入（部署地址动态化）。"""
     html_path = static_dir / name
     if html_path.exists():
         headers = {"Cache-Control": "no-cache, no-store, must-revalidate"} if no_cache else None
-        return HTMLResponse(html_path.read_text(encoding="utf-8"), headers=headers)
+        content = html_path.read_text(encoding="utf-8")
+        if request is not None:
+            content = content.replace("{{PUBLIC_URL}}", get_public_url(request)).replace("{{WS_URL}}", get_ws_url(request))
+        return HTMLResponse(content, headers=headers)
     return HTMLResponse(f"<h1>Missing static/{name}</h1>")
 
 
 @app.get("/login")
-async def login_page():
-    return _html_file("login.html")
+async def login_page(request: Request):
+    return _html_file("login.html", request)
 
 
 @app.get("/dashboard")
 async def dashboard_page(request: Request):
     if not _require_user(request):
         return RedirectResponse(url="/login")
-    return _html_file("dashboard.html")
+    return _html_file("dashboard.html", request)
 
 
 @app.get("/chat")
 async def chat_page(request: Request):
     if not _require_user(request):
         return RedirectResponse(url="/login")
-    return _html_file("index.html")
+    return _html_file("index.html", request)
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.10.0"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.10.1"}
 
 
 @app.post("/api/debug_log")
@@ -1585,7 +1631,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.10.0",
+        "version": "0.10.1",
     }
 
 
@@ -1765,7 +1811,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.10.0</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.10.1</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -3614,6 +3660,6 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.10.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.10.1 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info")
