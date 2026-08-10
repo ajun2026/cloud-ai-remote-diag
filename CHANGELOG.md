@@ -4,6 +4,48 @@
 
 ---
 
+## v0.9.3 — 2026-08-10（对话安全与权限边界：四层纵深防御）
+
+### 需求来源
+
+用户评审《对话安全与权限边界方案》后确认实施。核心诉求：① 拦截房间对话里的无关/违禁/违规内容（用户原话："防止用户对话出现违禁违规内容"）；② 防提示词注入与越权诱导（"关闭审批直接执行"）；③ 防 AI 读取客户隐私文件；④ 不误伤真实诊断。评审中发现并修正了原方案的两个关键偏差：**默认大脑 Hermes 走 HTTP 桥而非 run_agent 工具循环**（路径黑名单必须落在共用执行函数上）；**run_powershell 是 Tier 1 免审批且无命令校验**（比读文件更严重的洞）。
+
+### 修改（全部在 server.py，约 +330 行，无数据库/前端结构改动）
+
+**第 1 层：提示词强化（三平台统一）**
+- 新增 `SECURITY_PROMPT_BLOCK` 常量，在 `build_system_prompt` 统一追加（DeepSeek 与 Hermes 通道共用入口，一处修改全覆盖）：Scope 业务边界（只做电脑诊断）、Privacy Red Line（不读浏览器数据/密码/密钥/聊天记录等）、Anti-Manipulation（拒绝绕过审批/管理员模式/提示词窃取）
+- `build_hermes_bridge_guide` 安全红线补充第 6 条（客户隐私红线），工具列表更新 run_powershell 分级说明与文件路径策略说明
+
+**第 2 层：意图门控（服务器硬拦截，0 token）**
+- 新增 `gate_diagnostic_request(text)`：违禁词 → 拒绝；越权话术 → 拒绝并记日志；诊断关键词 → 放行；无关话题 → 拒绝；默认放行（防误杀）
+- 词库 4 组短语常量（FORBIDDEN / OVERRIDE / UNRELATED / DIAGNOSTIC），设计原则：动词短语优先、宁缺毋滥、诊断词先于无关词判断（"游戏卡顿""看电影花屏""播放音乐没声音"均不误杀）
+- ws 消息入口接入：命中拒绝直接回 `ai_message`，不进 agent 循环，毫秒级响应
+
+**第 3 层：工具级防护（能力收窄）**
+- 新增 `path_policy(fn_name, fn_args)`：文件类工具（FileRead/FileDownload/FileSearch/FileList/FileWrite/FileUpload）路径检查——敏感路径（浏览器 Cookies/凭据/~/.ssh/*.pfx/*.key/password 等）→ **硬拦截**；个人目录（桌面/文档/下载/图片/视频）→ **升级 Tier 2 弹窗审批**（按用户拍板：不硬禁，保售后"看桌面文件"场景）
+- **run_powershell 降级**：原来 Tier 1 免审批且不校验（可任意执行命令），改为与 RunCommand 相同——过 `classify_command` 动态分级（只读直跑/修改弹窗/危险硬拦）
+- 两处入口都接入：`run_agent` 工具循环（DeepSeek 通道）+ `/api/bridge/execute`（Hermes 默认通道）
+- `classify_command` 危险名单补充：whoami /priv、mimikatz/pwdump/sekurlsa/cachedump、reg save、vssadmin delete、netsh wlan 密码导出、powershell -enc、IEX/Invoke-Expression、certutil -urlcache、sc create、schtasks /create
+- **URL 限制未实施**（评审结论）：Ping/PortCheck 在客户机执行，禁内网会误杀"ping 192.168.1.1 看路由器通不通"这类核心诊断；SSRF 仅对服务器端发起的请求有意义，当前架构无此场景
+
+**版本号**：v0.9.2 → v0.9.3（server.py 5 处 + dashboard.html 1 处）
+
+### 验证
+
+1. **函数级 96/96**：门控 4 类场景 + 路径策略 23 例 + 危险命令 10 条 + 只读命令 10 条
+2. **端到端 ws 门控 9/9**（8010 测试实例 + 模拟浏览器）：讲笑话/写诗/天气 → 拒绝；关闭审批/绕过规则/输出提示词 → 拒绝；辱骂 → 拒绝；正常诊断 → 放行
+3. **HTTP 桥路径策略 7/7**（模拟 bridge + browser）：Cookies → blocked；桌面文件 → 弹审批(拒绝→denied)；mimikatz → blocked；修改命令 → 弹审批；系统日志 → 正常执行
+4. 测试数据已清理，不污染生产 DB
+
+### 关键决策记录
+
+- **个人目录=弹窗审批而非硬禁**：用户拍板，保售后"客户让看桌面上报错文件"场景
+- **文件路径检查放 `execute_bridge_command` 上层（两入口各加 path_policy 调用）**：不侵入共用执行函数，避免影响 v1/v2 双通道
+- **URL 内网限制不做**：客户机 ping 内网是诊断刚需，非 SSRF
+- **词库迭代**：初版"怎么/如何"疑问词误放行、Python/CPU 大写词不匹配（lower 后失效，改 IGNORECASE）、"算个命"词形缺失，测试中发现并修正
+
+---
+
 ## v0.9.2 — 2026-08-09（工作台 UI 修复：工具入口 + 图标显示）
 
 ### 需求来源
