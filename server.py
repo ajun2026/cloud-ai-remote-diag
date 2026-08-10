@@ -254,7 +254,10 @@ def get_recent_context(room_code: str, current_user_msg: str, max_msgs: int = 20
     # 最后一条 user 消息刚被保存、还没回复——跳过，避免与本次 user_message 重复
     if pairs and pairs[-1]["role"] == "user" and pairs[-1]["content"] == current_user_msg:
         pairs = pairs[:-1]
-    ctx = [{"role": r["role"], "content": (r["content"] or "")[:max_chars]} for r in pairs]
+    # 内部存储 role "ai"，API 边界映射为标准 role（OpenAI 规范只认 system/user/assistant/tool）。
+    # 修前：原样透传 "ai" → Hermes 通道静默丢弃（AI 记不住自己说过的话）、
+    #       DeepSeek 严格校验通道直接 400（第二次对话必挂）。
+    ctx = [{"role": "assistant" if r["role"] == "ai" else r["role"], "content": (r["content"] or "")[:max_chars]} for r in pairs]
     return ctx[-max_msgs:]
 
 def get_all_rooms() -> list[dict]:
@@ -1005,7 +1008,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.9.3")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.9.4")
 
 # ============================================================
 # Admin authentication — simple session cookie
@@ -1309,7 +1312,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.9.3"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.9.4"}
 
 
 @app.post("/api/debug_log")
@@ -1509,7 +1512,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.9.3",
+        "version": "0.9.4",
     }
 
 
@@ -1689,7 +1692,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.9.3</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.9.4</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -3511,6 +3514,6 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.9.3 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.9.4 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info")
