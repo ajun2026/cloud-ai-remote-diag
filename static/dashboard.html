@@ -369,10 +369,11 @@
         <div class="nav-item" onclick="switchTab('tools-linux')"><span data-i18n="nav_tools_linux">🐧 Linux 工具</span></div>
         <div class="nav-divider"></div>
         <div class="nav-item" onclick="switchTab('password')"><span data-i18n="nav_password">🔒 修改密码</span></div>
+        <div class="nav-item" onclick="switchTab('feedback')"><span data-i18n="nav_feedback">📝 反馈</span></div>
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
-      <div class="sidebar-footer">v0.9.4</div>
+      <div class="sidebar-footer">v0.10.0</div>
     </aside>
 
     <main class="content">
@@ -810,6 +811,21 @@
         </table>
       </section>
 
+      <!-- 反馈 -->
+      <section class="page" id="page-feedback">
+        <div class="page-title"><span data-i18n="nav_feedback">反馈</span></div>
+        <div class="page-desc" data-i18n="fb_desc">把测试中发现的问题或建议告诉我们</div>
+        <div class="panel">
+          <div class="msg-box" id="fb-msg"></div>
+          <textarea id="fb-content" rows="5" data-i18n-placeholder="fb_placeholder" placeholder="请描述您遇到的问题或建议…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:12px;"></textarea>
+          <button class="btn-main" data-i18n="fb_submit" onclick="submitFeedback()">提交反馈</button>
+        </div>
+        <div class="panel">
+          <div style="font-weight:600;margin-bottom:10px;" data-i18n="fb_history">我的反馈记录</div>
+          <div id="fb-history" style="font-size:13px;color:var(--text2);"></div>
+        </div>
+      </section>
+
     </main>
   </div>
 </div>
@@ -879,7 +895,8 @@
 const I18N = {
   'zh-CN': {
     nav_workorders: '📋 我的工单', nav_chat: '💬 对话', nav_create: '➕ 创建房间', nav_join: '⇄ 加入房间',
-    nav_download: '📦 下载桥接器', nav_tools: '🔧 工具模式', nav_password: '🔒 修改密码', nav_users: '👥 账号管理', nav_admin: '🛠 管理后台',
+    nav_download: '📦 下载桥接器', nav_tools: '🔧 工具模式', nav_password: '🔒 修改密码', nav_users: '👥 账号管理', nav_admin: '🛠 管理后台', nav_feedback: '📝 反馈',
+    fb_desc: '把测试中发现的问题或建议告诉我们', fb_placeholder: '请描述您遇到的问题或建议（如：诊断结果不准确、页面报错、希望增加的功能…）', fb_submit: '提交反馈', fb_success: '反馈已提交，感谢您的建议！', fb_need: '请填写反馈内容', fb_empty: '暂无反馈记录', fb_history: '我的反馈记录',
     nav_home: '🏠 首页',
     home_sub: '远程诊断 Windows 电脑问题 · 无需到现场',
     home_howto: '快速上手',
@@ -1049,7 +1066,8 @@ const I18N = {
   },
   'zh-TW': {
     nav_workorders: '📋 我的工單', nav_chat: '💬 對話', nav_create: '➕ 創建房間', nav_join: '⇄ 加入房間',
-    nav_download: '📦 下載橋接器', nav_tools: '🔧 工具模式', nav_password: '🔒 修改密碼', nav_users: '👥 帳號管理', nav_admin: '🛠 管理後台',
+    nav_download: '📦 下載橋接器', nav_tools: '🔧 工具模式', nav_password: '🔒 修改密碼', nav_users: '👥 帳號管理', nav_admin: '🛠 管理後台', nav_feedback: '📝 回饋',
+    fb_desc: '把測試中發現的問題或建議告訴我們', fb_placeholder: '請描述您遇到的問題或建議（如：診斷結果不準確、頁面報錯、希望增加的功能…）', fb_submit: '提交回饋', fb_success: '回饋已提交，感謝您的建議！', fb_need: '請填寫回饋內容', fb_empty: '暫無回饋記錄', fb_history: '我的回饋記錄',
     nav_home: '🏠 首頁',
     home_sub: '遠程診斷 Windows 電腦問題 · 無需到現場',
     home_howto: '快速上手',
@@ -1219,7 +1237,8 @@ const I18N = {
   },
   'en': {
     nav_workorders: '📋 Work Orders', nav_chat: '💬 Chat', nav_create: '➕ Create Room', nav_join: '⇄ Join Room',
-    nav_download: '📦 Download Bridge', nav_tools: '🔧 Tool Mode', nav_password: '🔒 Change Password', nav_users: '👥 Accounts', nav_admin: '🛠 Admin Console',
+    nav_download: '📦 Download Bridge', nav_tools: '🔧 Tool Mode', nav_password: '🔒 Change Password', nav_users: '👥 Accounts', nav_admin: '🛠 Admin Console', nav_feedback: '📝 Feedback',
+    fb_desc: 'Tell us issues or suggestions found during testing', fb_placeholder: 'Describe the issue or suggestion (e.g. inaccurate diagnosis, page error, feature request...)', fb_submit: 'Submit', fb_success: 'Feedback submitted. Thank you!', fb_need: 'Please enter feedback content', fb_empty: 'No feedback yet', fb_history: 'My Feedback',
     nav_home: '🏠 Home',
     home_sub: 'Remotely diagnose Windows PC issues · No on-site visit needed',
     home_howto: 'Quick Start',
@@ -1427,6 +1446,7 @@ function switchTab(name) {
   if (nav) nav.classList.add('active');
   if (name === 'workorders') loadRooms();
   if (name === 'users') loadUsers();
+  if (name === 'feedback') loadMyFeedbacks();
   // 工具模式依赖桥接器在线状态：每次进入都重新拉取房间列表，避免用页面加载时的旧快照
   if (name === 'tools-win') loadRooms().then(() => initTools());
   if (name === 'tools-linux') loadRooms().then(() => initLinuxTools());
@@ -1684,6 +1704,41 @@ function escapeHtml(str) {
   return String(str == null ? '' : str)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ===== 反馈 =====
+async function submitFeedback() {
+  const msg = document.getElementById('fb-msg');
+  const content = document.getElementById('fb-content').value.trim();
+  if (!content) { msg.textContent = t('fb_need'); msg.className = 'msg-box err'; return; }
+  try {
+    const resp = await fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
+    const d = await resp.json();
+    if (d.ok) {
+      msg.textContent = t('fb_success'); msg.className = 'msg-box ok';
+      document.getElementById('fb-content').value = '';
+      loadMyFeedbacks();
+      setTimeout(() => { msg.className = 'msg-box'; }, 4000);
+    } else {
+      msg.textContent = d.error || t('op_fail'); msg.className = 'msg-box err';
+    }
+  } catch (e) { msg.textContent = t('net_err') + ': ' + e.message; msg.className = 'msg-box err'; }
+}
+async function loadMyFeedbacks() {
+  const box = document.getElementById('fb-history');
+  if (!box) return;
+  box.innerHTML = '<span class="empty" data-i18n="loading">加载中...</span>';
+  try {
+    const resp = await fetch('/api/feedback/my');
+    const d = await resp.json();
+    const list = d.feedbacks || [];
+    if (!list.length) { box.innerHTML = '<div data-i18n="fb_empty">暂无反馈记录</div>'; return; }
+    box.innerHTML = list.map(f =>
+      '<div style="padding:10px 0;border-bottom:1px solid var(--border);">'
+      + '<div style="color:var(--text2);font-size:12px;">' + escapeHtml(f.created_at) + '</div>'
+      + '<div style="margin-top:4px;white-space:pre-wrap;color:var(--text);">' + escapeHtml(f.content) + '</div>'
+      + '</div>').join('');
+  } catch (e) { box.innerHTML = t('net_err'); }
 }
 
 async function viewHistory(room) {

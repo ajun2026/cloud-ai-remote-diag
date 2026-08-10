@@ -149,6 +149,16 @@ def init_db():
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_engineer ON rooms(engineer_username, created_at)")
+    # 用户反馈表（测试反馈收集）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedbacks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,               -- 提交人工号
+            content TEXT NOT NULL,                -- 反馈内容
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_feedbacks_user ON feedbacks(username, id)")
     conn.commit()
     conn.close()
     seed_users()
@@ -1008,7 +1018,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.9.4")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.10.0")
 
 # ============================================================
 # Admin authentication — simple session cookie
@@ -1224,6 +1234,69 @@ async def admin_reset_password(request: Request, username: str):
     return {"ok": True, "username": username}
 
 
+@app.post("/api/feedback")
+async def submit_feedback(request: Request):
+    """提交反馈（需登录）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    content = (body.get("content") or "").strip()
+    if not content:
+        return JSONResponse({"error": "反馈内容不能为空"}, status_code=400)
+    if len(content) > 2000:
+        return JSONResponse({"error": "反馈内容过长（最多 2000 字）"}, status_code=400)
+    try:
+        conn = _db_connect()
+        conn.execute("INSERT INTO feedbacks (username, content) VALUES (?, ?)", (user["username"], content))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"[feedback] DB error: {e}")
+        return JSONResponse({"error": f"保存失败: {e}"}, status_code=500)
+    run_logger.info(f"[feedback] {user['username']} 提交反馈: {content[:80]}")
+    return {"ok": True}
+
+
+@app.get("/api/feedback/my")
+async def my_feedbacks(request: Request):
+    """当前用户自己的反馈记录。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            "SELECT id, content, created_at FROM feedbacks WHERE username=? ORDER BY id DESC LIMIT 20",
+            (user["username"],),
+        ).fetchall()
+        conn.close()
+        return {"feedbacks": [dict(r) for r in rows]}
+    except Exception as e:
+        run_logger.error(f"[feedback] my query error: {e}")
+        return {"feedbacks": []}
+
+
+@app.get("/api/admin/feedbacks")
+async def admin_feedbacks(request: Request):
+    """管理员查看全部反馈。"""
+    if not _require_admin(request):
+        return JSONResponse({"error": "未授权"}, status_code=401)
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            "SELECT id, username, content, created_at FROM feedbacks ORDER BY id DESC LIMIT 500"
+        ).fetchall()
+        conn.close()
+        return {"feedbacks": [dict(r) for r in rows]}
+    except Exception as e:
+        run_logger.error(f"[feedback] admin query error: {e}")
+        return {"feedbacks": []}
+
+
 @app.post("/api/admin/delete_room")
 async def admin_delete_room(request: Request):
     """Delete a room's chat history (and approvals) from SQLite."""
@@ -1312,7 +1385,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.9.4"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.10.0"}
 
 
 @app.post("/api/debug_log")
@@ -1512,7 +1585,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.9.4",
+        "version": "0.10.0",
     }
 
 
@@ -1692,7 +1765,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.9.4</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.10.0</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -1718,6 +1791,12 @@ def _generate_admin_html():
   <tbody></tbody>
 </table>
 
+<h2>用户反馈</h2>
+<table id="feedbacks-table">
+  <thead><tr><th>ID</th><th>工号</th><th>内容</th><th>时间</th></tr></thead>
+  <tbody><tr><td colspan="4" style="color:var(--text2);">加载中...</td></tr></tbody>
+</table>
+
 <h2>服务器日志</h2>
 <div class="log-tabs">
   <button class="btn-primary" id="tab-server" onclick="loadLog('server.log')">server.log</button>
@@ -1727,6 +1806,7 @@ def _generate_admin_html():
 <pre id="log-container">点击上方标签加载日志...</pre>
 
 <script>
+function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 async function refresh() {
   const resp = await fetch('/api/admin/stats');
   const data = await resp.json();
@@ -1771,6 +1851,26 @@ async function refresh() {
       + '&nbsp;|&nbsp;<a href="#" onclick="deleteRoom(\'' + r.room_code + '\')" style="color:var(--error)">删除</a></td>'
       + '</tr>';
   }
+
+  // 用户反馈
+  try {
+    const resp3 = await fetch('/api/admin/feedbacks');
+    const fbData = await resp3.json();
+    const ftbody = document.querySelector('#feedbacks-table tbody');
+    const list = fbData.feedbacks || [];
+    if (!list.length) { ftbody.innerHTML = '<tr><td colspan="4" style="color:var(--text2);">暂无反馈</td></tr>'; }
+    else {
+      ftbody.innerHTML = '';
+      for (const f of list) {
+        ftbody.innerHTML += '<tr>'
+          + '<td>' + f.id + '</td>'
+          + '<td><strong>' + esc(f.username) + '</strong></td>'
+          + '<td style="max-width:520px;white-space:pre-wrap;">' + esc(f.content) + '</td>'
+          + '<td>' + f.created_at + '</td>'
+          + '</tr>';
+      }
+    }
+  } catch (e) {}
 }
 
 async function viewRoom(code) {
@@ -3514,6 +3614,6 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.9.4 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.10.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info")
