@@ -414,7 +414,7 @@
           </div>
           <div class="dl-cmd">
             <span class="dl-copy" onclick="copyLinuxCmd(this)" data-i18n="dl_copy">复制</span>
-            <span id="linux-cmd-text">curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span>
+            <span id="linux-cmd-text">curl -sL {{PUBLIC_URL}}/static/install-linux.sh | bash</span>
           </div>
           <a class="dl-toggle" onclick="toggleLinuxHelp()" data-i18n="dl_linux_toggle">[+] Linux 安装教程</a>
           <div class="dl-help" id="linux-help" data-i18n-html="dl_linux_help"></div>
@@ -513,9 +513,9 @@ const I18N = {
       + '<tr><td>aarch64</td><td>ARM64</td></tr>'
       + '<tr><td>loongarch64</td><td>龙芯</td></tr></table></div>'
       + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">2</span>方式一：一键安装（自动识别架构）</div>'
-      + '<span class="dl-cmd-block">curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span></div>'
+      + '<span class="dl-cmd-block">curl -sL {{PUBLIC_URL}}/static/install-linux.sh | bash</span></div>'
       + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">3</span>方式二：手动安装（以 x86_64 为例）</div>'
-      + '<span class="dl-cmd-block">wget http://106.54.193.9:8000/static/bridge-linux-amd64\nchmod +x bridge-linux-amd64\n./bridge-linux-amd64</span>'
+      + '<span class="dl-cmd-block">wget {{PUBLIC_URL}}/static/bridge-linux-amd64\nchmod +x bridge-linux-amd64\n./bridge-linux-amd64</span>'
       + '<div class="dl-step-note">按上方按钮下载对应架构的版本即可</div></div>'
       + '<div class="dl-step"><div class="dl-step-title"><span class="num">4</span>输入房间码</div>'
       + '<span class="dl-cmd-block">启动后输入上方房间码，回车即连接</span></div>'
@@ -595,9 +595,9 @@ const I18N = {
       + '<tr><td>aarch64</td><td>ARM64</td></tr>'
       + '<tr><td>loongarch64</td><td>龍芯</td></tr></table></div>'
       + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">2</span>方式一：一鍵安裝（自動識別架構）</div>'
-      + '<span class="dl-cmd-block">curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span></div>'
+      + '<span class="dl-cmd-block">curl -sL {{PUBLIC_URL}}/static/install-linux.sh | bash</span></div>'
       + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">3</span>方式二：手動安裝（以 x86_64 為例）</div>'
-      + '<span class="dl-cmd-block">wget http://106.54.193.9:8000/static/bridge-linux-amd64\nchmod +x bridge-linux-amd64\n./bridge-linux-amd64</span>'
+      + '<span class="dl-cmd-block">wget {{PUBLIC_URL}}/static/bridge-linux-amd64\nchmod +x bridge-linux-amd64\n./bridge-linux-amd64</span>'
       + '<div class="dl-step-note">按上方按鈕下載對應架構的版本即可</div></div>'
       + '<div class="dl-step"><div class="dl-step-title"><span class="num">4</span>輸入房間碼</div>'
       + '<span class="dl-cmd-block">啟動後輸入上方房間碼，回車即連接</span></div>'
@@ -677,9 +677,9 @@ const I18N = {
       + '<tr><td>aarch64</td><td>ARM64 build</td></tr>'
       + '<tr><td>loongarch64</td><td>LoongArch build</td></tr></table></div>'
       + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">2</span>Option A: One-command install (auto-detect arch)</div>'
-      + '<span class="dl-cmd-block">curl -sL http://106.54.193.9:8000/static/install-linux.sh | bash</span></div>'
+      + '<span class="dl-cmd-block">curl -sL {{PUBLIC_URL}}/static/install-linux.sh | bash</span></div>'
       + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">3</span>Option B: Manual install (x86_64 example)</div>'
-      + '<span class="dl-cmd-block">wget http://106.54.193.9:8000/static/bridge-linux-amd64\nchmod +x bridge-linux-amd64\n./bridge-linux-amd64</span>'
+      + '<span class="dl-cmd-block">wget {{PUBLIC_URL}}/static/bridge-linux-amd64\nchmod +x bridge-linux-amd64\n./bridge-linux-amd64</span>'
       + '<div class="dl-step-note">Or use the architecture buttons above to download the right build</div></div>'
       + '<div class="dl-step"><div class="dl-step-title"><span class="num">4</span>Enter the room code</div>'
       + '<span class="dl-cmd-block">After launching, enter the room code above and press Enter</span></div>'
@@ -922,6 +922,7 @@ function goBackToWorkbench() {
 async function loadHistory(room) {
   try {
     const resp = await fetch('/api/history/' + room);
+    if (resp.status === 401) { addSystemMsg('登录已过期，请重新登录后查看历史记录'); return; }
     if (!resp.ok) { addSystemMsg('(历史加载失败: HTTP ' + resp.status + ')'); return; }
     const data = await resp.json();
     messagesEl.innerHTML = '';

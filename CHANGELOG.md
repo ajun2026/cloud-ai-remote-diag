@@ -1,3 +1,17 @@
+## v0.10.3 — 2026-08-10（bridge.ps1 分帧修复 + 历史 401 友好提示）
+
+### 修复
+
+- **bridge.ps1 大消息协议错误**：.NET Framework ClientWebSocket 一次 SendAsync 发送大消息（文件块 base64 JSON ~350KB）会抛"特定协议操作的数据格式无效"→ 改为分帧发送（≤32KB/帧，EndOfMessage 收尾），文件上传/下载恢复稳定
+- **历史加载 401 友好提示**：登录会话过期时显示"登录已过期，请重新登录后查看历史记录"，替代生硬的 HTTP 401 提示
+- **补齐脚本模板文件**：仓库新增 `static/bridge.ps1.tmpl` / `static/install-linux.sh.tmpl`（部署地址动态化模板，随 server.py 渲染机制生效），移除同名原始硬编码文件
+
+### 版本号
+
+v0.10.2 → v0.10.3（server.py 5 处 + dashboard.html 1 处）
+
+---
+
 ## v0.10.2 — 2026-08-10（管理后台显示工程师信息）
 
 ### 修改
