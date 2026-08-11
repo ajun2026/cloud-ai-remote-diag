@@ -1021,7 +1021,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.11.0")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.11.1")
 
 # ============================================================
 # Admin authentication — simple session cookie
@@ -1437,7 +1437,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.11.0"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.11.1"}
 
 
 @app.post("/api/debug_log")
@@ -1684,14 +1684,12 @@ async def room_bat(room_code: str, request: Request):
            "chcp 65001 >nul\r\n"
            "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
            "cd /d \"%~dp0\"\r\n"
-           "if not exist \"bridge-win64.exe\" (\r\n"
-           "    echo [1/2] First run: downloading bridge...\r\n"
-           "    curl -sL -o \"bridge-win64.exe\" \"" + public_url + "/static/bridge-win64.exe\"\r\n"
-           "    if errorlevel 1 (\r\n"
-           "        echo Download failed. Please check network and retry.\r\n"
-           "        pause\r\n"
-           "        exit /b 1\r\n"
-           "    )\r\n"
+           "echo [1/2] Downloading latest bridge...\r\n"
+           "curl -sL -o \"bridge-win64.exe\" \"" + public_url + "/static/bridge-win64.exe\"\r\n"
+           "if errorlevel 1 (\r\n"
+           "    echo Download failed. Please check network and retry.\r\n"
+           "    pause\r\n"
+           "    exit /b 1\r\n"
            ")\r\n"
            "echo [2/2] Connecting to room " + room_code + " ...\r\n"
            "echo Keep this window open. Go back to the browser chat page.\r\n"
@@ -1792,7 +1790,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.11.0",
+        "version": "0.11.1",
     }
 
 
@@ -1972,7 +1970,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.11.0</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.11.1</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -3812,7 +3810,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.11.0+）：
+    # 服务器主动定期发业务 ping（v0.11.1+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -3937,7 +3935,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.11.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.11.1 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0)
