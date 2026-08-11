@@ -72,7 +72,7 @@ func main() {
 	serverURL = normalizeServerURL(serverURL)
 
 	// 默认服务器地址：内置部署服务器，可用环境变量 CLOUDDIAG_SERVER 覆盖
-	const defaultServer = "ws://124.221.188.3:8000"
+	const defaultServer = "wss://clouddiag.online"
 	if serverURL == "" || serverURL == "ws://localhost:8000" {
 		if env := os.Getenv("CLOUDDIAG_SERVER"); env != "" {
 			serverURL = normalizeServerURL(env)

@@ -1021,7 +1021,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.11.1")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.11.2")
 
 # ============================================================
 # Admin authentication — simple session cookie
@@ -1437,7 +1437,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.11.1"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.11.2"}
 
 
 @app.post("/api/debug_log")
@@ -1694,7 +1694,7 @@ async def room_bat(room_code: str, request: Request):
            "echo [2/2] Connecting to room " + room_code + " ...\r\n"
            "echo Keep this window open. Go back to the browser chat page.\r\n"
            "echo.\r\n"
-           "\"bridge-win64.exe\" -room " + room_code + "\r\n"
+           "\"bridge-win64.exe\" -server " + get_ws_url(request) + " -room " + room_code + "\r\n"
            "pause\r\n")
     return Response(content=bat, media_type="text/plain; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="connect-{room_code}.bat"'})
@@ -1790,7 +1790,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.11.1",
+        "version": "0.11.2",
     }
 
 
@@ -1970,7 +1970,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.11.1</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.11.2</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -3789,7 +3789,12 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     reason = "unknown"  # 断开原因（finally 中记录，需在 try 前初始化）
 
     room.bridge_ws = websocket
-    room.remote_ip = websocket.client.host if hasattr(websocket.client, 'host') else ""
+    # 客户端 IP：反代后优先 X-Forwarded-For（Caddy 本机转发，websocket.client 会是 127.0.0.1）
+    try:
+        xff = websocket.headers.get("x-forwarded-for", "")
+        room.remote_ip = xff.split(",")[0].strip() if xff else (websocket.client.host if hasattr(websocket.client, 'host') else "")
+    except Exception:
+        room.remote_ip = websocket.client.host if hasattr(websocket.client, 'host') else ""
     room.bridge_connect_count += 1
     room.last_heartbeat = datetime.now(timezone.utc)
     run_logger.info(f"[bridge] joined room {room_code} (ip={room.remote_ip}, connect#{room.bridge_connect_count})")
@@ -3810,7 +3815,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.11.1+）：
+    # 服务器主动定期发业务 ping（v0.11.2+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -3935,7 +3940,8 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.11.1 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.11.2 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
-                ws_ping_interval=0, ws_ping_timeout=0)
+                ws_ping_interval=0, ws_ping_timeout=0,
+                proxy_headers=True, forwarded_allow_ips="127.0.0.1")

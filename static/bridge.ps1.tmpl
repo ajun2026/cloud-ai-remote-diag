@@ -1,6 +1,6 @@
 # ============================================================================
 #  Cloud AI Remote Diagnostics - PowerShell Bridge (ps-pipe)
-#  Version 1.1.1 (raw WebSocket layer, big-endian fix)
+#  Version 1.2.0 (wss/TLS support)
 #
 #  A file-less PowerShell client that connects to the cloud server and
 #  executes diagnostic commands on this Windows PC - no .exe needed.
@@ -14,7 +14,7 @@
 #
 #    3) Download to local file, then run:
 #         powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345
-#         powershell -ExecutionPolicy Bypass -File bridge.ps1 -Server ws://10.0.0.5:8000 -Room ABC12345
+#         powershell -ExecutionPolicy Bypass -File bridge.ps1 -Server wss://clouddiag.online -Room ABC12345
 #
 #  Requirements: Windows PowerShell 5.1+ (built-in), .NET 4.5+
 #  Note: keep the window open while diagnosing. The bridge auto-reconnects.
@@ -25,7 +25,7 @@ param(
     [string]$Room   = $env:BRIDGE_ROOM
 )
 
-$Version   = "1.1.1"
+$Version   = "1.2.0"
 $ServerUrl = if ($Server) { $Server } else { "{{WS_URL}}" }
 $script:ws = $null
 $script:exiting = $false
@@ -84,11 +84,18 @@ function Read-Exact {
 
 function Ws-Connect {
     param($Uri)
-    if ($Uri.Scheme -ne "ws") { throw "Only ws:// is supported (got: $($Uri.Scheme))" }
+    $isTls = $Uri.Scheme -eq "wss"
+    if (-not $isTls -and $Uri.Scheme -ne "ws") { throw "Only ws:// or wss:// is supported (got: $($Uri.Scheme))" }
     $tcp = New-Object System.Net.Sockets.TcpClient
     $tcp.NoDelay = $true
     $tcp.Connect($Uri.Host, $Uri.Port)
     $stream = $tcp.GetStream()
+    if ($isTls) {
+        # TLS 1.2 handshake (wss). Default cert validation (Let's Encrypt CA is trusted).
+        $ssl = New-Object System.Net.Security.SslStream($stream, $false)
+        $ssl.AuthenticateAsClient($Uri.Host, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+        $stream = $ssl
+    }
     $rng = New-Object byte[] 16
     (New-Object System.Random).NextBytes($rng)
     $key = [Convert]::ToBase64String($rng)

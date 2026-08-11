@@ -1,3 +1,27 @@
+## v0.11.2 — 2026-08-11（HTTPS/WSS 全站加密）
+
+### 新增：HTTPS 部署（clouddiag.online）
+
+- 域名 clouddiag.online（腾讯云）DNS A 记录 → 124.221.188.3
+- Caddy 反代 + Let's Encrypt 免费证书（90 天自动续期），HTTP 308 跳转 HTTPS
+- 旧 IP 80 端口缓冲器：提示页引导用户到新地址
+- 公网 8000 端口关闭（安全组），全站强制 HTTPS
+
+### 适配：全链路 wss
+
+- **ps1 v1.2.0**：手写 WS 层支持 wss（TLS 1.2 握手 + 证书校验）
+- **Go bridge**：默认服务器改为 wss://clouddiag.online（main.go），四架构重新编译部署（win64/amd64/arm64/loong64）
+- **bridge.py**：SERVER_URL 改为 wss://clouddiag.online
+- **一键连接 .bat**：增加 -server {{WS_URL}} 参数（模板注入，多服务器部署自动指向各自地址）
+- **服务器 X-Forwarded-For**：uvicorn proxy_headers + ws_bridge 读取 XFF，反代后客户端真实 IP 记录不丢失
+- 文档地址更新：使用说明/账号清单 → https://clouddiag.online
+
+### 版本号
+
+v0.11.1 → v0.11.2（server.py + dashboard.html）
+
+---
+
 ## v0.11.1 — 2026-08-11（Windows 一键连接 .bat 强制更新 exe）
 
 ### 修复
