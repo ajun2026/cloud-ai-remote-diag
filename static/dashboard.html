@@ -373,7 +373,7 @@
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
-      <div class="sidebar-footer">v0.11.2</div>
+      <div class="sidebar-footer">v0.12.0</div>
     </aside>
 
     <main class="content">
@@ -1578,7 +1578,12 @@ function renderRooms() {
     return;
   }
   document.getElementById('room-tbody').innerHTML = list.map(r => {
-    const st = r.bridge_online ? '<span class="status on">' + t('status_on') + '</span>' : '<span class="status off">' + t('status_off') + '</span>';
+    // 状态：房间状态优先（归档/闲置），否则连接状态
+    let stHtml;
+    if (r.status === 'archived') stHtml = '<span class="status off">已归档</span>';
+    else if (r.status === 'idle') stHtml = '<span class="status off" style="color:#888;">已闲置</span>';
+    else if (r.bridge_online) stHtml = '<span class="status on">连接中</span>';
+    else stHtml = '<span class="status off">已断开</span>';
     return '<tr>'
       + '<td class="mono">' + r.room_code + '</td>'
       + '<td>' + r.sn + '</td>'
@@ -1586,7 +1591,7 @@ function renderRooms() {
       + '<td>' + r.ticket_no + '</td>'
       + '<td>' + (r.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td>' + (r.last_seen || '').replace('T', ' ').slice(0, 16) + '</td>'
-      + '<td>' + st + '</td>'
+      + '<td>' + stHtml + '</td>'
       + '<td>' + validityBadge(r.days_left) + '</td>'
       + '<td><div class="row-actions">'
       + '<button class="btn-sm" onclick="openChat(\'' + r.room_code + '\')">' + t('enter_chat') + '</button>'

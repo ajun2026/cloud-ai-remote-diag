@@ -384,7 +384,10 @@
     <span>工单: <span id="ri-ticket"></span></span>
     <span>桥接器: <span id="ri-bridge">--</span></span>
     <span>有效期: <span id="ri-validity">--</span></span>
-    <button id="connect-toggle" onclick="toggleConnectPanel()" style="margin-left:auto;padding:3px 10px;font-size:12px;background:var(--surface);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;">📶 连接你的电脑</button>
+    <span>房间状态: <span id="ri-status">--</span></span>
+    <span style="flex:1;"></span>
+    <button id="connect-toggle" onclick="toggleConnectPanel()" style="padding:3px 10px;font-size:12px;background:var(--surface);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;">📶 连接你的电脑</button>
+    <button id="room-close-btn" onclick="closeRoom()" style="padding:3px 10px;font-size:12px;background:var(--surface);color:var(--error);border:1px solid var(--error);border-radius:4px;cursor:pointer;">⛔ 结束诊断</button>
   </div>
 
   <div id="connect-panel" style="display:none;padding:12px 14px;background:var(--surface2);border-bottom:1px solid var(--border);font-size:13px;">
@@ -456,6 +459,18 @@
           <div class="dl-help" id="linux-help" data-i18n-html="dl_linux_help"></div>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- 会话空闲提醒（30min 无操作 → 60s 倒计时 → 自动登出） -->
+<div id="idle-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);display:none;justify-content:center;align-items:center;z-index:9998;">
+  <div style="background:var(--surface);border:1px solid var(--info);border-radius:14px;padding:24px;width:380px;max-width:95vw;box-shadow:0 8px 40px rgba(0,0,0,0.35);">
+    <h3 style="margin:0 0 8px;color:var(--text);font-size:18px;">⏰ 会话空闲提醒</h3>
+    <p style="font-size:13px;color:var(--text2);margin:0 0 16px;">页面已空闲 30 分钟，<b id="idle-count" style="color:var(--warn);">60</b> 秒后自动退出登录</p>
+    <div style="display:flex;gap:10px;">
+      <button onclick="continueSession()" style="flex:1;padding:10px;border:none;border-radius:8px;background:var(--info);color:#fff;font-size:14px;font-weight:600;cursor:pointer;">继续使用</button>
+      <button onclick="forceLogout()" style="flex:1;padding:10px;border:none;border-radius:8px;background:var(--surface2);color:var(--text2);font-size:14px;font-weight:600;cursor:pointer;">立即退出</button>
     </div>
   </div>
 </div>
@@ -1004,6 +1019,22 @@ async function loadRoomConnect(room) {
       else if (dl <= 3) riVal.innerHTML = '<span style="color:#e0a800;font-weight:600;">剩 ' + dl + ' 天</span>';
       else riVal.innerHTML = '<span style="color:var(--text2);">剩 ' + dl + ' 天</span>';
     }
+    // 房间状态显示（room_connect 返回 status）
+    const riStatus = document.getElementById('ri-status');
+    if (riStatus) {
+      const st = d.status || 'active';
+      if (st === 'idle') { riStatus.innerHTML = '<span style="color:#888;">已闲置（可恢复）</span>'; }
+      else if (st === 'archived') { riStatus.innerHTML = '<span style="color:#e74c3c;font-weight:600;">已归档（只读）</span>'; }
+      else { riStatus.innerHTML = '<span style="color:#2ecc71;">诊断中</span>'; }
+      // 归档房间：只读（禁用发送）
+      const sendBtn = document.getElementById('send-btn');
+      const inputBox = document.getElementById('input-box');
+      if (st === 'archived' && sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.title = '房间已归档，仅可查看历史';
+        if (inputBox) inputBox.placeholder = '房间已归档，仅可查看历史记录';
+      }
+    }
     document.getElementById('cp-meta').textContent = '标记: SN=' + (d.sn || '-') + ' · 工单=' + (d.ticket_no || '-') + ' · 创建人=' + d.engineer_username + ' · ' + (d.created_at || '');
     if (new URLSearchParams(location.search).get('connect') === '1') toggleConnectPanel();
   } catch (e) { console.error('loadRoomConnect failed', e); }
@@ -1078,6 +1109,67 @@ function fallbackCopy(text, done) {
   document.body.removeChild(ta);
 }
 
+// ===== 结束诊断（一键关闭：令牌作废 + 房间归档 + 断开桥接器）=====
+async function closeRoom() {
+  if (!roomCode) return;
+  if (!confirm('结束诊断后：桥接器将断开、房间关闭、历史封存（仅管理员可查看）。\n确定结束诊断吗？')) return;
+  try {
+    const resp = await fetch('/api/room_close/' + encodeURIComponent(roomCode), { method: 'POST' });
+    if (resp.ok) {
+      alert('房间已结束诊断');
+      location.href = '/dashboard';
+    } else {
+      const d = await resp.json().catch(() => ({}));
+      alert('操作失败: ' + (d.error || resp.status));
+    }
+  } catch (e) { alert('网络错误: ' + e.message); }
+}
+
+// ===== 会话空闲检测（30min 无操作 → 60s 倒计时 → 自动登出）=====
+let idleTimer = null;
+let idleCountdown = null;
+const IDLE_LIMIT_MS = 30 * 60 * 1000;
+
+function resetIdleTimer() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(showIdleWarning, IDLE_LIMIT_MS);
+}
+
+function showIdleWarning() {
+  const ov = document.getElementById('idle-overlay');
+  if (!ov) return;
+  ov.style.display = 'flex';
+  let remaining = 60;
+  const count = document.getElementById('idle-count');
+  if (count) count.textContent = remaining;
+  clearInterval(idleCountdown);
+  idleCountdown = setInterval(() => {
+    remaining--;
+    if (count) count.textContent = remaining;
+    if (remaining <= 0) { clearInterval(idleCountdown); forceLogout(); }
+  }, 1000);
+}
+
+function continueSession() {
+  clearInterval(idleCountdown);
+  const ov = document.getElementById('idle-overlay');
+  if (ov) ov.style.display = 'none';
+  resetIdleTimer();
+}
+
+async function forceLogout() {
+  clearInterval(idleCountdown);
+  try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+  location.href = '/login';
+}
+
+// 用户交互重置空闲计时
+['mousemove', 'keydown', 'click', 'touchstart', 'scroll'].forEach(ev => {
+  document.addEventListener(ev, resetIdleTimer, { passive: true });
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) resetIdleTimer(); });
+resetIdleTimer();
+
 // 自动重连：指数退避，最多 5 次
 function scheduleReconnect() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -1092,7 +1184,6 @@ function scheduleReconnect() {
     connect(roomCode);
   }, delay);
 }
-
 // ============================================================
 // Message handler
 // ============================================================

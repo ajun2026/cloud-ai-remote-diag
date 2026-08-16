@@ -21,7 +21,7 @@ func isAdmin() bool {
 // 原理：ShellExecuteW + "runas" verb → 触发 UAC 弹窗 → 用户同意后以管理员启动新进程。
 // 新进程会带上 --elevated 标志，避免再次提权（防递归）。
 // 返回 nil 表示新进程已成功启动；调用方应立即 os.Exit(0)。
-func elevateSelf(serverURL, roomCode string) error {
+func elevateSelf(serverURL, roomCode, token string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("定位自身程序失败: %w", err)
@@ -34,6 +34,9 @@ func elevateSelf(serverURL, roomCode string) error {
 	}
 	if roomCode != "" {
 		args = append(args, "--room", roomCode)
+	}
+	if token != "" {
+		args = append(args, "--token", token)
 	}
 	cmdline := fmt.Sprintf("%s %s", quoteArg(exe), strings.Join(args, " "))
 

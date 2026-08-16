@@ -60,10 +60,11 @@ func normalizeServerURL(s string) string {
 }
 
 func main() {
-	var serverURL, roomCode string
+	var serverURL, roomCode, token string
 	var elevate, elevated, noElevate bool
 	flag.StringVar(&serverURL, "server", "ws://localhost:8000", "服务器地址 (ws:// 或 wss://)")
 	flag.StringVar(&roomCode, "room", "", "房间码（必填）")
+	flag.StringVar(&token, "token", "", "连接令牌（一键连接下发）")
 	flag.BoolVar(&elevate, "elevate", false, "自动请求管理员权限（Windows UAC 提权）")
 	flag.BoolVar(&noElevate, "no-elevate", false, "禁止自动提权（特殊情况用，默认双击自动提权）")
 	flag.BoolVar(&elevated, "elevated", false, "内部标志：已处于提权后的进程")
@@ -115,7 +116,7 @@ func main() {
 		shouldElevate := elevate || flag.NFlag() == 0
 		if shouldElevate {
 			fmt.Println(" 正在请求管理员权限（UAC 弹窗确认后自动继续）…")
-			if err := elevateSelf(serverURL, roomCode); err != nil {
+			if err := elevateSelf(serverURL, roomCode, token); err != nil {
 				fmt.Fprintf(os.Stderr, " 提权失败（可能拒绝了 UAC）: %v\n", err)
 				fmt.Println(" 继续以普通权限运行（部分功能受限，如 BIOS 全量读取）。")
 			} else {
@@ -130,6 +131,11 @@ func main() {
 
 	serverURL = strings.TrimRight(serverURL, "/")
 
+	// 令牌：命令行参数优先，其次环境变量 BRIDGE_TOKEN
+	if token == "" {
+		token = os.Getenv("BRIDGE_TOKEN")
+	}
+
 	logger := NewAuditLogger()
 	info := collectClientInfo()
 	logger.Info("bridge %s 启动 (pid=%d, os=%s/%s, host=%s)",
@@ -142,6 +148,7 @@ func main() {
 	cfg := &Config{
 		ServerURL: serverURL,
 		RoomCode:  roomCode,
+		Token:     token,
 		Info:      info,
 		Logger:    logger,
 	}

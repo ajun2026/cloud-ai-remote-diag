@@ -146,10 +146,18 @@ def init_db():
             machine_model TEXT DEFAULT '',
             engineer_username TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            expires_at TEXT DEFAULT NULL
+            expires_at TEXT DEFAULT NULL,
+            connect_token_hash TEXT DEFAULT NULL,
+            token_expires_at TEXT DEFAULT NULL,
+            status TEXT DEFAULT 'active',
+            idle_at TEXT DEFAULT NULL
         )
     """)
     _ensure_column(conn, "rooms", "expires_at", "expires_at TEXT DEFAULT NULL")
+    _ensure_column(conn, "rooms", "connect_token_hash", "connect_token_hash TEXT DEFAULT NULL")
+    _ensure_column(conn, "rooms", "token_expires_at", "token_expires_at TEXT DEFAULT NULL")
+    _ensure_column(conn, "rooms", "status", "status TEXT DEFAULT 'active'")
+    _ensure_column(conn, "rooms", "idle_at", "idle_at TEXT DEFAULT NULL")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_engineer ON rooms(engineer_username, created_at)")
     # 用户反馈表（测试反馈收集）
     conn.execute("""
@@ -990,6 +998,8 @@ class Room:
         self.bridge_mode: str = "v1"
         # 目标平台: windows | linux | darwin（默认 windows，兼容旧 bridge）
         self.platform: str = "windows"
+        # 闲置检测任务（browser 断开后 30min 倒计时）
+        self.idle_task: Optional[asyncio.Task] = None
 
     def record_command(self, tool: str, command: str, timeout: int, platform: str, sent: bool):
         """记录一次命令下发（用于诊断追溯）。"""
@@ -1021,7 +1031,46 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.11.2")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.12.0")
+
+# ============================================================
+# HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
+# 授权 Host = 部署地址（PUBLIC_URL 推导，域名或 IP 均可）+ 本机运维
+# ============================================================
+_pub_url = os.getenv("PUBLIC_URL", "").strip().rstrip("/")
+ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
+if _pub_url:
+    _pub_host = _pub_url.split("://")[-1].split("/")[0].split(":")[0].lower()
+    if _pub_host:
+        ALLOWED_HOSTS.add(_pub_host)
+        ALLOWED_HOSTS.add("www." + _pub_host)
+
+MIGRATE_PAGE = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="3;url=https://clouddiag.online">
+<title>服务已迁移</title>
+<style>
+body{font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0f172a;color:#e2e8f0}
+div{text-align:center;padding:20px}
+h1{font-size:22px}a{color:#38bdf8}
+</style>
+</head>
+<body><div>
+<h1>🔒 请使用新地址访问</h1>
+<p>本项目已启用 HTTPS，请访问：<a href="https://clouddiag.online">https://clouddiag.online</a></p>
+<p>旧地址（IP 直连）已停用，3 秒后自动跳转...</p>
+</div></body></html>"""
+
+
+@app.middleware("http")
+async def enforce_domain_host(request: Request, call_next):
+    host = request.headers.get("host", "")
+    hostname = host.split(":")[0].lower()
+    if hostname not in ALLOWED_HOSTS:
+        return HTMLResponse(MIGRATE_PAGE, status_code=200)
+    return await call_next(request)
 
 # ============================================================
 # Admin authentication — simple session cookie
@@ -1074,15 +1123,17 @@ async def admin_logout(request: Request):
 # 用户认证（工程师账号）— users 表 + session cookie
 # ============================================================
 USER_SESSIONS: dict[str, dict] = {}   # token -> {username, role, exp}
-USER_SESSION_TTL = 12 * 3600            # 12 hours
+USER_SESSION_TTL = 2 * 3600              # 2 hours（滑动续期：活跃请求自动刷新）
 
 
 def _require_user(request: Request) -> Optional[dict]:
-    """校验 user_token cookie，返回 {username, role} 或 None。"""
+    """校验 user_token cookie，返回 {username, role} 或 None。滑动续期：每次校验通过刷新过期时间。"""
     token = request.cookies.get("user_token", "")
     sess = USER_SESSIONS.get(token)
     if not sess or sess.get("exp", 0) <= time.time():
         return None
+    # 滑动续期：活跃请求刷新 session 有效期（干活不被打断）
+    sess["exp"] = time.time() + USER_SESSION_TTL
     return {"username": sess["username"], "role": sess["role"]}
 
 
@@ -1437,7 +1488,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.11.2"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.12.0"}
 
 
 @app.post("/api/debug_log")
@@ -1557,6 +1608,122 @@ def room_expired_db(room_code: str) -> bool:
         return False
 
 
+# ============================================================
+# 连接令牌 + 房间状态机（active / idle / archived）
+# ============================================================
+TOKEN_TTL = 2 * 3600  # 令牌有效期 2h（与登录一致，滚动续期）
+
+
+def token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def generate_connect_token() -> str:
+    return secrets.token_urlsafe(24)
+
+
+def token_expiry_str() -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=TOKEN_TTL)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def set_room_token(room_code: str, token: str) -> None:
+    """保存令牌哈希 + 到期时间，并把房间置为 active（获取/刷新一键连接时调用）。"""
+    try:
+        conn = _db_connect()
+        conn.execute(
+            "UPDATE rooms SET connect_token_hash=?, token_expires_at=?, status='active', idle_at=NULL WHERE room_code=?",
+            (token_hash(token), token_expiry_str(), room_code),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"set_room_token error: {e}")
+
+
+def clear_room_token(room_code: str) -> None:
+    try:
+        conn = _db_connect()
+        conn.execute("UPDATE rooms SET connect_token_hash=NULL, token_expires_at=NULL WHERE room_code=?", (room_code,))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def set_room_status(room_code: str, status: str) -> None:
+    try:
+        conn = _db_connect()
+        conn.execute("UPDATE rooms SET status=? WHERE room_code=?", (status, room_code))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def get_room_status(room_code: str) -> str:
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT status FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+        conn.close()
+        return row["status"] if row and row["status"] else "active"
+    except Exception:
+        return "active"
+
+
+def verify_room_token(room_code: str, token: str) -> bool:
+    """校验连接令牌：房间 active + 令牌哈希匹配 + 未过期。"""
+    try:
+        conn = _db_connect()
+        row = conn.execute(
+            "SELECT connect_token_hash, token_expires_at, status FROM rooms WHERE room_code=?",
+            (room_code,),
+        ).fetchone()
+        conn.close()
+        if not row:
+            return False
+        if row["status"] != "active":
+            return False
+        stored = row["connect_token_hash"]
+        if not stored or not token:
+            return False
+        if not hmac.compare_digest(stored, token_hash(token)):
+            return False
+        exp = row["token_expires_at"]
+        if exp:
+            try:
+                exp_dt = datetime.strptime(exp, "%Y-%m-%d %H:%M:%S")
+                if datetime.now(timezone.utc).replace(tzinfo=None) > exp_dt:
+                    return False
+            except Exception:
+                pass
+        return True
+    except Exception:
+        return False
+
+
+def refresh_room_token_expiry(room_code: str) -> None:
+    """bridge 连接成功后滚动令牌有效期（活跃续期）。"""
+    try:
+        conn = _db_connect()
+        conn.execute("UPDATE rooms SET token_expires_at=? WHERE room_code=?", (token_expiry_str(), room_code))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+async def mark_idle_after(room_code: str, room) -> None:
+    """浏览器断开 30min 后无人重连 → 置 idle + 清令牌（防离开后滥用）。"""
+    try:
+        await asyncio.sleep(30 * 60)
+        if room.browser_ws is None:
+            clear_room_token(room_code)
+            set_room_status(room_code, "idle")
+            run_logger.info(f"[{room_code}] auto-idle: no browser for 30min")
+    except asyncio.CancelledError:
+        pass
+
+
 @app.get("/api/my_rooms")
 async def my_rooms(request: Request):
     """当前登录工程师的房间列表（含连接状态）。"""
@@ -1594,6 +1761,7 @@ async def my_rooms(request: Request):
             "bridge_online": bridge_online,
             "expires_at": d.get("expires_at"),
             "days_left": room_days_left(d.get("expires_at")),
+            "status": d.get("status") or "active",
             "browser_online": browser_online,
             "platform": (room.machine or {}).get("platform", "") if room else "",
             "status": "连接中" if bridge_online else "已断开",
@@ -1634,9 +1802,15 @@ async def room_connect(room_code: str, request: Request):
         return JSONResponse({"error": "无权访问该房间"}, status_code=403)
 
     public_url = get_public_url(request)
-    ps1_cmd = ('$env:BRIDGE_ROOM="' + room_code + '"; iex (iwr "' + public_url + '/static/bridge.ps1").Content')
-    bat = "@echo off\r\nbridge-win64.exe -room " + room_code + "\r\n"
-    linux_cmd = ("curl -sL \"" + public_url + "/static/install-linux.sh\" | bash -s -- " + room_code)
+    ws_url = get_ws_url(request)
+
+    # 生成/刷新连接令牌（每次获取一键连接 = 新令牌，旧令牌作废；同时激活房间）
+    token = generate_connect_token()
+    set_room_token(room_code, token)
+
+    ps1_cmd = ('$env:BRIDGE_ROOM="' + room_code + '"; $env:BRIDGE_TOKEN="' + token + '"; iex (iwr "' + public_url + '/static/bridge.ps1").Content')
+    bat = "@echo off\r\nbridge-win64.exe -server " + ws_url + " -room " + room_code + " -token " + token + "\r\n"
+    linux_cmd = ("curl -sL \"" + public_url + "/static/install-linux.sh\" | bash -s -- " + room_code + " " + token)
 
     return {
         "room_code": room_code,
@@ -1647,6 +1821,7 @@ async def room_connect(room_code: str, request: Request):
         "created_at": row["created_at"] or "",
         "expires_at": row["expires_at"] if "expires_at" in row.keys() else None,
         "days_left": room_days_left(row["expires_at"]) if "expires_at" in row.keys() else None,
+        "status": row["status"] if "status" in row.keys() else "active",
         "connect": {
             "powershell": ps1_cmd,
             "windows_bat": bat,
@@ -1678,8 +1853,13 @@ async def room_bat(room_code: str, request: Request):
         return JSONResponse({"error": "房间不存在"}, status_code=404)
     if user.get("role") != "admin" and row["engineer_username"] != user["username"]:
         return JSONResponse({"error": "无权访问该房间"}, status_code=403)
-
     public_url = get_public_url(request)
+    ws_url = get_ws_url(request)
+
+    # 生成/刷新连接令牌（每次获取一键连接 = 新令牌，旧令牌作废）
+    token = generate_connect_token()
+    set_room_token(room_code, token)
+
     bat = ("@echo off\r\n"
            "chcp 65001 >nul\r\n"
            "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
@@ -1694,10 +1874,43 @@ async def room_bat(room_code: str, request: Request):
            "echo [2/2] Connecting to room " + room_code + " ...\r\n"
            "echo Keep this window open. Go back to the browser chat page.\r\n"
            "echo.\r\n"
-           "\"bridge-win64.exe\" -server " + get_ws_url(request) + " -room " + room_code + "\r\n"
+           "\"bridge-win64.exe\" -server " + ws_url + " -room " + room_code + " -token " + token + "\r\n"
            "pause\r\n")
     return Response(content=bat, media_type="text/plain; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="connect-{room_code}.bat"'})
+
+
+@app.post("/api/room_close/{room_code}")
+async def room_close(room_code: str, request: Request):
+    """结束诊断：房间归档（令牌作废 + 断开 bridge + 历史保留只读）。仅房间主人/管理员。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = room_code.upper()
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT engineer_username FROM rooms WHERE room_code = ?", (room_code,)).fetchone()
+        conn.close()
+    except Exception:
+        row = None
+    if not row:
+        return JSONResponse({"error": "房间不存在"}, status_code=404)
+    if user.get("role") != "admin" and row["engineer_username"] != user["username"]:
+        return JSONResponse({"error": "无权操作该房间"}, status_code=403)
+
+    set_room_status(room_code, "archived")
+    clear_room_token(room_code)
+    room = rooms.get(room_code)
+    if room:
+        if room.bridge_ws:
+            try:
+                await room.bridge_ws.send_json({"type": "error", "content": "房间已结束诊断，连接将断开。"})
+                await room.bridge_ws.close()
+            except Exception:
+                pass
+        room.bridge_ws = None
+    run_logger.info(f"[{room_code}] room closed by {user['username']} (archived)")
+    return {"ok": True, "status": "archived"}
 
 
 @app.get("/api/history/{room_code}")
@@ -1790,7 +2003,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.11.2",
+        "version": "0.12.0",
     }
 
 
@@ -1970,7 +2183,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.11.2</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.12.0</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -3625,6 +3838,10 @@ async def ws_browser(websocket: WebSocket, room_code: str):
         run_logger.info(f"Room re-created from DB (browser): {room_code}")
 
     room.browser_ws = websocket
+    # 浏览器重连：取消闲置倒计时（宽限期内回来 = 不关闭）
+    if getattr(room, "idle_task", None):
+        room.idle_task.cancel()
+        room.idle_task = None
     run_logger.info(f"[browser] joined room {room_code}")
 
     ready_msg = "Bridge connected [OK]" if room.bridge_ws else "Waiting for bridge connection [--]"
@@ -3761,6 +3978,10 @@ async def ws_browser(websocket: WebSocket, room_code: str):
         run_logger.info(f"[browser] left room {room_code}")
     finally:
         room.browser_ws = None
+        # 闲置检测：30min 后无浏览器重连 → 置 idle + 清令牌（防离开后滥用）
+        if getattr(room, "idle_task", None):
+            room.idle_task.cancel()
+        room.idle_task = asyncio.create_task(mark_idle_after(room_code, room))
         await http_client.aclose()
 
 
@@ -3768,20 +3989,39 @@ async def ws_browser(websocket: WebSocket, room_code: str):
 async def ws_bridge(websocket: WebSocket, room_code: str):
     await websocket.accept()
 
-    # 房间过期校验（每次连接都查 DB，不受内存缓存影响）：过期后禁止 bridge 连接
+    # 校验 1：房间存在 + 未过期（每次连接都查 DB，不受内存缓存影响）
+    if not room_record_exists(room_code):
+        await websocket.send_json({"type": "error", "content": "Room not found. Create it from the dashboard first (SN + ticket required)."})
+        await websocket.close()
+        return
     if room_expired_db(room_code):
+        set_room_status(room_code, "archived")  # 过期即归档（历史保留）
         run_logger.info(f"[bridge] rejected: room {room_code} expired")
-        await websocket.send_json({"type": "error", "content": "房间已过期，无法连接。如需继续诊断请创建新房间（历史记录仍可查看）。"})
+        await websocket.send_json({"type": "error", "content": "房间已过期，无法连接。历史记录仍可查看，如需继续诊断请创建新房间。"})
         await websocket.close()
         return
 
+    # 校验 2：连接令牌（URL query ?token=xxx，防止房间码单独可用）
+    token = websocket.query_params.get("token", "")
+    if not verify_room_token(room_code, token):
+        status = get_room_status(room_code)
+        if status == "idle":
+            msg = "房间已闲置。请回到对话页重新获取一键连接（自动生成新令牌）。"
+        elif status == "archived":
+            msg = "房间已结束诊断（归档）。历史记录仍可查看。"
+        else:
+            msg = "连接令牌无效或已过期。请回到对话页重新获取一键连接。"
+        run_logger.info(f"[bridge] rejected: {room_code} bad token (status={status})")
+        await websocket.send_json({"type": "error", "content": msg})
+        await websocket.close()
+        return
+
+    # 校验通过：滚动令牌有效期 + 确保 active
+    refresh_room_token_expiry(room_code)
+    set_room_status(room_code, "active")
+
     room = rooms.get(room_code)
     if not room:
-        # 房间必须先在数据库中存在（工作台创建时绑定 SN/工单号）——防止绕过创建限制
-        if not room_record_exists(room_code):
-            await websocket.send_json({"type": "error", "content": "Room not found. Create it from the dashboard first (SN + ticket required)."})
-            await websocket.close()
-            return
         room = Room(room_code)
         rooms[room_code] = room
         run_logger.info(f"Room re-created from DB (bridge): {room_code}")
@@ -3815,7 +4055,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.11.2+）：
+    # 服务器主动定期发业务 ping（v0.12.0+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -3940,7 +4180,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.11.2 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.12.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,

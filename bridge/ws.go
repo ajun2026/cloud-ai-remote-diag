@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	urlpkg "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +74,9 @@ func (c *Client) Shutdown() {
 // connectAndServe 建立连接并进入消息循环
 func (c *Client) connectAndServe() error {
 	url := fmt.Sprintf("%s/ws/bridge/%s", c.cfg.ServerURL, c.cfg.RoomCode)
+	if c.cfg.Token != "" {
+		url += "?token=" + urlpkg.QueryEscape(c.cfg.Token)
+	}
 	c.cfg.Logger.Info("连接服务器 %s (房间 %s)…", url, c.cfg.RoomCode)
 
 	dialer := websocket.Dialer{

@@ -12,6 +12,6 @@ func isAdmin() bool {
 }
 
 // elevateSelf 非 Windows 平台不支持自动提权
-func elevateSelf(serverURL, roomCode string) error {
+func elevateSelf(serverURL, roomCode, token string) error {
 	return fmt.Errorf("当前平台不支持自动提权，请手动以管理员/root 权限运行")
 }
