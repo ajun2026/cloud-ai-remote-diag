@@ -373,7 +373,7 @@
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
-      <div class="sidebar-footer">v0.13.4</div>
+      <div class="sidebar-footer">v0.13.5</div>
     </aside>
 
     <main class="content">
@@ -382,7 +382,7 @@
       <section class="page active" id="page-home">
         <div class="home-hero">
           <div class="home-title">🤖 云端 AI 远程运维助手</div>
-          <div class="home-sub" data-i18n="home_sub">远程诊断 Windows / Linux 电脑问题 · 无需到现场</div>
+          <div class="home-sub" data-i18n="home_sub">云端 AI 诊断 Windows / Linux 电脑问题 · 硬件工具全覆盖</div>
         </div>
 
         <div class="home-section">
@@ -609,7 +609,7 @@
               <div class="tool-card-title">蓝屏 / Dump 分析</div>
               <span class="badge badge-read">只读</span>
             </div>
-            <div class="tool-card-desc">分析蓝屏崩溃：事件日志信号（Kernel-Power/WHEA/内存）+ minidump 解析（停止码/参数）+ WinDbg 深度定位——匹配微软官方知识库生成报告</div>
+            <div class="tool-card-desc">分析蓝屏崩溃：事件日志信号 + dump 解析（停止码/参数）+ WinDbg 深度定位——支持<b>指定路径</b>分析拷来的 dump 并关联对应时间的 Windows 事件日志</div>
             <button class="btn-sm tool-card-open" onclick="toggleTool('card-dumpanalyze')">▶ 打开工具</button>
             <div class="tool-card-body">
               <div class="msg-box" id="dumpanalyze-msg"></div>
@@ -617,37 +617,16 @@
                 <label>目标房间（需桥接器在线）</label>
                 <select id="dumpanalyze-room" onchange="dumpAnalyzeClear()"></select>
               </div>
+              <div class="field">
+                <label>指定路径（可选——分析指定位置的 dump 文件（目录或 .dmp）并关联对应时间的 Windows 事件日志；留空=分析本机默认 Minidump + MEMORY.DMP）</label>
+                <input id="dumpanalyze-path" placeholder="如 D:\dumps 或 D:\dumps\xxx.dmp；留空使用本机默认路径">
+              </div>
               <div class="tool-card-actions">
                 <button class="btn-main" id="dumpanalyze-btn" onclick="dumpAnalyzeFetch()">💥 分析蓝屏 / Dump</button>
               </div>
               <div id="dumpanalyze-result" style="display:none;">
                 <div class="tool-card-actions">
                   <button class="btn-main" onclick="openLogModal('dumpanalyze-win', document.getElementById('dumpanalyze-room').value)">📄 查看分析报告</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="tool-card" id="card-diskspace">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">💾</div>
-              <div class="tool-card-title">磁盘空间分析</div>
-              <span class="badge badge-read">只读</span>
-            </div>
-            <div class="tool-card-desc">分析磁盘占用：磁盘总览 / 分区使用率 / 用户目录 TOP / 大文件 TOP20——固定命令一次执行</div>
-            <button class="btn-sm tool-card-open" onclick="toggleTool('card-diskspace')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="diskspace-msg"></div>
-              <div class="field">
-                <label>目标房间（需桥接器在线）</label>
-                <select id="diskspace-room" onchange="diskspaceClear()"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="diskspace-btn" onclick="diskspaceFetch()">💾 分析磁盘空间</button>
-              </div>
-              <div id="diskspace-result" style="display:none;">
-                <div class="tool-card-actions">
-                  <button class="btn-main" onclick="openLogModal('diskspace-win', document.getElementById('diskspace-room').value)">📄 查看分析结果</button>
                 </div>
               </div>
             </div>
@@ -1129,7 +1108,7 @@ const I18N = {
     nav_download: '📦 下载桥接器', nav_password: '🔒 修改密码', nav_users: '👥 账号管理', nav_admin: '🛠 管理后台', nav_feedback: '📝 反馈',
     fb_desc: '把测试中发现的问题或建议告诉我们', fb_placeholder: '请描述您遇到的问题或建议（如：诊断结果不准确、页面报错、希望增加的功能…）', fb_submit: '提交反馈', fb_success: '反馈已提交，感谢您的建议！', fb_need: '请填写反馈内容', fb_empty: '暂无反馈记录', fb_history: '我的反馈记录',
     nav_home: '🏠 首页',
-    home_sub: '远程诊断 Windows / Linux 电脑问题 · 无需到现场',
+    home_sub: '云端 AI 诊断 Windows / Linux 电脑问题 · 硬件工具全覆盖',
     home_howto: '快速上手',
     home_step1_t: '创建房间', home_step1_d: '填写电脑 SN 与报修工单号，生成 8 位房间码',
     home_step2_t: '获取连接', home_step2_d: '进入对话页点「📶 连接你的电脑」，复制一键命令或下载连接包',
@@ -1300,7 +1279,7 @@ const I18N = {
     nav_download: '📦 下載橋接器', nav_password: '🔒 修改密碼', nav_users: '👥 帳號管理', nav_admin: '🛠 管理後台', nav_feedback: '📝 回饋',
     fb_desc: '把測試中發現的問題或建議告訴我們', fb_placeholder: '請描述您遇到的問題或建議（如：診斷結果不準確、頁面報錯、希望增加的功能…）', fb_submit: '提交回饋', fb_success: '回饋已提交，感謝您的建議！', fb_need: '請填寫回饋內容', fb_empty: '暫無回饋記錄', fb_history: '我的回饋記錄',
     nav_home: '🏠 首頁',
-    home_sub: '遠程診斷 Windows / Linux 電腦問題 · 無需到現場',
+    home_sub: '雲端 AI 診斷 Windows / Linux 電腦問題 · 硬件工具全覆蓋',
     home_howto: '快速上手',
     home_step1_t: '創建房間', home_step1_d: '填寫電腦 SN 與報修工單號，生成 8 位房間碼',
     home_step2_t: '客戶運行橋接器', home_step2_d: '在需診斷的電腦上運行橋接器並輸入房間碼，完成連接',
@@ -1471,7 +1450,7 @@ const I18N = {
     nav_download: '📦 Download Bridge', nav_password: '🔒 Change Password', nav_users: '👥 Accounts', nav_admin: '🛠 Admin Console', nav_feedback: '📝 Feedback',
     fb_desc: 'Tell us issues or suggestions found during testing', fb_placeholder: 'Describe the issue or suggestion (e.g. inaccurate diagnosis, page error, feature request...)', fb_submit: 'Submit', fb_success: 'Feedback submitted. Thank you!', fb_need: 'Please enter feedback content', fb_empty: 'No feedback yet', fb_history: 'My Feedback',
     nav_home: '🏠 Home',
-    home_sub: 'Remotely diagnose Windows / Linux PCs · No on-site visit needed',
+    home_sub: 'Cloud AI diagnostics for Windows / Linux PCs · Full hardware tool coverage',
     home_howto: 'Quick Start',
     home_step1_t: 'Create Room', home_step1_d: 'Enter the PC SN and repair ticket no. to generate an 8-digit room code',
     home_step2_t: 'Run Bridge on Client', home_step2_d: 'Run the bridge on the PC to diagnose and enter the room code to connect',
@@ -2100,7 +2079,6 @@ async function initTools() {
   fillWinlogsRoom();
   fillDumpRoom();
   fillRaidRoom();
-  fillDiskspaceRoom();
   fillDumpAnalyzeRoom();
 }
 
@@ -2703,15 +2681,18 @@ function dumpAnalyzeClear() {
 async function dumpAnalyzeFetch() {
   const roomCode = document.getElementById('dumpanalyze-room').value;
   if (!roomCode) { alert('请选择在线房间'); return; }
+  const path = document.getElementById('dumpanalyze-path').value.trim();
   const msg = document.getElementById('dumpanalyze-msg');
   const btn = document.getElementById('dumpanalyze-btn');
   msg.className = 'msg-box';
-  msg.textContent = '正在分析蓝屏 / Dump（事件日志 + 转储解析，约 1-2 分钟）...';
+  msg.textContent = path
+    ? '正在分析指定路径的 dump（' + path + '，约 1-2 分钟）...'
+    : '正在分析蓝屏 / Dump（事件日志 + 转储解析，约 1-2 分钟）...';
   btn.disabled = true;
   try {
     const resp = await fetch('/api/tools/dump_analyze', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ room_code: roomCode }),
+      body: JSON.stringify({ room_code: roomCode, path: path || undefined }),
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
@@ -2719,48 +2700,6 @@ async function dumpAnalyzeFetch() {
     msg.textContent = '✅ 蓝屏分析完成——点击下方按钮查看报告/下载';
     msg.className = 'msg-box ok';
     document.getElementById('dumpanalyze-result').style.display = 'block';
-    msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  } catch (e) {
-    msg.className = 'msg-box err';
-    msg.textContent = '分析失败：' + e.message;
-  } finally { btn.disabled = false; }
-}
-
-// ===== 磁盘空间分析 =====
-let diskspaceLogText = '';
-
-function fillDiskspaceRoom() {
-  const sel = document.getElementById('diskspace-room');
-  const online = allRooms.filter(r => r.bridge_online);
-  sel.innerHTML = online.length
-    ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
-    : '<option value="">暂无在线房间</option>';
-}
-
-function diskspaceClear() {
-  document.getElementById('diskspace-msg').textContent = '';
-  document.getElementById('diskspace-result').style.display = 'none';
-}
-
-async function diskspaceFetch() {
-  const roomCode = document.getElementById('diskspace-room').value;
-  if (!roomCode) { alert('请选择在线房间'); return; }
-  const msg = document.getElementById('diskspace-msg');
-  const btn = document.getElementById('diskspace-btn');
-  msg.className = 'msg-box';
-  msg.textContent = '正在分析磁盘空间（需 1-2 分钟）...';
-  btn.disabled = true;
-  try {
-    const resp = await fetch('/api/tools/diskspace', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ room_code: roomCode }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
-    diskspaceLogText = data.log || '';
-    msg.textContent = '✅ 磁盘分析完成（' + diskspaceLogText.split('\n').length + ' 行）——点击下方按钮查看/下载';
-    msg.className = 'msg-box ok';
-    document.getElementById('diskspace-result').style.display = 'block';
     msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
     msg.className = 'msg-box err';
@@ -2979,7 +2918,6 @@ function getLogState(kind) {
   const p = kind.split('-')[1] || 'win';
   if (kind.startsWith('sio')) return { title: '🔧 SIO Log（' + p + '）', text: sioLogText[p] || '' };
   if (kind.startsWith('raid')) return { title: '🛡 RAID 信息（VROC / RSTe / Broadcom）', text: raidLogText || '' };
-  if (kind.startsWith('diskspace')) return { title: '💾 磁盘空间分析结果', text: diskspaceLogText || '' };
   if (kind.startsWith('dumpanalyze')) return { title: '💥 蓝屏 / Dump 分析报告', text: dumpAnalyzeReport || '' };
   return { title: '💽 硬盘健康 SMART（' + p + '）', text: smartLogText[p] || '' };
 }

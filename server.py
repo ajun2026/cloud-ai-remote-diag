@@ -1031,7 +1031,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.4")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.5")
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1488,7 +1488,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.4"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.5"}
 
 
 @app.post("/api/debug_log")
@@ -2067,7 +2067,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.4",
+        "version": "0.13.5",
     }
 
 
@@ -2247,7 +2247,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.4</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.5</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -3016,27 +3016,6 @@ def parse_publisher(subject: str) -> str:
     return m.group(1).strip().strip('"') if m else subject[:50]
 
 
-# ============================================================
-# 磁盘空间分析命令（英文输出避免 GBK 乱码；扫描范围：磁盘总览+分区+用户目录+大文件 TOP20）
-# ============================================================
-DISKSPACE_CMD = (
-    "$out = @('===== DISKS ====='); "
-    "$out += Get-Volume | Where-Object { $_.DriveLetter } | ForEach-Object { "
-    "$t = $_.Size; $f = $_.SizeRemaining; "
-    "'{0}: {1} | Total {2} GB | Free {3} GB | Used {4}% | {5}' -f $_.DriveLetter, $_.FileSystemLabel, "
-    "[math]::Round($t/1GB,1), [math]::Round($f/1GB,1), [math]::Round(($t-$f)/$t*100,1), $_.FileSystem }; "
-    "$out += ''; $out += '===== USER FOLDER TOP ====='; "
-    "$out += Get-ChildItem $env:USERPROFILE -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object { "
-    "$s = (Get-ChildItem $_.FullName -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum; "
-    "'{0} GB  {1}' -f [math]::Round($s/1GB,2), $_.Name } | Sort-Object -Descending; "
-    "$out += ''; $out += '===== TOP 20 LARGE FILES ====='; "
-    "$out += Get-ChildItem $env:USERPROFILE -Recurse -Force -File -ErrorAction SilentlyContinue | "
-    "Sort-Object Length -Descending | Select-Object -First 20 | ForEach-Object { "
-    "'{0} GB  {1}' -f [math]::Round($_.Length/1GB,2), $_.FullName }; "
-    "$out -join \"`n\""
-)
-
-
 def classify_startup(name: str, path: str) -> str:
     low = (name + " " + path).lower()
     if any(k in low for k in STARTUP_NECESSARY_KEYWORDS):
@@ -3126,20 +3105,31 @@ async def handle_quick_action(room, content: str, websocket) -> bool:
             await websocket.send_json({"type": "startup_list", "items": items})
             return True
 
-        if content.startswith("[QUICK_ACTION:diskspace]"):
-            await websocket.send_json({"type": "status", "content": "正在分析磁盘空间..."})
+        if content.startswith("[QUICK_ACTION:dump_analyze]"):
+            await websocket.send_json({"type": "status", "content": "正在分析本机蓝屏记录与转储（约 1-2 分钟）..."})
             cmd_id = f"qa_{secrets.token_hex(4)}"
+            public_url = os.getenv("PUBLIC_URL", "").strip().rstrip("/") or "https://clouddiag.online"
+            cmd = (
+                "$s = \"$env:TEMP\\dump_analyze.ps1\"; "
+                f"curl.exe -sL -o $s '{public_url}/static/tools/dump_analyze.ps1'; "
+                "if (!(Test-Path $s)) { Write-Output '[DOWNLOAD_FAIL]'; exit }; "
+                "powershell -NoProfile -ExecutionPolicy Bypass -File $s"
+            )
             try:
                 out = await asyncio.wait_for(
-                    execute_bridge_command(room, "RunCommand", {"command": DISKSPACE_CMD, "timeout": 120}, cmd_id, tier=1),
-                    timeout=130,
+                    execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 180}, cmd_id, tier=1),
+                    timeout=200,
                 )
             except Exception as e:
-                await websocket.send_json({"type": "error", "content": f"分析失败: {e}"})
+                await websocket.send_json({"type": "error", "content": f"蓝屏分析失败: {e}"})
                 return True
             out = out or ""
-            run_logger.info(f"[{room.code}] QUICK_ACTION diskspace done: {len(out)} chars")
-            await websocket.send_json({"type": "ai_message", "content": "📊 磁盘空间分析结果：\n\n" + out})
+            if "DOWNLOAD_FAIL" in out:
+                await websocket.send_json({"type": "error", "content": "分析脚本下载失败（客户机网络异常）"})
+                return True
+            report = build_dump_report(room.code, out)
+            run_logger.info(f"[{room.code}] QUICK_ACTION dump_analyze done: {len(out)} chars")
+            await websocket.send_json({"type": "ai_message", "content": report})
             return True
 
         if content.startswith("[QUICK_ACTION:startup_close]"):
@@ -4158,12 +4148,113 @@ def norm_bugcheck_code(code: str) -> str:
         return str(code).strip().upper()
 
 
+# 售后实战建议库（高频停止码：具体行动 + 参数含义）——微软页面无直接步骤，由旺财按实战经验补充
+ACTION_KB = {
+    "0x116": {"actions": [
+        "更新 / 回滚显卡驱动（优先官网最新 WHQL 版）",
+        "检查 GPU 温度与散热（清灰、换硅脂、风扇状态）",
+        "调高 TDR 延迟：注册表 HKLM\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers 新建 DWORD TdrDelay=10",
+        "用 GPU 压力测试（FurMark）验证稳定性"],
+        "params": {"1": "设备对象（出问题的 GPU）", "2": "驱动内部函数地址", "4": "TDR 原因码（0xC000009A=资源不足 / 0xC000000D=设备超时）"}},
+    "0x124": {"actions": [
+        "查看 WHEA 事件详情（事件查看器→系统→WHEA-Logger）定位错误源",
+        "优先排查 CPU / 内存 / 主板（内存可跑 memtest86）",
+        "BIOS 恢复默认设置，检查 CPU 电压 / 温度",
+        "更新 BIOS 与芯片组驱动"],
+        "params": {"1": "错误源类型（0=处理器 1=内存 2=PCIe 3=显卡）", "2": "错误源 GUID"}},
+    "0x3B": {"actions": [
+        "回滚最近安装的驱动 / 软件（尤其是显卡驱动）",
+        "运行 sfc /scannow 与 DISM 检查系统文件",
+        "内存检测（Windows 内存诊断 / memtest86）",
+        "更新系统到最新补丁"],
+        "params": {"1": "异常代码（0xC0000005=访问冲突）", "2": "发生异常的地址", "3": "陷阱帧"}},
+    "0x50": {"actions": [
+        "检查内存（Windows 内存诊断 / memtest86）",
+        "回滚最近安装的驱动（网卡 / 显卡 / 存储驱动常见）",
+        "扫描杀毒（防病毒软件触发）",
+        "chkdsk /f 检查磁盘（NTFS 损坏也会触发）"],
+        "params": {"1": "错误的内存地址", "2": "0=读 1=写 8=执行", "3": "引用该地址的指令"}},
+    "0xA": {"actions": [
+        "更新 / 回滚网卡、存储、显卡驱动（IRQL 冲突常见于驱动）",
+        "禁用可疑的过滤驱动（防火墙 / 杀毒）",
+        "运行 sfc /scannow 修复系统文件",
+        "内存检测排除硬件因素"],
+        "params": {"1": "被引用的地址", "2": "发生时的 IRQL", "3": "0=读 1=写", "4": "引用地址的指令"}},
+    "0xD1": {"actions": [
+        "更新 / 回滚网卡、显卡、存储驱动（最常见原因）",
+        "检查是否有第三方过滤驱动（杀毒 / VPN / 防火墙）",
+        "更新 BIOS",
+        "内存检测排除硬件因素"],
+        "params": {"1": "被引用的内存地址", "2": "0=读 1=写", "3": "引用地址的指令", "4": "当前 IRQL"}},
+    "0x7E": {"actions": [
+        "回滚最近安装的驱动（尤其显卡驱动）",
+        "运行 sfc /scannow 修复系统文件",
+        "内存检测（0x7E 常见内存/驱动）",
+        "更新系统补丁"],
+        "params": {"1": "异常代码", "2": "异常地址", "3": "陷阱帧"}},
+    "0x9F": {"actions": [
+        "更新显卡 / 网卡 / USB 控制器驱动（电源状态转换失败）",
+        "更新 BIOS（电源管理相关修复）",
+        "检查电源管理设置（PCI Express 电源管理禁用测试）",
+        "外设逐一断开排查（USB 设备导致睡眠失败）"],
+        "params": {"1": "设备对象", "2": "设备对象状态", "3": "电源 IRP", "4": "设备名"}},
+    "0x133": {"actions": [
+        "更新显卡 / 存储驱动（DPC 长时间占用）",
+        "检查存储设备（SSD 固件更新——部分 SSD 固件 bug 触发）",
+        "检查是否开启了内核调试（bcdedit 删除 debug 设置）"],
+        "params": {"1": "保留", "2": "保留"}},
+    "0x139": {"actions": [
+        "更新 / 回滚最近安装的驱动",
+        "运行 sfc /scannow 与 DISM 修复系统",
+        "内存检测（内核数据结构损坏常与内存有关）",
+        "检查超频设置（CPU/内存恢复默认）"],
+        "params": {"1": "校验失败类型", "2": "保留", "3": "保留"}},
+    "0xEF": {"actions": [
+        "检查系统关键进程（svchost / csrss 等被杀）",
+        "杀毒全盘扫描（确认是否杀毒误杀系统进程）",
+        "恢复最近系统更改（回滚驱动/卸载软件）"],
+        "params": {"1": "终止的进程名"}},
+    "0x24": {"actions": [
+        "chkdsk /f 检查 NTFS 卷",
+        "更新存储驱动（AHCI/NVMe）",
+        "检查硬盘健康（SMART——坏道/即将故障）",
+        "备份数据，考虑更换硬盘"],
+        "params": {"1": "源文件与行号", "2": "NTFS 状态"}},
+    "0x77": {"actions": [
+        "检查硬盘健康（SMART）——内核栈页错误多与磁盘故障相关",
+        "更换 SATA 数据线 / 接口测试",
+        "更新存储驱动"],
+        "params": {"1": "I/O 状态码"}},
+    "0x1A": {"actions": [
+        "内存检测（memtest86）——最常见内存故障",
+        "更新 BIOS / 芯片组驱动",
+        "检查超频设置恢复默认"],
+        "params": {"1": "子类型码"}},
+    "0xC2": {"actions": [
+        "更新 / 回滚驱动（内存池请求错误常见驱动 bug）",
+        "运行 sfc /scannow",
+        "杀毒扫描（恶意软件篡改池）"],
+        "params": {"1": "池类型", "2": "池标记"}},
+    "0x101": {"actions": [
+        "检查 CPU 温度 / 散热（过热降频触发）",
+        "BIOS 恢复默认（关闭超频 / 关闭 C-State 测试）",
+        "更新 BIOS"],
+        "params": {"1": "时钟看门狗超时的处理器"}},
+    "0x10E": {"actions": [
+        "更新显卡驱动（视频内存管理内部错误=驱动 bug）",
+        "回滚到上一稳定版本测试"],
+        "params": {"1": "驱动内存地址"}},
+}
+
+
 def build_dump_report(room_code: str, raw: str) -> str:
     """解析 dump_analyze.ps1 输出 → 匹配知识库 → 生成中文分析报告。"""
     kb = load_bugcheck_kb()
     bd = load_bad_drivers()
     lines = []
     events = {}
+    sysinfo = {}
+    bsods = []
     dumps = []
     winDbg = {}
     section = ""
@@ -4171,6 +4262,10 @@ def build_dump_report(room_code: str, raw: str) -> str:
         ln = ln.strip()
         if ln.startswith("[EVENTS]"):
             section = "events"; continue
+        if ln.startswith("[SYSINFO]"):
+            section = "sysinfo"; continue
+        if ln.startswith("[BSODS]"):
+            section = "bsods"; continue
         if ln.startswith("[DUMPS]"):
             section = "dumps"; continue
         if ln.startswith("[WINDBG]"):
@@ -4180,10 +4275,17 @@ def build_dump_report(room_code: str, raw: str) -> str:
         if section == "events" and "=" in ln:
             k, v = ln.split("=", 1)
             events[k] = v
+        elif section == "sysinfo" and "=" in ln:
+            k, v = ln.split("=", 1)
+            if k == "GPU":
+                sysinfo.setdefault("GPUS", []).append(v)
+            else:
+                sysinfo[k] = v
+        elif section == "bsods" and ln.startswith("EVT="):
+            parts = ln.split("|")
+            bsods.append({"time": parts[0][4:] if len(parts) > 1 else "", "code": parts[1] if len(parts) > 1 else ""})
         elif section == "dumps" and "=" in ln:
             k, v = ln.split("=", 1)
-            if k == "FILE" and dumps and not dumps[-1].get("empty"):
-                pass
             if k == "FILE":
                 dumps.append({"file": v})
             elif dumps:
@@ -4192,22 +4294,64 @@ def build_dump_report(room_code: str, raw: str) -> str:
             k, v = ln.split("=", 1)
             winDbg[k] = v
 
-    # 事件信号
+    # 事件信号（说清楚：内存诊断结果 + 磁盘错误细分）
     kp = int(events.get("KERNEL_POWER_41", 0) or 0)
     whea = int(events.get("WHEA", 0) or 0)
-    mem = int(events.get("MEMORY_DIAG", 0) or 0)
-    disk = int(events.get("DISK_ERR", 0) or 0)
+    mem_total = int(events.get("MEMORY_DIAG", 0) or 0)
+    mem_fail = int(events.get("MEMORY_DIAG_FAIL", 0) or 0)
+    d7 = int(events.get("DISK_ID7", 0) or 0)
+    d51 = int(events.get("DISK_ID51", 0) or 0)
+    d55 = int(events.get("DISK_ID55", 0) or 0)
+    disk_total = d7 + d51 + d55
+    disk_last = events.get("DISK_LAST", "")
     therm = int(events.get("THERMAL", 0) or 0)
     risk = []
     if kp >= 3: risk.append(f"Kernel-Power 41 意外断电/重启 {kp} 次（⚠ 电源/主板嫌疑）")
     elif kp > 0: risk.append(f"Kernel-Power 41 意外断电/重启 {kp} 次")
     if whea > 0: risk.append(f"WHEA 硬件错误 {whea} 次（⚠ 硬件故障信号）")
-    if mem > 0: risk.append(f"内存诊断记录 {mem} 次（⚠ 内存嫌疑）")
-    if disk > 0: risk.append(f"存储/磁盘错误 {disk} 次（⚠ 硬盘嫌疑）")
+    if mem_total > 0:
+        if mem_fail > 0:
+            risk.append(f"Windows 内存诊断 {mem_total} 次（其中 {mem_fail} 次检出错误——⚠ 内存确实有问题）")
+        else:
+            risk.append(f"Windows 内存诊断 {mem_total} 次（结果通过——内存健康，无嫌疑）")
+    if disk_total > 0:
+        parts = []
+        if d7: parts.append(f"ID 7 磁盘坏块/损坏警告 {d7} 次")
+        if d51: parts.append(f"ID 51 分页/IO 错误 {d51} 次")
+        if d55: parts.append(f"ID 55 NTFS 文件系统损坏 {d55} 次")
+        detail = "；".join(parts) + (f"（最近 {disk_last}）" if disk_last else "")
+        if d7 >= 10 or d51 >= 3 or d55 >= 3:
+            risk.append(f"磁盘错误 {disk_total} 次——{detail}（⚠ 硬盘/存储存在持续问题）")
+        else:
+            risk.append(f"磁盘错误 {disk_total} 次——{detail}（偶发，暂不构成强烈嫌疑）")
     if therm > 0: risk.append(f"热事件 {therm} 次（⚠ 散热/温度嫌疑）")
 
     lines.append("💥 蓝屏 / Dump 分析报告")
     lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+    # 系统信息
+    if sysinfo.get("MODEL"):
+        gpu_str = "；".join(g.split("|")[0] for g in sysinfo.get("GPUS", []))
+        lines.append(f"💻 {sysinfo.get('MANUFACTURER', '')} {sysinfo.get('MODEL', '')}｜{sysinfo.get('OS', '')}")
+        info_bits = []
+        if sysinfo.get("CPU"): info_bits.append(f"CPU: {sysinfo['CPU'][:60]}")
+        if gpu_str: info_bits.append(f"GPU: {gpu_str[:80]}")
+        if sysinfo.get("BIOS"): info_bits.append(f"BIOS: {sysinfo['BIOS'][:40]}")
+        if info_bits:
+            lines.append("  " + "｜".join(info_bits))
+        lines.append("")
+    # 蓝屏记录（90 天）
+    if bsods:
+        lines.append(f"🔴 蓝屏 / 异常记录（90 天共 {len(bsods)} 次）")
+        code_counter = {}
+        for b in bsods:
+            code_counter[b["code"]] = code_counter.get(b["code"], 0) + 1
+            lines.append(f"  {b.get('time', '?')} | {b.get('code', '无代码')}")
+        same_codes = {c: n for c, n in code_counter.items() if n >= 2 and c}
+        if same_codes:
+            for c, n in same_codes.items():
+                name = (kb.get(norm_bugcheck_code(c)) or {}).get("name", "")
+                lines.append(f"  ⚠ 停止码 {c} {name} 出现 {n} 次——多次相同代码，根因一致，非偶发")
+        lines.append("")
     if dumps:
         lines.append(f"🔴 崩溃转储（{len(dumps)} 个）")
         for d in dumps[:5]:
@@ -4215,15 +4359,27 @@ def build_dump_report(room_code: str, raw: str) -> str:
             lines.append(f"  📄 {d.get('file', '?')} | {d.get('time', '?')} | {d.get('size_mb', '?')} MB")
             if code:
                 kb_entry = kb.get(norm_bugcheck_code(code))
+                act = ACTION_KB.get(norm_bugcheck_code(code))
                 name = kb_entry.get("name", "") if kb_entry else ""
                 lines.append(f"     停止码: {code} {name}")
                 if d.get("params"):
                     lines.append(f"     参数: {d['params']}")
+                    # 参数解读
+                    if act and act.get("params"):
+                        plist = [p.strip() for p in d["params"].split("|") if p.strip()]
+                        for i, pv in enumerate(plist[:4], start=1):
+                            desc_p = act["params"].get(str(i))
+                            if desc_p:
+                                lines.append(f"       P{i}: {pv} → {desc_p}")
                 if kb_entry:
                     if kb_entry.get("desc"):
                         lines.append(f"     📚 说明: {kb_entry['desc'][:150]}")
                     if kb_entry.get("cause"):
                         lines.append(f"     📚 常见原因: {kb_entry['cause'][:150]}")
+                if act and act.get("actions"):
+                    lines.append(f"     🔧 排查行动:")
+                    for a in act["actions"]:
+                        lines.append(f"        · {a}")
             else:
                 lines.append(f"     （{d.get('parse_skip', '无法解析')}）")
             # 坏驱动匹配（从参数/模块名近似——从 BUGCHECK_MSG/文件名无法直接得模块——WinDbg 层补充）
@@ -4243,6 +4399,75 @@ def build_dump_report(room_code: str, raw: str) -> str:
             lines.append(f"  {r}")
     else:
         lines.append("  无显著异常信号")
+    # 组合推断（无 WinDbg 时按停止码 + 事件信号给方向）
+    if dumps and dumps[0].get("bugcheck"):
+        code_n = norm_bugcheck_code(dumps[0]["bugcheck"])
+        hints = []
+        if code_n == "0x116" or code_n == "0x117" or code_n == "0x119" or code_n == "0x10E":
+            hints.append("🎯 显卡驱动嫌疑高（TDR/视频内存类停止码）——优先更新或回滚显卡驱动")
+        elif code_n == "0x124":
+            hints.append("🎯 WHEA 硬件错误——重点排查 CPU / 内存 / 主板")
+        elif code_n in ("0x50", "0x1A", "0xC2", "0x139"):
+            hints.append("🎯 内存相关嫌疑高——优先内存检测")
+            if mem_fail > 0:
+                hints.append("    （内存诊断曾检出错误，强化内存嫌疑）")
+            elif mem_total > 0:
+                hints.append("    （注：内存诊断结果为通过，嫌疑以代码特征为主）")
+        elif code_n in ("0x24", "0x77"):
+            hints.append("🎯 存储相关嫌疑高——优先检查硬盘健康（SMART）")
+            if disk_total > 0:
+                hints.append("    （磁盘错误事件同时存在，强化硬盘嫌疑）")
+        if disk_total >= 50:
+            hints.append(f"⚠ 磁盘错误事件高达 {disk_total} 次——强烈建议检查硬盘健康（SMART 工具）")
+        if hints:
+            lines.append("")
+            lines.append("🔎 综合判断")
+            for h in hints:
+                lines.append(f"  {h}")
+    # 证据链分析
+    if dumps and dumps[0].get("bugcheck"):
+        code_n = norm_bugcheck_code(dumps[0]["bugcheck"])
+        act = ACTION_KB.get(code_n)
+        lines.append("")
+        lines.append("🧩 证据链分析")
+        if whea == 0:
+            lines.append("  · WHEA 硬件错误日志: 无记录 → 倾向排除 CPU/内存硬件级故障")
+        else:
+            lines.append(f"  · WHEA 硬件错误日志: {whea} 条 → ⚠ 存在硬件级错误信号")
+        disp4101 = int(events.get("DISPLAY_4101", 0) or 0)
+        if code_n in ("0x116", "0x10E", "0x117", "0x119"):
+            if disp4101 == 0:
+                lines.append("  · Display 事件 4101（驱动恢复）: 无记录 → 驱动直接崩溃，未走【停止响应→恢复】流程")
+            else:
+                lines.append(f"  · Display 事件 4101（驱动恢复）: {disp4101} 次 → 驱动曾超时但恢复成功")
+        if kp > 0:
+            lines.append(f"  · Kernel-Power 41: {kp} 次 → 与蓝屏时间吻合（崩溃伴随意外断电重启）")
+        if mem_total > 0:
+            lines.append(f"  · 内存诊断: {mem_total} 次" + ("（检出错误——内存问题）" if mem_fail > 0 else "（通过——内存健康）"))
+        if bsods:
+            first_code = bsods[0].get("code", "")
+            if first_code and all(b.get("code") == first_code for b in bsods if b.get("code")):
+                lines.append(f"  · 多次崩溃停止码一致（{first_code}）→ 根因稳定指向同一类问题")
+        # 结论
+        lines.append("")
+        lines.append("📌 结论")
+        if code_n in ("0x116", "0x10E", "0x117", "0x119"):
+            lines.append(f"  蓝屏为 {code_n} {kb.get(code_n, {}).get('name', '')}——显卡驱动超时/视频内存错误，属驱动级软件故障（非硬件损坏概率高）")
+        elif code_n == "0x124":
+            lines.append("  蓝屏为 WHEA 不可纠正硬件错误——CPU/内存/主板硬件故障概率高，需逐项排除")
+        elif code_n in ("0x50", "0x1A", "0xC2", "0x139"):
+            lines.append("  蓝屏与内存相关——内存故障或驱动内存操作错误，需内存检测确认")
+        elif code_n in ("0x24", "0x77"):
+            lines.append("  蓝屏与存储相关——硬盘/文件系统故障概率高，需 SMART 检测确认")
+        else:
+            lines.append(f"  蓝屏停止码 {code_n}——见上方知识库说明与排查行动")
+        # 优先级建议
+        if act and act.get("actions"):
+            lines.append("")
+            lines.append("🛠 修复建议（按优先级）")
+            for i, a in enumerate(act["actions"], start=1):
+                tag = "核心" if i == 1 else ""
+                lines.append(f"  {i}. {a}" + (f"（核心）" if tag else ""))
     # 坏驱动知识库命中提示
     if winDbg.get("CAUSED_BY"):
         for drv, info in bd.items():
@@ -4257,18 +4482,24 @@ def build_dump_report(room_code: str, raw: str) -> str:
     lines.append("")
     lines.append("📝 建议")
     if dumps and dumps[0].get("bugcheck"):
-        kb_entry = kb.get(norm_bugcheck_code(dumps[0]["bugcheck"]))
-        adv = ""
-        if kb_entry:
-            adv = (kb_entry.get("advice") or "").replace("Ask Learn", "").strip()
-            if len(adv) < 20 or "想要尝试使用" in adv:
-                adv = kb_entry.get("cause") or ""
-        if adv and len(adv) > 15:
-            lines.append(f"  {adv[:200]}")
-        elif kb_entry and kb_entry.get("name"):
-            lines.append(f"  {kb_entry['name']}——建议排查最近安装的驱动/软件，并用 WinDbg 深度定位肇事驱动。")
+        code_n = norm_bugcheck_code(dumps[0]["bugcheck"])
+        kb_entry = kb.get(code_n)
+        act = ACTION_KB.get(code_n)
+        if act and act.get("actions"):
+            lines.append(f"  ⭐ 首选: {act['actions'][0]}")
+            lines.append(f"  完整排查步骤见上方「🔧 排查行动」（共 {len(act['actions'])} 项）")
         else:
-            lines.append("  根据停止码查阅微软官方文档确认详细排查步骤。")
+            adv = ""
+            if kb_entry:
+                adv = (kb_entry.get("advice") or "").replace("Ask Learn", "").strip()
+                if len(adv) < 20 or "想要尝试使用" in adv or "Microsoft Edge" in adv or "Edge" in adv:
+                    adv = kb_entry.get("cause") or ""
+            if adv and len(adv) > 15:
+                lines.append(f"  {adv[:200]}")
+            elif kb_entry and kb_entry.get("name"):
+                lines.append(f"  {kb_entry['name']}——建议排查最近安装的驱动/软件，并用 WinDbg 深度定位肇事驱动。")
+            else:
+                lines.append("  根据停止码查阅微软官方文档确认详细排查步骤。")
     else:
         lines.append("  当前无崩溃转储——如有蓝屏问题，建议：启用小转储（系统属性→启动和故障恢复→写入调试信息→小内存转储 256KB）后再观察。")
     if not winDbg.get("CAUSED_BY"):
@@ -4295,11 +4526,19 @@ async def tools_dump_analyze(request: Request):
         return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
     public_url = get_public_url(request)
 
+    # 可选指定 dump 路径（安全过滤：仅允许路径字符，阻止命令注入）
+    dump_path = str(body.get("path", "") or "").strip()
+    if dump_path:
+        dump_path = re.sub(r"['\"`;|&<>()$]", "", dump_path)[:200]
+        path_arg = f" -DumpPath '{dump_path}'"
+    else:
+        path_arg = ""
+
     cmd = (
         "$s = \"$env:TEMP\\dump_analyze.ps1\"; "
         f"curl.exe -sL -o $s '{public_url}/static/tools/dump_analyze.ps1'; "
         "if (!(Test-Path $s)) { Write-Output '[DOWNLOAD_FAIL]'; exit }; "
-        "powershell -NoProfile -ExecutionPolicy Bypass -File $s"
+        f"powershell -NoProfile -ExecutionPolicy Bypass -File $s{path_arg}"
     )
     run_logger.info(f"[{room_code}] tools_dump_analyze exec start")
     try:
@@ -4314,33 +4553,6 @@ async def tools_dump_analyze(request: Request):
     run_logger.info(f"[{room_code}] tools_dump_analyze done: {len(result)} chars")
     report = build_dump_report(room_code, result)
     return {"ok": True, "report": report, "raw": result}
-
-
-@app.post("/api/tools/diskspace")
-async def tools_diskspace(request: Request):
-    """磁盘空间分析——固定命令一次执行（磁盘总览+分区+用户目录+大文件 TOP20）。只读操作。"""
-    user = _require_user(request)
-    if not user:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"error": "invalid_json"}, status_code=400)
-    room_code = str(body.get("room_code", "")).upper()
-    if not room_code:
-        return JSONResponse({"error": "缺少房间码"}, status_code=400)
-    room = rooms.get(room_code)
-    if not room or not room.bridge_ws:
-        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
-    run_logger.info(f"[{room_code}] tools_diskspace exec start")
-    try:
-        result = await asyncio.wait_for(
-            execute_bridge_command(room, "RunCommand", {"command": DISKSPACE_CMD, "timeout": 120, "cwd": ""},
-                                   f"diskspace_{int(time.time())}", tier=1), timeout=130)
-    except Exception as e:
-        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
-    run_logger.info(f"[{room_code}] tools_diskspace done: {len(result or '')} chars")
-    return {"ok": True, "log": result or ""}
 
 
 @app.post("/api/tools/raid")
@@ -4945,7 +5157,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.4+）：
+    # 服务器主动定期发业务 ping（v0.13.5+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5070,7 +5282,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.4 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.5 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,

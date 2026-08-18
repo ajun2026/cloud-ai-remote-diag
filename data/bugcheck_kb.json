@@ -181,6 +181,48 @@
    "desc": "",
    "cause": "",
    "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0xE2": {
+   "name": "",
+   "desc": "MANUALLY_INITIATED_CRASH 错误检查的值为 0x000000E2。 这表示用户有意从内核调试器或键盘启动崩溃转储。",
+   "cause": "",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x116": {
+   "name": "VIDEO_TDR_FAILURE",
+   "desc": "VIDEO_TDR_FAILURE 错误检查的值为 0x00000116。 此错误检查表明重置显示驱动程序并从超时恢复的尝试失败。",
+   "cause": "如果在处理最终用户命令或操作时系统出现完全冻结或挂起，图形中会出现常见的稳定性问题。 通常，GPU 忙于处理密集型图形操作，通常是在游戏过程中。 没有屏幕更新发生，用户假定其系统已冻结。 用户通常等待几秒钟，然后按电源按钮重新启动系统。 Windows 会尝试检测这些有问题的挂起情况，并动态恢复响应式桌面。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x124": {
+   "name": "WHEA_UNCORRECTABLE_ERROR",
+   "desc": "WHEA_UNCORRECTABLE_ERROR 错误检查的值为 0x00000124，表明发生了致命的硬件错误。 此错误检查使用 Windows 硬件错误体系结构 (WHEA) 提供的错误数据。",
+   "cause": "若要识别错误的特定原因，通常需要了解 WHEA_ERROR_RECORD 结构。 有关详细信息，请参阅本文的备注部分。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x101": {
+   "name": "",
+   "desc": "CLOCK_WATCHDOG_TIMEOUT Bug 检查的值为 0x00000101。 此 Bug 检查指示在多处理器系统中，辅助处理器上的预期时钟中断未在分配的时间间隔内收到。",
+   "cause": "指定的处理器未处理中断。 通常，当处理器无响应或死锁时，会发生此 Bug 检查。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x10E": {
+   "name": "VIDEO_MEMORY_MANAGEMENT_INTERNAL",
+   "desc": "VIDEO_MEMORY_MANAGEMENT_INTERNAL 错误检查的值为 0x0000010E。 这表示视频内存管理器遇到了无法从中恢复的条件。",
+   "cause": "此错误检查通常是由视频驱动程序行为不当引起的。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x117": {
+   "name": "VIDEO_TDR_TIMEOUT_DETECTED",
+   "desc": "VIDEO_TDR_TIMEOUT_DETECTED 实时转储的值为 0x00000117。 这表示显示驱动程序未能及时响应。",
+   "cause": "如果在处理最终用户命令或操作时系统出现完全冻结或挂起，图形中会出现常见的稳定性问题。 通常，GPU 忙于处理密集型图形操作，通常是在游戏过程中。 没有屏幕更新发生，用户假定其系统已冻结。 用户通常等待几秒钟，然后按电源按钮重新启动系统。 Windows 会尝试检测这些有问题的挂起情况，并动态恢复响应式桌面。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x119": {
+   "name": "VIDEO_SCHEDULER_INTERNAL_ERROR",
+   "desc": "VIDEO_SCHEDULER_INTERNAL_ERROR bug 检查的值为 0x00000119。 此 bug 检查指示视频计划程序检测到严重冲突。",
+   "cause": "这是内部 OS 状态错误，通常是由内存损坏或硬件损坏引起的。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
   }
  }
 }
