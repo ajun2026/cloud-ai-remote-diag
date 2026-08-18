@@ -373,7 +373,7 @@
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
-      <div class="sidebar-footer">v0.13.2</div>
+      <div class="sidebar-footer">v0.13.3</div>
     </aside>
 
     <main class="content">
@@ -581,6 +581,31 @@
 
         <div class="tool-grid">
 
+          <div class="tool-card" id="card-smart-win">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">💽</div>
+              <div class="tool-card-title">硬盘健康检测（SMART）</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">读取硬盘 SMART 健康数据（温度/重映射坏道/通电时长/SSD 磨损）——自动分发 smartctl 工具到客户机执行</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-smart-win')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="smart-msg-win"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="smart-room-win" onchange="smartClear('win')"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="smart-btn-win" onclick="smartFetch('win')">🔍 检测硬盘健康</button>
+              </div>
+              <div id="smart-result-win" style="display:none;">
+                <div class="tool-card-actions">
+                  <button class="btn-main" onclick="openLogModal('smart-win', document.getElementById('smart-room-win').value)">📄 查看 SMART 信息</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="tool-card" id="card-sio-win">
             <div class="tool-card-head">
               <div class="tool-card-icon">🔧</div>
@@ -597,7 +622,11 @@
               </div>
               <div class="tool-card-actions">
                 <button class="btn-main" id="sio-btn-win" onclick="sioFetch('win')">🔍 抓取 SIO Log</button>
-                <button class="btn-sm" id="sio-dl-win" style="display:none;" onclick="sioDownload('win')">💾 下载 txt</button>
+              </div>
+              <div id="sio-result-win" style="display:none;">
+                <div class="tool-card-actions">
+                  <button class="btn-main" onclick="openLogModal('sio-win', document.getElementById('sio-room-win').value)">📄 查看 SIO Log</button>
+                </div>
               </div>
             </div>
           </div>
@@ -778,6 +807,31 @@
 
         <div class="tool-grid">
 
+          <div class="tool-card" id="card-smart-linux">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">💽</div>
+              <div class="tool-card-title">硬盘健康检测（SMART）</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">读取硬盘 SMART 健康数据（温度/重映射坏道/通电时长/SSD 磨损）——自动安装 smartmontools 后执行</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-smart-linux')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="smart-msg-linux"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="smart-room-linux" onchange="smartClear('linux')"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="smart-btn-linux" onclick="smartFetch('linux')">🔍 检测硬盘健康</button>
+              </div>
+              <div id="smart-result-linux" style="display:none;">
+                <div class="tool-card-actions">
+                  <button class="btn-main" onclick="openLogModal('smart-linux', document.getElementById('smart-room-linux').value)">📄 查看 SMART 信息</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="tool-card" id="card-sio-linux">
             <div class="tool-card-head">
               <div class="tool-card-icon">🔧</div>
@@ -794,7 +848,11 @@
               </div>
               <div class="tool-card-actions">
                 <button class="btn-main" id="sio-btn-linux" onclick="sioFetch('linux')">🔍 抓取 SIO Log</button>
-                <button class="btn-sm" id="sio-dl-linux" style="display:none;" onclick="sioDownload('linux')">💾 下载 txt</button>
+              </div>
+              <div id="sio-result-linux" style="display:none;">
+                <div class="tool-card-actions">
+                  <button class="btn-main" onclick="openLogModal('sio-linux', document.getElementById('sio-room-linux').value)">📄 查看 SIO Log</button>
+                </div>
               </div>
             </div>
           </div>
@@ -919,6 +977,25 @@
           <thead><tr><th data-i18n="bios_th_item">设置项</th><th data-i18n="bios_th_value">当前值</th></tr></thead>
           <tbody id="bios-tbody"></tbody>
         </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 通用日志查看弹窗（SIO Log / SMART 等纯文本结果） -->
+<div class="modal-overlay" id="log-modal">
+  <div class="modal-lg modal-lg-wide">
+    <div class="modal-head">
+      <div class="modal-title" id="log-modal-title">📄 查看日志</div>
+      <button class="modal-close" onclick="closeLogModal()">✕</button>
+    </div>
+    <div class="history-body" style="display:flex; flex-direction:column;">
+      <div class="toolbar" style="margin-bottom:10px; flex-shrink:0;">
+        <button class="btn-sm" onclick="copyLogText()">📋 复制全部</button>
+        <button class="btn-sm" onclick="downloadLogTxt()">💾 下载 .txt</button>
+      </div>
+      <div style="flex:1; overflow:auto; border:1px solid var(--border); border-radius:8px; background:var(--bg);">
+        <pre id="log-modal-content" style="margin:0; padding:12px; font-size:12px; white-space:pre-wrap; word-break:break-all;"></pre>
       </div>
     </div>
   </div>
@@ -1922,6 +1999,7 @@ async function initTools() {
   fillEnergyRoom();
   fillDriversRoom();
   fillSioRoom('win');
+  fillSmartRoom('win');
 }
 
 function fillSntmRoom() {
@@ -2501,6 +2579,52 @@ function initLinuxTools() {
   if (msg) msg.className = 'msg-box';
   fillLinuxLogPackRoom();
   fillSioRoom('linux');
+  fillSmartRoom('linux');
+}
+
+// ===== 硬盘健康检测（SMART）=====
+let smartLogText = { win: '', linux: '' };
+
+function fillSmartRoom(platform) {
+  const roomSel = document.getElementById('smart-room-' + platform);
+  const online = allRooms.filter(r => r.bridge_online);
+  if (!online.length) {
+    roomSel.innerHTML = '<option value="">暂无在线房间</option>';
+  } else {
+    roomSel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+function smartClear(platform) {
+  document.getElementById('smart-msg-' + platform).textContent = '';
+  document.getElementById('smart-result-' + platform).style.display = 'none';
+}
+
+async function smartFetch(platform) {
+  const roomCode = document.getElementById('smart-room-' + platform).value;
+  if (!roomCode) { alert('请选择在线房间'); return; }
+  const msg = document.getElementById('smart-msg-' + platform);
+  const btn = document.getElementById('smart-btn-' + platform);
+  msg.className = 'msg-box';
+  msg.textContent = '正在检测硬盘 SMART 健康（Linux 首次可能需安装 smartmontools，请稍候）...';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/tools/smart', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: roomCode }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    smartLogText[platform] = data.log || '';
+    msg.textContent = '✅ SMART 检测完成（' + smartLogText[platform].split('\n').length + ' 行）——点击下方按钮查看/下载';
+    msg.className = 'msg-box ok';
+    document.getElementById('smart-result-' + platform).style.display = 'block';
+  } catch (e) {
+    msg.className = 'msg-box err';
+    msg.textContent = '检测失败：' + e.message;
+  } finally { btn.disabled = false; }
 }
 
 // ===== SIO Log 硬件诊断日志 =====
@@ -2520,7 +2644,7 @@ function fillSioRoom(platform) {
 
 function sioClear(platform) {
   document.getElementById('sio-msg-' + platform).textContent = '';
-  document.getElementById('sio-dl-' + platform).style.display = 'none';
+  document.getElementById('sio-result-' + platform).style.display = 'none';
 }
 
 async function sioFetch(platform) {
@@ -2539,24 +2663,51 @@ async function sioFetch(platform) {
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
     sioLogText[platform] = data.log || '';
-    msg.className = 'msg-box';
-    msg.innerHTML = '<pre style="margin:0;max-height:320px;overflow:auto;font-size:12px;white-space:pre-wrap;word-break:break-all;">'
-      + escapeHtml(sioLogText[platform]) + '</pre>';
-    document.getElementById('sio-dl-' + platform).style.display = 'inline-block';
+    msg.textContent = '✅ SIO Log 抓取完成（' + sioLogText[platform].split('\n').length + ' 行）——点击下方按钮查看/下载';
+    msg.className = 'msg-box ok';
+    document.getElementById('sio-result-' + platform).style.display = 'block';
   } catch (e) {
     msg.className = 'msg-box err';
     msg.textContent = '抓取失败：' + e.message;
   } finally { btn.disabled = false; }
 }
 
-function sioDownload(platform) {
-  const text = sioLogText[platform] || '';
+// ===== 通用日志查看弹窗（SIO / SMART 共用）=====
+let logModalKind = '';
+let logModalRoom = '';
+
+function getLogState(kind) {
+  const p = kind.split('-')[1] || 'win';
+  if (kind.startsWith('sio')) return { title: '🔧 SIO Log（' + p + '）', text: sioLogText[p] || '' };
+  return { title: '💽 硬盘健康 SMART（' + p + '）', text: smartLogText[p] || '' };
+}
+
+function openLogModal(kind, room) {
+  logModalKind = kind;
+  logModalRoom = room || '';
+  const state = getLogState(kind);
+  document.getElementById('log-modal-title').textContent = state.title;
+  document.getElementById('log-modal-content').textContent = state.text;
+  document.getElementById('log-modal').classList.add('show');
+}
+
+function closeLogModal() {
+  document.getElementById('log-modal').classList.remove('show');
+}
+
+function copyLogText() {
+  const text = document.getElementById('log-modal-content').textContent;
+  navigator.clipboard.writeText(text).then(() => alert('已复制全部内容')).catch(() => alert('复制失败'));
+}
+
+function downloadLogTxt() {
+  const text = document.getElementById('log-modal-content').textContent;
   if (!text) return;
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  const room = document.getElementById('sio-room-' + platform).value || 'room';
-  a.download = 'sio_log_' + room + '_' + new Date().toISOString().slice(0, 10) + '.txt';
+  const prefix = logModalKind.startsWith('sio') ? 'sio_log' : 'smart';
+  a.download = prefix + '_' + (logModalRoom || 'room') + '_' + new Date().toISOString().slice(0, 10) + '.txt';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
 }

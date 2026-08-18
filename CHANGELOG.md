@@ -1,3 +1,29 @@
+## v0.13.3 — 2026-08-17（硬盘健康检测 + SIO/SMART 查看弹窗）
+
+### 新功能：硬盘健康检测（SMART）
+
+- Windows / Linux 工具页新增「硬盘健康检测（SMART）」工具卡片
+- smartctl 升级到 GitHub 最新版 7.5（2025-04-30），含 drivedb.h 驱动数据库
+- Windows 自动分发 smartctl.exe 到客户机执行；Linux 自动安装 smartmontools
+- 完整输出 smartctl -a（全量：设备信息/健康/属性表/错误日志——不再过滤丢失 NVMe 关键属性）
+- 修复：之前 grep 过滤导致 NVMe 属性（Data Units/Power Cycles/Media Errors）丢失、ATA 盘 FAILED 根因不可见
+
+### 交互改造：SIO Log / SMART 仿 BIOS 信息读取
+
+- 抓取完成后卡片显示状态 + 「📄 查看」按钮（不再内嵌长文本）
+- 点击弹出全屏查看窗口（通用 log-modal：SIO/SMART 共用）
+- 弹窗内：完整内容滚动查看 + 复制全部 + 下载 .txt（文件名自动带房间和日期）
+
+### 工具文件
+
+- static/tools/：hwdiag-win.zip、hwdiag-linux、smartctl.exe(7.5)、smartctl-7.5.exe、smartctl-drivedb.h
+
+### 版本号
+
+v0.13.2 → v0.13.3（本地存档，未推 GitHub）
+
+---
+
 ## v0.13.2 — 2026-08-17（SIO Log 硬件诊断日志工具集成）
 
 ### 新功能：SIO Log 抓取（Windows / Linux）
