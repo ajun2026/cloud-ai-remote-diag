@@ -185,6 +185,36 @@
     min-height: 42px; max-height: 120px; font-family: inherit;
   }
   #input-box:focus { border-color: var(--info); }
+  .qa-btn {
+    padding: 5px 12px; font-size: 12px; background: var(--surface2);
+    color: var(--text2); border: 1px solid var(--border); border-radius: 6px;
+    cursor: pointer;
+  }
+  .qa-btn:hover:not(:disabled) { border-color: var(--info); color: var(--info); }
+  .qa-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  /* 启动项面板 */
+  .startup-panel {
+    margin: 8px 14px; padding: 12px 14px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 10px; font-size: 13px;
+  }
+  .startup-panel h4 { margin: 0 0 8px; font-size: 14px; }
+  .startup-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-radius: 6px; cursor: pointer;
+  }
+  .startup-item:hover { background: rgba(96,165,250,0.08); }
+  .startup-item.disabled { opacity: 0.55; cursor: not-allowed; }
+  .startup-item input { accent-color: var(--info); }
+  .st-name { font-weight: 600; min-width: 140px; }
+  .st-desc { color: var(--text2); flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-path { display: block; color: var(--text2); font-size: 11px; opacity: 0.65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-pub { color: var(--text2); font-size: 11px; opacity: 0.75; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  .st-cat { font-size: 11px; padding: 1px 7px; border-radius: 8px; white-space: nowrap; }
+  .st-cat.necessary { background: rgba(46,204,113,0.15); color: #2ecc71; }
+  .st-cat.common { background: rgba(224,168,0,0.15); color: #e0a800; }
+  .st-cat.advisory { background: rgba(231,76,60,0.15); color: #e74c3c; }
+  .st-cat.suspicious { background: rgba(155,89,182,0.15); color: #9b59b6; }
+  .startup-actions { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
   #send-btn {
     padding: 10px 24px; border: none; border-radius: 24px;
     background: var(--accent); color: #fff; font-size: 14px;
@@ -364,6 +394,10 @@
   </div>
 
   <div id="messages"></div>
+
+  <div id="quick-actions" style="display:flex;gap:8px;padding:8px 14px 0;flex-wrap:wrap;">
+    <button class="qa-btn" onclick="quickStartupScan()" title="查询并交互式关闭开机自启动项">🔌 开机自启动</button>
+  </div>
 
   <div id="input-area">
     <textarea id="input-box" data-i18n-placeholder="input_placeholder" placeholder="描述你的电脑问题，例如：帮我检查系统有没有异常" rows="1"></textarea>
@@ -787,6 +821,7 @@ function updateBridgeStatus(connected) {
   // 一键连接信息栏的桥接器状态
   const ri = document.getElementById('ri-bridge');
   if (ri) { ri.innerHTML = connected ? '<span style="color:#2ecc71;">● 在线</span>' : '<span style="color:#888;">● 离线</span>'; }
+  updateQuickActions();  // 快捷功能按钮随桥接器连接状态启停
 }
 
 function updateAutoApproveBtnState() {
@@ -1106,6 +1141,12 @@ function handleMessage(msg) {
     case 'ai_message':
       addAiMessage(msg.content);
       break;
+    case 'startup_list':
+      renderStartupPanel(msg.items || []);
+      break;
+    case 'startup_result':
+      handleStartupResult(msg);
+      break;
     case 'ai_done':
       sendBtn.disabled = false; inputBox.focus();
       break;
@@ -1116,6 +1157,108 @@ function handleMessage(msg) {
     default:
       console.log('Unknown message type:', msg.type, msg);
   }
+}
+
+// ============================================================
+// 快捷功能：开机自启动（QUICK_ACTION）
+// ============================================================
+const CAT_LABEL = { necessary: '🟢 必需', common: '🟡 常用', advisory: '🔴 建议关闭', suspicious: '⚠️ 可疑' };
+let startupPanelEl = null;
+
+function quickStartupScan() {
+  if (!bridgeConnected) { alert('请先连接客户机（📶 连接你的电脑）后再使用此功能'); return; }
+  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立，请稍候'); return; }
+  addSystemMsg('正在查询本机开机自启动项...');
+  ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_scan]' }));
+}
+
+function renderStartupPanel(items) {
+  if (startupPanelEl && startupPanelEl.parentNode) startupPanelEl.remove();
+  const panel = document.createElement('div');
+  panel.className = 'startup-panel';
+  let rows = '';
+  items.slice(0, 30).forEach((it, idx) => {
+    const cat = it.category || 'common';
+    const disabled = cat === 'necessary';
+    const checked = !!it.recommend && !disabled;
+    rows += '<div class="startup-item' + (disabled ? ' disabled' : '') + '" onclick="toggleStartupItem(this,' + idx + ')">'
+      + '<input type="checkbox" data-idx="' + idx + '" ' + (checked ? 'checked' : '') + (disabled ? ' disabled' : '') + '>'
+      + '<span class="st-name" title="' + escapeHtml(it.name || '') + '">' + escapeHtml(it.name || '?') + '</span>'
+      + '<div style="flex:1;min-width:0;">'
+      + '<span class="st-desc">' + escapeHtml((it.display && it.display !== it.name ? it.display + ' — ' : '') + (it.desc || '')) + '</span>'
+      + '<span class="st-path" title="' + escapeHtml(it.command || '') + '">' + escapeHtml(it.command || '') + '</span>'
+      + '</div>'
+      + (it.publisher ? '<span class="st-pub">' + escapeHtml(it.publisher) + '</span>' : '')
+      + '<span class="st-cat ' + cat + '">' + (CAT_LABEL[cat] || cat) + '</span>'
+      + '</div>';
+  });
+  panel.innerHTML = '<h4>🔌 开机自启动项（共 ' + items.length + ' 项）</h4>'
+    + rows
+    + '<div class="startup-actions">'
+    + '<button class="qa-btn" style="background:var(--accent);color:#fff;border:none;font-weight:600;" onclick="confirmStartupClose()">✔ 关闭所选</button>'
+    + '<button class="qa-btn" onclick="clearStartupSel()">全不选</button>'
+    + '<span style="font-size:12px;color:var(--text2);" id="st-count">已选 0 项</span>'
+    + '<span style="font-size:11px;color:var(--text2);margin-left:auto;">🔴 建议关闭项已预勾选 · 🟢 系统必需不可关闭</span>'
+    + '</div>';
+  panel._items = items;
+  messagesEl.appendChild(panel);
+  startupPanelEl = panel;
+  updateStartupCount();
+  scrollBottom();
+}
+
+function toggleStartupItem(row, idx) {
+  const cb = row.querySelector('input');
+  if (cb.disabled) return;
+  cb.checked = !cb.checked;
+  updateStartupCount();
+}
+
+function clearStartupSel() {
+  if (!startupPanelEl) return;
+  startupPanelEl.querySelectorAll('input[type=checkbox]:not(:disabled)').forEach(cb => { cb.checked = false; });
+  updateStartupCount();
+}
+
+function updateStartupCount() {
+  if (!startupPanelEl) return;
+  const n = startupPanelEl.querySelectorAll('input[type=checkbox]:checked').length;
+  const el = startupPanelEl.querySelector('#st-count');
+  if (el) el.textContent = '已选 ' + n + ' 项';
+}
+
+function confirmStartupClose() {
+  if (!startupPanelEl) return;
+  const items = [];
+  const displays = [];
+  startupPanelEl.querySelectorAll('input[type=checkbox]:checked').forEach(cb => {
+    const it = startupPanelEl._items[parseInt(cb.dataset.idx)];
+    if (it) { items.push({ name: it.name, location: it.location, command: it.command }); displays.push(it.display || it.name); }
+  });
+  if (items.length === 0) { alert('请先勾选要关闭的启动项'); return; }
+  if (!confirm('将关闭以下开机自启动项（执行前自动备份到桌面）：\n\n' + displays.join('、') + '\n\n确定执行？')) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立'); return; }
+  addSystemMsg('正在关闭所选启动项...');
+  ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_close] ' + JSON.stringify({ items: items }) }));
+}
+
+function handleStartupResult(msg) {
+  const closed = msg.closed || [];
+  if (startupPanelEl && startupPanelEl._items) {
+    const remain = startupPanelEl._items.filter(it => !closed.includes(it.name));
+    renderStartupPanel(remain);
+  }
+  let txt = '✅ 已关闭 ' + closed.length + ' 项' + (closed.length ? '：' + closed.join('、') : '');
+  if (msg.failed && msg.failed.length) txt += '\n❌ 失败：' + msg.failed.join('、');
+  if (msg.backup) txt += '\n💾 备份位置：' + msg.backup;
+  txt += '\n（误删可恢复：reg import 备份文件 / 复制回原启动文件）';
+  addSystemMsg(txt);
+}
+
+// 桥接器连接状态联动快捷按钮
+function updateQuickActions() {
+  const btns = document.querySelectorAll('.qa-btn');
+  btns.forEach(b => { b.disabled = !bridgeConnected; });
 }
 
 // ============================================================
@@ -1419,6 +1562,7 @@ exportBtn.addEventListener('click', () => {
 langSwitcher.value = currentLang;
 applyLang(currentLang);
 updateAutoApproveBtnState();
+updateQuickActions();  // 初始：未连接时快捷按钮禁用
 // 从 URL 参数进入房间；无参数则回工作台（创建/加入均在工作台完成）
 const urlParams = new URLSearchParams(location.search);
 const roomFromUrl = (urlParams.get('room') || '').trim().toUpperCase();

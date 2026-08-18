@@ -1031,7 +1031,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.0")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.1")
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1488,7 +1488,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.0"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.1"}
 
 
 @app.post("/api/debug_log")
@@ -2067,7 +2067,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.0",
+        "version": "0.13.1",
     }
 
 
@@ -2247,7 +2247,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.0</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.1</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -2896,6 +2896,16 @@ Body: {{"room_code": "{room.code}", "tool": "<工具名>", "args": {{...}}}}
 - 遇到与电脑诊断**无关**的请求（如播放音乐/视频、游戏、娱乐、购物、闲聊等）：**不要执行、不要反复尝试找办法**，直接礼貌回复：「当前远程诊断助手专注于电脑问题诊断，无法执行这类操作。如果您有电脑故障需要排查，请告诉我具体问题。」
 - 判断标准：该请求是否服务于电脑问题诊断/维修目的。不是 → 按上一条处理，不要消耗时间硬做。
 
+### 快捷功能指令（用户点击对话页快捷按钮时你会收到，必须按格式返回）
+1. 收到 `[QUICK_ACTION:startup_scan]`：查询本机开机自启动项（注册表 Run：HKCU/HKLM/WOW6432Node + RunOnce：HKCU/HKLM + 启动文件夹：用户/公用 + 开机触发的计划任务），整理成 JSON 后**在回复末尾**用标记包裹（不要省略、不要改格式）：
+[[STARTUP_LIST]]{"items":[{"name":"BaiduYunDetect","display":"百度网盘","command":"C:\\Users\\x\\AppData\\Roaming\\baidu\\BaiduNetdisk\\YunDetectService.exe","location":"HKCU\\Run","category":"advisory","recommend":true}]}[[/STARTUP_LIST]]
+- category 取值：necessary(系统必需,如 ctfmon)/common(常用软件)/advisory(建议关闭)/suspicious(可疑)
+- recommend=true 仅对 advisory 项（前端预勾选）；necessary 项必填 false
+- 标记之外的部分写简短说明（查到 N 项等），不要重复罗列全部项目
+2. 收到 `[QUICK_ACTION:startup_close]` 后跟 JSON（如 {"names":["BaiduYunDetect"]}）：用户已通过面板勾选确认。执行关闭流程：①备份（reg export 到桌面 run-backup-日期.reg）②删除对应注册表值/启动文件/禁用计划任务 ③验证消失。完成后在回复末尾附：
+[[STARTUP_CLOSED]]{"closed":["BaiduYunDetect"],"failed":[],"backup":"C:\\Users\\x\\Desktop\\run-backup-20260817.reg"}[[/STARTUP_CLOSED]]
+- 只关闭用户点名的项；🟢系统必需项绝不删除；标记之外写简要执行结果说明
+
 ### 工作流程
 1. 先诊断：用 Tier 1 工具或 RunCommand 只读命令收集信息（必要时多次调用，逐步深入）
 2. 用户要求操作时：简要说明后用 curl 调用对应工具，等待接口返回（期间浏览器会弹审批窗给用户）
@@ -2903,6 +2913,268 @@ Body: {{"room_code": "{room.code}", "tool": "<工具名>", "args": {{...}}}}
 4. {reply_lang}
 5. 信息不足时主动询问用户补充细节
 """
+
+
+def extract_marked_json(text: str, tag: str):
+    """从 AI 回复中提取 [[TAG]]{json}[[/TAG]] 标记块，返回 (dict, 剥离标记后的文本)。"""
+    import re as _re
+    pattern = _re.compile(r"\[\[" + _re.escape(tag) + r"\]\](.*?)\[\[/" + _re.escape(tag) + r"\]\]", _re.S)
+    m = pattern.search(text)
+    if not m:
+        return None, text
+    try:
+        data = json.loads(m.group(1).strip())
+    except Exception:
+        return None, text
+    return data, pattern.sub("", text)
+
+
+# ============================================================
+# 快捷功能（QUICK_ACTION）：服务器直接处理，保证结构化输出
+# ============================================================
+STARTUP_SCAN_CMD = (
+    "$paths = @('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run',"
+    "'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run',"
+    "'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run',"
+    "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce',"
+    "'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce',"
+    "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run',"
+    "'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run');"
+    "foreach ($p in $paths) { if (Test-Path $p) { Write-Output ('=== ' + $p + ' ==='); "
+    "$item = Get-ItemProperty $p; $item.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | "
+    "ForEach-Object { $raw = [string]$_.Value; $exe = ($raw -replace '\"','' -split '\\s+')[0]; "
+    "$sig = ''; if ($exe -and (Test-Path $exe)) { try { $sig = (Get-AuthenticodeSignature $exe).SignerCertificate.Subject } catch {} }; "
+    "Write-Output ($_.Name + '|' + $raw + '|' + $sig) } } };"
+    "Write-Output '=== STARTUP-FOLDER ===';"
+    "Get-ChildItem \"$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\" -ErrorAction SilentlyContinue | "
+    "ForEach-Object { $sig = ''; try { $sig = (Get-AuthenticodeSignature $_.FullName).SignerCertificate.Subject } catch {}; "
+    "Write-Output ('FOLDER|' + $_.Name + '|' + $_.FullName + '|' + $sig) };"
+    "Get-ChildItem 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\StartUp' -ErrorAction SilentlyContinue | "
+    "ForEach-Object { $sig = ''; try { $sig = (Get-AuthenticodeSignature $_.FullName).SignerCertificate.Subject } catch {}; "
+    "Write-Output ('FOLDER|' + $_.Name + '|' + $_.FullName + '|' + $sig) };"
+    "Write-Output '=== SCHEDULED-TASKS ===';"
+    "Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.Triggers.CimClass.CimClassName -match 'Boot|Logon' } | "
+    "ForEach-Object { $exe = $_.Actions | Select-Object -First 1 -ExpandProperty Execute -ErrorAction SilentlyContinue; "
+    "$sig = ''; if ($exe -and (Test-Path $exe)) { try { $sig = (Get-AuthenticodeSignature $exe).SignerCertificate.Subject } catch {} }; "
+    "Write-Output ('TASK|' + $_.TaskName + '|' + $_.TaskPath + '|' + $sig) }"
+)
+
+STARTUP_NECESSARY_KEYWORDS = ["ctfmon", "securityhealth", "onedrive"]
+STARTUP_ADVISORY_KEYWORDS = [
+    "updater", "update", "detect", "yun", "baidunetdisk", "quark", "qclaw",
+    "autolaunch", "music", "音乐", "edgeupdate", "googleupdate", "teamsupdate",
+    "nwizard", "rtkaud", "officeupdate",
+]
+
+# 已知启动项库：(关键词列表, 中文名, 功能说明, category, 是否预勾选关闭)
+KNOWN_STARTUP = [
+    (["qqnt", "腾讯qq", "\\qq.exe"], "QQ", "腾讯即时通讯软件，开机自启便于接收消息", "common", False),
+    (["dingtalk", "dingding"], "钉钉", "阿里办公通讯软件，开机自启便于接收工作消息", "common", False),
+    (["feishu", "lark"], "飞书", "字节跳动办公协同软件", "common", False),
+    (["msteams", "teams"], "Microsoft Teams", "微软团队协作软件", "common", False),
+    (["wechat", "weixin"], "微信", "腾讯微信，开机自启便于接收消息", "common", False),
+    (["everything"], "Everything", "极速本地文件搜索工具（常驻建立索引）", "common", False),
+    (["baidunetdisk", "baiduyun", "yundetect"], "百度网盘", "百度网盘后台检测服务（非必要常驻）", "advisory", True),
+    (["thunder", "xunlei"], "迅雷", "下载工具", "common", False),
+    (["wps"], "WPS Office", "金山办公软件套件", "common", False),
+    (["cloudmusic", "网易云"], "网易云音乐", "音乐播放软件（可手动打开）", "advisory", True),
+    (["kuwo", "kugou", "qqmusic", "汽水音乐"], "音乐播放器", "音乐软件（可手动打开）", "advisory", True),
+    (["nwizard", "nvidia"], "NVIDIA 更新助手", "NVIDIA 显卡驱动/GeForce 后台更新", "advisory", True),
+    (["rtkaud"], "瑞昱声卡服务", "Realtek 音频控制面板后台服务", "advisory", True),
+    (["quark"], "夸克更新器", "夸克浏览器/网盘后台更新程序", "advisory", True),
+    (["edgeupdate", "microsoftedge"], "Edge 更新任务", "Edge 浏览器后台自动更新", "advisory", True),
+    (["googleupdater", "googleupdate"], "Google 更新器", "Chrome 及 Google 软件后台更新", "advisory", True),
+    (["lenovovantage", "background monitor", "lenovo"], "联想电源管理", "联想电脑管家电池/功耗后台监控", "common", False),
+    (["360safe", "360tray", "360"], "360 安全软件", "安全防护软件（建议保留）", "necessary", False),
+    (["huorong", "火绒"], "火绒安全", "安全防护软件（建议保留）", "necessary", False),
+    (["steam"], "Steam", "游戏平台（可手动启动）", "advisory", True),
+    (["epicgames", "epic"], "Epic Games", "游戏平台启动器", "advisory", True),
+    (["adobe", "creative cloud"], "Adobe Creative Cloud", "Adobe 软件更新与云端服务", "advisory", True),
+    (["teamviewer"], "TeamViewer", "远程控制软件", "common", False),
+    (["todesk"], "ToDesk", "远程控制软件", "common", False),
+    (["sunlogin", "向日葵"], "向日葵远程控制", "远程控制软件", "common", False),
+    (["tencent meeting", "wemeet"], "腾讯会议", "视频会议软件", "common", False),
+    (["onecloud", "onedrive"], "OneDrive", "微软云盘同步", "common", False),
+    (["baidunetdisk"], "百度网盘", "百度网盘同步/备份服务", "advisory", True),
+]
+
+
+def lookup_known_startup(name: str, path: str) -> dict:
+    """已知库匹配：返回 {display, desc, category, recommend} 或 None。"""
+    low = (name + " " + (path or "")).lower()
+    for keywords, display, desc, cat, rec in KNOWN_STARTUP:
+        if any(k.lower() in low for k in keywords):
+            return {"display": display, "desc": desc, "category": cat, "recommend": rec}
+    return None
+
+
+def parse_publisher(subject: str) -> str:
+    """从签名 Subject 提取公司名（CN=xxx）。"""
+    if not subject:
+        return ""
+    m = re.search(r"CN=([^,]+)", subject)
+    return m.group(1).strip().strip('"') if m else subject[:50]
+
+
+def classify_startup(name: str, path: str) -> str:
+    low = (name + " " + path).lower()
+    if any(k in low for k in STARTUP_NECESSARY_KEYWORDS):
+        return "necessary"
+    if any(k in low for k in STARTUP_ADVISORY_KEYWORDS):
+        return "advisory"
+    return "common"
+
+
+def is_windows_builtin(name: str, path: str, location: str, category: str) -> bool:
+    """判断是否为 Windows 系统自带启动项（面板不展示）。"""
+    low_path = (path or "").lower()
+    if location == "SCHEDULED-TASK":
+        # Microsoft 计划任务目录（\Microsoft\...）视为系统自带
+        return (path or "").lower().startswith("\\microsoft\\")
+    if category == "necessary":
+        return True
+    if low_path.startswith("c:\\windows\\") or "windowsapps" in low_path or "system32" in low_path:
+        return True
+    return False
+
+
+def parse_startup_items(out: str) -> list:
+    """解析查询输出（=== 位置 === + 名称|路径|签名）为结构化 items（已过滤 Windows 自带）。"""
+    items = []
+    current_loc = ""
+    for line in (out or "").splitlines():
+        line = line.strip()
+        if line.startswith("===") and line.endswith("==="):
+            current_loc = line.strip("= ").strip()
+        elif line.startswith("TASK|"):
+            parts = line.split("|", 3)
+            if len(parts) >= 3:
+                name, path, sig = parts[1], parts[2], (parts[3] if len(parts) > 3 else "")
+                cat = classify_startup(name, path)
+                items.append({"name": name, "command": path.strip(),
+                              "location": "SCHEDULED-TASK", "category": cat,
+                              "recommend": cat == "advisory", "publisher": parse_publisher(sig)})
+        elif line.startswith("FOLDER|"):
+            parts = line.split("|", 3)
+            if len(parts) >= 3:
+                name, path, sig = parts[1], parts[2], (parts[3] if len(parts) > 3 else "")
+                cat = classify_startup(name, path)
+                items.append({"name": name, "command": path,
+                              "location": "STARTUP-FOLDER", "category": cat,
+                              "recommend": cat == "advisory", "publisher": parse_publisher(sig)})
+        elif "|" in line:
+            parts = line.split("|", 2)
+            name, raw, sig = parts[0].strip(), parts[1].strip(), (parts[2] if len(parts) > 2 else "")
+            if name and current_loc:
+                cat = classify_startup(name, raw)
+                items.append({"name": name, "command": raw,
+                              "location": current_loc, "category": cat,
+                              "recommend": cat == "advisory", "publisher": parse_publisher(sig)})
+    # 已知库增强：命中则覆盖中文名/功能/分类；未知项标注
+    for it in items:
+        known = lookup_known_startup(it["name"], it["command"])
+        if known:
+            it["display"] = known["display"]
+            it["desc"] = known["desc"]
+            it["category"] = known["category"]
+            it["recommend"] = known["recommend"]
+        else:
+            it["display"] = it["name"]
+            it["desc"] = (it["publisher"] + " 提供的程序") if it["publisher"] else "未识别程序"
+    # 过滤 Windows 自带项（面板只展示第三方/用户启动项）
+    filtered = [it for it in items if not is_windows_builtin(it["name"], it["command"], it["location"], it["category"])]
+    return filtered
+
+
+async def handle_quick_action(room, content: str, websocket) -> bool:
+    """处理快捷功能指令，返回 True 表示已处理（跳过 AI）。"""
+    try:
+        if content.startswith("[QUICK_ACTION:startup_scan]"):
+            await websocket.send_json({"type": "status", "content": "正在查询开机自启动项..."})
+            cmd_id = f"qa_{secrets.token_hex(4)}"
+            try:
+                out = await asyncio.wait_for(
+                    execute_bridge_command(room, "RunCommand", {"command": STARTUP_SCAN_CMD}, cmd_id, tier=1),
+                    timeout=60,
+                )
+            except Exception as e:
+                await websocket.send_json({"type": "error", "content": f"查询失败: {e}"})
+                return True
+            items = parse_startup_items(out)
+            run_logger.info(f"[{room.code}] QUICK_ACTION startup_scan: {len(items)} items")
+            await websocket.send_json({"type": "startup_list", "items": items})
+            return True
+
+        if content.startswith("[QUICK_ACTION:startup_close]"):
+            try:
+                payload = json.loads(content[len("[QUICK_ACTION:startup_close]"):].strip())
+            except Exception:
+                await websocket.send_json({"type": "error", "content": "关闭指令格式错误"})
+                return True
+            targets = payload.get("items") or []
+            if not targets:
+                await websocket.send_json({"type": "error", "content": "未指定要关闭的启动项"})
+                return True
+            # 备份（桌面）
+            backup_file = f"run-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.reg"
+            bak_cmd = (f"reg export 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' "
+                       f"\"$env:USERPROFILE\\Desktop\\{backup_file}\" /y 2>&1 | Out-Null; "
+                       f"reg export 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' "
+                       f"\"$env:USERPROFILE\\Desktop\\{backup_file}\" /y 2>&1 | Out-Null; "
+                       f"Write-Output 'BACKUP_OK'")
+            try:
+                await asyncio.wait_for(
+                    execute_bridge_command(room, "RunCommand", {"command": bak_cmd}, f"qa_{secrets.token_hex(4)}", tier=3),
+                    timeout=60,
+                )
+            except Exception:
+                pass
+            # 逐个删除
+            closed, failed = [], []
+            for t in targets:
+                name = t.get("name", "")
+                loc = t.get("location", "")
+                path = t.get("command", "")
+                if not name:
+                    continue
+                try:
+                    if loc.startswith("HKCU") or loc.startswith("HKLM"):
+                        del_cmd = (f"Remove-ItemProperty -Path '{loc}' -Name '{name}' -ErrorAction SilentlyContinue; "
+                                   f"Write-Output 'DEL_OK'")
+                    elif loc == "STARTUP-FOLDER":
+                        del_cmd = f"Remove-Item '{path}' -Force -ErrorAction SilentlyContinue; Write-Output 'DEL_OK'"
+                    elif loc == "SCHEDULED-TASK":
+                        del_cmd = (f"Disable-ScheduledTask -TaskName '{name}' -TaskPath '{path}' -ErrorAction SilentlyContinue | Out-Null; "
+                                   f"Write-Output 'DEL_OK'")
+                    else:
+                        failed.append(name)
+                        continue
+                    res = await asyncio.wait_for(
+                        execute_bridge_command(room, "RunCommand", {"command": del_cmd}, f"qa_{secrets.token_hex(4)}", tier=3),
+                        timeout=60,
+                    )
+                    if "DEL_OK" in (res or ""):
+                        closed.append(name)
+                    else:
+                        failed.append(name)
+                except Exception:
+                    failed.append(name)
+            run_logger.info(f"[{room.code}] QUICK_ACTION startup_close: closed={closed} failed={failed}")
+            await websocket.send_json({
+                "type": "startup_result",
+                "closed": closed,
+                "failed": failed,
+                "backup": f"C:\\Users\\<用户>\\Desktop\\{backup_file}",
+            })
+            return True
+    except Exception as e:
+        run_logger.exception(f"[{room.code}] QUICK_ACTION error: {e}")
+        try:
+            await websocket.send_json({"type": "error", "content": f"快捷功能执行出错: {e}"})
+        except Exception:
+            pass
+        return True
+    return False
 
 
 async def run_agent_hermes(
@@ -3953,6 +4225,12 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                     })
                     continue
 
+                # === 快捷功能指令：服务器直接处理（不经过 AI，保证结构化输出） ===
+                if user_message.startswith("[QUICK_ACTION:"):
+                    handled = await handle_quick_action(room, user_message, websocket)
+                    if handled:
+                        continue
+
                 # Send "analyzing" and log it
                 run_logger.info(f"[{room_code}] Starting agent (brain={brain}) for message: {user_message[:100]}")
                 await websocket.send_json({
@@ -3989,6 +4267,13 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                                 timeout=300.0  # 5 minute total timeout for agent
                             )
                         chat_logger.info(f"[{room_code}] AI ({brain}): {answer[:500]}")
+                        # 解析快捷功能结构化标记（startup_list / startup_result），剥离标记后发送文本
+                        list_data, answer = extract_marked_json(answer, "STARTUP_LIST")
+                        if list_data and isinstance(list_data, dict) and "items" in list_data:
+                            await safe_send({"type": "startup_list", "items": list_data["items"]})
+                        closed_data, answer = extract_marked_json(answer, "STARTUP_CLOSED")
+                        if closed_data and isinstance(closed_data, dict):
+                            await safe_send({"type": "startup_result", **closed_data})
                         await safe_send({
                             "type": "ai_message",
                             "content": answer,
@@ -4119,7 +4404,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.0+）：
+    # 服务器主动定期发业务 ping（v0.13.1+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -4244,7 +4529,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.1 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,
