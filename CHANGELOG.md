@@ -1,3 +1,20 @@
+## v0.13.2 — 2026-08-17（SIO Log 硬件诊断日志工具集成）
+
+### 新功能：SIO Log 抓取（Windows / Linux）
+
+- Windows 工具页 / Linux 工具页新增「SIO Log 硬件诊断日志」工具卡片
+- 自动流程：下载 HWDiag 工具到客户机 → 解压 → 执行 /DUMPLOG → 返回日志文本
+- 日志在卡片内可滚动查看 + 「💾 下载 txt」按钮（sio_log_房间_日期.txt）
+- 工具文件部署：static/tools/hwdiag-win.zip（exe + LeCrud 驱动）、hwdiag-linux
+- 后端接口：POST /api/tools/sio_log（按房间平台自动选 Windows/Linux 命令链）
+- Windows 需管理员（bridge 提权）、Linux 需 root（自动 sudo + 兜底）
+
+### 版本号
+
+v0.13.1 → v0.13.2（本地存档，未推 GitHub）
+
+---
+
 ## v0.13.1 — 2026-08-17（快捷功能：开机自启动交互式管理）
 
 ### 新功能：快捷功能框架 + 开机自启动面板

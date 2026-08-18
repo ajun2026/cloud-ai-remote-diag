@@ -1031,7 +1031,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.1")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.2")
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1488,7 +1488,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.1"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.2"}
 
 
 @app.post("/api/debug_log")
@@ -2067,7 +2067,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.1",
+        "version": "0.13.2",
     }
 
 
@@ -2247,7 +2247,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.1</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.2</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -4093,6 +4093,65 @@ LINUX_LOGPACK_CMD = (
 )
 
 
+@app.post("/api/tools/sio_log")
+async def tools_sio_log(request: Request):
+    """抓取 SIO 硬件诊断日志（HWDiag /DUMPLOG）——自动下载工具到客户机并执行，返回日志文本。
+    支持 Windows（HwDiagWin.exe + LeCrud 驱动）与 Linux（root）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    platform = (room.machine or {}).get("platform", room.platform)
+    public_url = get_public_url(request)
+
+    if platform == "linux":
+        cmd = (
+            "cd /tmp && "
+            f"curl -sL -o /tmp/hwdiag '{public_url}/static/tools/hwdiag-linux' && "
+            "chmod +x /tmp/hwdiag && "
+            "(sudo /tmp/hwdiag /DUMPLOG > /tmp/sio_log.txt 2>&1 || /tmp/hwdiag /DUMPLOG > /tmp/sio_log.txt 2>&1) && "
+            "cat /tmp/sio_log.txt"
+        )
+    else:
+        cmd = (
+            "$d = \"$env:TEMP\\hwdiag\"; $z = \"$env:TEMP\\hwdiag.zip\"; "
+            f"curl.exe -sL -o $z '{public_url}/static/tools/hwdiag-win.zip'; "
+            "if (!(Test-Path $z)) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
+            "Expand-Archive $z $d -Force -ErrorAction SilentlyContinue; "
+            "if (!(Test-Path \"$d\\HwDiagWin.exe\")) { Write-Output 'EXTRACT_FAIL'; exit }; "
+            "Push-Location $d; cmd /c \"HwDiagWin.exe /DUMPLOG > sio_log.txt 2>&1\"; Pop-Location; "
+            "if (Test-Path \"$d\\sio_log.txt\") { Get-Content \"$d\\sio_log.txt\" -Raw } else { Write-Output 'RUN_FAIL' }"
+        )
+
+    run_logger.info(f"[{room_code}] tools_sio_log: platform={platform}, exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 180, "cwd": ""},
+                                   f"sio_{int(time.time())}", tier=1),
+            timeout=200,
+        )
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+
+    result = result or ""
+    if "DOWNLOAD_FAIL" in result or "EXTRACT_FAIL" in result or "RUN_FAIL" in result:
+        return JSONResponse({"error": "工具执行失败（可能客户机无管理员权限或下载失败）", "log": result[:500]}, status_code=500)
+    run_logger.info(f"[{room_code}] tools_sio_log done: {len(result)} chars")
+    return {"ok": True, "platform": platform, "log": result}
+
+
 @app.post("/api/tools/linux/logpack")
 async def tools_linux_logpack(request: Request):
     """在 Linux 客户机上打包 /var/log 日志到桌面（SN_日期_logs.tar.gz）。"""
@@ -4404,7 +4463,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.1+）：
+    # 服务器主动定期发业务 ping（v0.13.2+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -4529,7 +4588,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.1 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.2 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,

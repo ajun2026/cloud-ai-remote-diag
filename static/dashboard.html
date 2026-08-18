@@ -373,7 +373,7 @@
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
-      <div class="sidebar-footer">v0.13.1</div>
+      <div class="sidebar-footer">v0.13.2</div>
     </aside>
 
     <main class="content">
@@ -581,6 +581,27 @@
 
         <div class="tool-grid">
 
+          <div class="tool-card" id="card-sio-win">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">🔧</div>
+              <div class="tool-card-title">SIO Log 硬件诊断日志</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">抓取 SIO EEPROM 硬件事件日志（温度/电压/异常记录，共 124 条）——自动下载 HWDiag 工具到客户机并执行，日志可查看/下载</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-sio-win')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="sio-msg-win"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="sio-room-win" onchange="sioClear('win')"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="sio-btn-win" onclick="sioFetch('win')">🔍 抓取 SIO Log</button>
+                <button class="btn-sm" id="sio-dl-win" style="display:none;" onclick="sioDownload('win')">💾 下载 txt</button>
+              </div>
+            </div>
+          </div>
+
           <div class="tool-card" id="card-sntm">
             <div class="tool-card-head">
               <div class="tool-card-icon">💾</div>
@@ -756,6 +777,27 @@
         <div class="page-desc" data-i18n="tools_linux_desc">Linux 客户机专用工具集合（Ubuntu / UOS / KOS / 麒麟 / 龙芯等），通过桥接器远程推送到客户机执行</div>
 
         <div class="tool-grid">
+
+          <div class="tool-card" id="card-sio-linux">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">🔧</div>
+              <div class="tool-card-title">SIO Log 硬件诊断日志</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">抓取 SIO EEPROM 硬件事件日志（温度/电压/异常记录，共 124 条）——自动下载 HWDiag Linux 版到客户机（root 执行），日志可查看/下载</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-sio-linux')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="sio-msg-linux"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线，Linux 平台）</label>
+                <select id="sio-room-linux" onchange="sioClear('linux')"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="sio-btn-linux" onclick="sioFetch('linux')">🔍 抓取 SIO Log</button>
+                <button class="btn-sm" id="sio-dl-linux" style="display:none;" onclick="sioDownload('linux')">💾 下载 txt</button>
+              </div>
+            </div>
+          </div>
 
           <div class="tool-card" id="card-linux-logpack">
             <div class="tool-card-head">
@@ -1879,6 +1921,7 @@ async function initTools() {
   fillSleepRoom();
   fillEnergyRoom();
   fillDriversRoom();
+  fillSioRoom('win');
 }
 
 function fillSntmRoom() {
@@ -2457,6 +2500,65 @@ function initLinuxTools() {
   const msg = document.getElementById('linux-logpack-msg');
   if (msg) msg.className = 'msg-box';
   fillLinuxLogPackRoom();
+  fillSioRoom('linux');
+}
+
+// ===== SIO Log 硬件诊断日志 =====
+let sioLogText = { win: '', linux: '' };
+
+function fillSioRoom(platform) {
+  const roomSel = document.getElementById('sio-room-' + platform);
+  const online = allRooms.filter(r => r.bridge_online);
+  if (!online.length) {
+    roomSel.innerHTML = '<option value="">暂无在线房间</option>';
+  } else {
+    roomSel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+function sioClear(platform) {
+  document.getElementById('sio-msg-' + platform).textContent = '';
+  document.getElementById('sio-dl-' + platform).style.display = 'none';
+}
+
+async function sioFetch(platform) {
+  const roomCode = document.getElementById('sio-room-' + platform).value;
+  if (!roomCode) { alert('请选择在线房间'); return; }
+  const msg = document.getElementById('sio-msg-' + platform);
+  const btn = document.getElementById('sio-btn-' + platform);
+  msg.className = 'msg-box';
+  msg.textContent = '正在下载工具并抓取 SIO Log（需 30-60 秒，请稍候）...';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/tools/sio_log', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: roomCode }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    sioLogText[platform] = data.log || '';
+    msg.className = 'msg-box';
+    msg.innerHTML = '<pre style="margin:0;max-height:320px;overflow:auto;font-size:12px;white-space:pre-wrap;word-break:break-all;">'
+      + escapeHtml(sioLogText[platform]) + '</pre>';
+    document.getElementById('sio-dl-' + platform).style.display = 'inline-block';
+  } catch (e) {
+    msg.className = 'msg-box err';
+    msg.textContent = '抓取失败：' + e.message;
+  } finally { btn.disabled = false; }
+}
+
+function sioDownload(platform) {
+  const text = sioLogText[platform] || '';
+  if (!text) return;
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const room = document.getElementById('sio-room-' + platform).value || 'room';
+  a.download = 'sio_log_' + room + '_' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
 }
 
 function fillLinuxLogPackRoom() {
