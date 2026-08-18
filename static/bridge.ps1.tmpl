@@ -7,10 +7,10 @@
 #
 #  Usage:
 #    1) One-line, no download (interactive room prompt):
-#         iex (iwr {{PUBLIC_URL}}/static/bridge.ps1).Content
+#         iex (iwr {{PUBLIC_URL}}/static/bridge.ps1 -UseBasicParsing).Content
 #
 #    2) One-line with room code pre-set (no prompt):
-#         $env:BRIDGE_ROOM = "ABC12345"; iex (iwr {{PUBLIC_URL}}/static/bridge.ps1).Content
+#         $env:BRIDGE_ROOM = "ABC12345"; iex (iwr {{PUBLIC_URL}}/static/bridge.ps1 -UseBasicParsing).Content
 #
 #    3) Download to local file, then run:
 #         powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345

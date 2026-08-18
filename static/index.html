@@ -185,6 +185,36 @@
     min-height: 42px; max-height: 120px; font-family: inherit;
   }
   #input-box:focus { border-color: var(--info); }
+  .qa-btn {
+    padding: 5px 12px; font-size: 12px; background: var(--surface2);
+    color: var(--text2); border: 1px solid var(--border); border-radius: 6px;
+    cursor: pointer;
+  }
+  .qa-btn:hover:not(:disabled) { border-color: var(--info); color: var(--info); }
+  .qa-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  /* 启动项面板 */
+  .startup-panel {
+    margin: 8px 14px; padding: 12px 14px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 10px; font-size: 13px;
+  }
+  .startup-panel h4 { margin: 0 0 8px; font-size: 14px; }
+  .startup-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-radius: 6px; cursor: pointer;
+  }
+  .startup-item:hover { background: rgba(96,165,250,0.08); }
+  .startup-item.disabled { opacity: 0.55; cursor: not-allowed; }
+  .startup-item input { accent-color: var(--info); }
+  .st-name { font-weight: 600; min-width: 140px; }
+  .st-desc { color: var(--text2); flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-path { display: block; color: var(--text2); font-size: 11px; opacity: 0.65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-pub { color: var(--text2); font-size: 11px; opacity: 0.75; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  .st-cat { font-size: 11px; padding: 1px 7px; border-radius: 8px; white-space: nowrap; }
+  .st-cat.necessary { background: rgba(46,204,113,0.15); color: #2ecc71; }
+  .st-cat.common { background: rgba(224,168,0,0.15); color: #e0a800; }
+  .st-cat.advisory { background: rgba(231,76,60,0.15); color: #e74c3c; }
+  .st-cat.suspicious { background: rgba(155,89,182,0.15); color: #9b59b6; }
+  .startup-actions { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
   #send-btn {
     padding: 10px 24px; border: none; border-radius: 24px;
     background: var(--accent); color: #fff; font-size: 14px;
@@ -193,44 +223,6 @@
   #send-btn:hover { opacity: 0.85; }
   #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  /* ====== Connect Dialog ====== */
-  #connect-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
-    display: flex; justify-content: center; align-items: center; z-index: 100;
-  }
-  #connect-dialog {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-    padding: 28px 32px; width: 560px; max-width: 94vw; text-align: center;
-  }
-  #connect-dialog h2 { margin-bottom: 8px; }
-  #connect-dialog p { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
-  #connect-dialog input {
-    width: 100%; padding: 12px; border: 1px solid var(--border);
-    border-radius: 10px; background: var(--bg); color: var(--text);
-    font-size: 16px; text-align: center; letter-spacing: 3px;
-    font-family: monospace; outline: none; text-transform: uppercase;
-  }
-  #connect-dialog input:focus { border-color: var(--info); }
-  #connect-dialog .action-row {
-    display: flex; gap: 10px; margin-top: 16px;
-  }
-  #connect-dialog .action-row button {
-    flex: 1; padding: 14px; border: none; border-radius: 10px;
-    font-size: 15px; font-weight: 700; cursor: pointer;
-  }
-  /* 方案A：创建房间=主按钮(实心亮蓝)，加入房间=次按钮(描边) */
-  #create-room-link {
-    background: var(--info); color: #0b1a2e;
-    border: 1px solid var(--info) !important; font-weight: 700;
-  }
-  #create-room-link:hover { background: #7cb4ff; }
-  #join-btn {
-    background: transparent; color: var(--info);
-    border: 1px solid var(--info) !important; font-weight: 600;
-  }
-  #join-btn:hover { background: rgba(96,165,250,0.15); }
-  #connect-dialog .hint { margin-top: 12px; font-size: 12px; color: var(--text2); }
-  #connect-dialog .hint a { color: var(--info); cursor: pointer; text-decoration: underline; }
 
   /* Close button for connect dialog */
   #connect-dialog { position: relative; }
@@ -329,15 +321,7 @@
     #room-display { font-size: 12px; letter-spacing: 1px; padding: 3px 8px; }
   }
 
-  /* ====== Client download panel (collapsible) ====== */
-  .client-panel { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
-  .client-toggle {
-    display: block; text-align: center; font-size: 12px; color: var(--info);
-    cursor: pointer; padding: 8px; border-radius: 8px;
-    border: 1px dashed var(--border); background: rgba(15,52,96,0.3);
-  }
-  .client-toggle:hover { border-color: var(--info); }
-  .client-body { display: none; margin-top: 12px; text-align: left; }
+  /* ====== Download panel (room one-click connect) ====== */
   .dl-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
   .dl-tab {
     flex: 1; padding: 8px; text-align: center; font-size: 13px; font-weight: 600;
@@ -373,6 +357,7 @@
         <option value="en">EN</option>
       </select>
       <button id="export-btn" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;display:none;" data-i18n="export_btn">导出对话</button>
+      <button id="report-btn" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;display:none;" title="生成诊断观察报告（仅执行记录与采集数据，不含 AI 分析）">📄 生成报告</button>
       <button id="reconnect-btn" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;display:none;" data-i18n="reconnect_btn">重新连接</button>
       <div id="room-display"></div>
     </div>
@@ -410,6 +395,16 @@
 
   <div id="messages"></div>
 
+  <!-- 上门工程师（field）：连接功能可用，无对话权限提示条 -->
+  <div id="field-tip" style="display:none;padding:8px 14px;background:rgba(224,168,0,0.12);color:#e0a800;font-size:12px;border-bottom:1px solid var(--border);">
+    ⚠ 上门工程师账号：可使用「📶 连接你的电脑」与快捷工具；对话诊断由远程工程师处理（不可发送消息）
+  </div>
+
+  <div id="quick-actions" style="display:flex;gap:8px;padding:8px 14px 0;flex-wrap:wrap;">
+    <button class="qa-btn" onclick="quickStartupScan()" title="查询并交互式关闭开机自启动项">🔌 开机自启动</button>
+    <button class="qa-btn" onclick="quickDumpAnalyze()" title="分析本机蓝屏记录与转储（默认 Minidump 目录）">💥 蓝屏分析</button>
+  </div>
+
   <div id="input-area">
     <textarea id="input-box" data-i18n-placeholder="input_placeholder" placeholder="描述你的电脑问题，例如：帮我检查系统有没有异常" rows="1"></textarea>
     <button id="send-btn" disabled data-i18n="send_btn">发送</button>
@@ -417,51 +412,6 @@
 </div>
 
 <!-- Connect Dialog -->
-<div id="connect-overlay">
-  <div id="connect-dialog">
-    <button class="dialog-close" id="close-connect-btn" title="关闭" aria-label="关闭">✕</button>
-    <h2 data-i18n="dialog_title">[+] 加入远程诊断</h2>
-    <p data-i18n="dialog_subtitle">输入 6 位房间码，或创建一个新房间</p>
-    <input id="room-input" type="text" maxlength="8" placeholder="AB12CDEF" autocomplete="off">
-    <div class="action-row">
-      <button id="create-room-link" data-i18n="dialog_create">创建新房间</button>
-      <button id="join-btn" data-i18n="dialog_join">加入房间</button>
-    </div>
-
-    <div class="client-panel">
-      <span class="client-toggle" onclick="toggleClientPanel()" data-i18n="client_toggle">[+] 首次使用？下载桥接器客户端</span>
-      <div class="client-body" id="client-body">
-        <div class="dl-tabs">
-          <div class="dl-tab active" data-tab="win" onclick="switchDlTab('win')">Windows</div>
-          <div class="dl-tab" data-tab="linux" onclick="switchDlTab('linux')">Linux</div>
-        </div>
-
-        <!-- Windows panel -->
-        <div class="dl-tab-panel active" id="dl-panel-win">
-          <a href="/static/bridge-win64.exe" download class="dl-btn" data-i18n="dialog_download">
-            [v] 下载 Windows 桥接器 (bridge-win64.exe, 4.8MB)
-          </a>
-          <div class="dl-note" data-i18n-html="dl_win_note"></div>
-        </div>
-
-        <!-- Linux panel -->
-        <div class="dl-tab-panel" id="dl-panel-linux">
-          <div class="dl-arch-row">
-            <a href="/static/bridge-linux-amd64" download class="dl-arch-btn" title="x86_64 / Ubuntu / UOS / KOS / RedHat">x86_64</a>
-            <a href="/static/bridge-linux-arm64" download class="dl-arch-btn" title="ARM64 / 飞腾 / 鲲鹏">ARM64</a>
-            <a href="/static/bridge-linux-loong64" download class="dl-arch-btn" title="LoongArch / 龙芯">龙芯</a>
-          </div>
-          <div class="dl-cmd">
-            <span class="dl-copy" onclick="copyLinuxCmd(this)" data-i18n="dl_copy">复制</span>
-            <span id="linux-cmd-text">curl -sL {{PUBLIC_URL}}/static/install-linux.sh | bash</span>
-          </div>
-          <a class="dl-toggle" onclick="toggleLinuxHelp()" data-i18n="dl_linux_toggle">[+] Linux 安装教程</a>
-          <div class="dl-help" id="linux-help" data-i18n-html="dl_linux_help"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- 会话空闲提醒（30min 无操作 → 60s 倒计时 → 自动登出） -->
 <div id="idle-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);display:none;justify-content:center;align-items:center;z-index:9998;">
@@ -792,28 +742,6 @@ function applyLang(lang) {
 }
 
 // ============================================================
-// Client download panel
-// ============================================================
-function toggleClientPanel() {
-  const body = document.getElementById('client-body');
-  const toggle = document.querySelector('.client-toggle');
-  if (!body) return;
-  if (body.style.display === 'block') {
-    body.style.display = 'none';
-    toggle.textContent = t('client_toggle');
-  } else {
-    body.style.display = 'block';
-    toggle.textContent = '[-] ' + (currentLang === 'en' ? 'First time? Download the bridge client' : (currentLang === 'zh-TW' ? '首次使用？下載橋接器客戶端' : '首次使用？下载桥接器客户端'));
-  }
-}
-
-function switchDlTab(tab) {
-  document.querySelectorAll('.dl-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
-  document.getElementById('dl-panel-win').classList.toggle('active', tab === 'win');
-  document.getElementById('dl-panel-linux').classList.toggle('active', tab === 'linux');
-}
-
-// ============================================================
 // Linux download helpers
 // ============================================================
 function toggleLinuxHelp() {
@@ -855,6 +783,23 @@ function fallbackCopy(text, done) {
 let ws = null;
 let roomCode = null;
 let bridgeConnected = false;
+let myRole = '';
+let myUsername = '';
+// 加载时获取当前用户角色（用于 field 上门工程师权限控制）
+fetch('/api/auth/me').then(r => r.json()).then(d => {
+  if (d && d.role) {
+    myRole = d.role;
+    myUsername = d.username || '';
+    if (myRole === 'field') {
+      // 上门工程师：连接功能可用——仅禁用聊天输入（不可发消息）
+      const tip = document.getElementById('field-tip');
+      if (tip) { tip.style.display = 'block'; }
+      const ia = document.getElementById('input-area');
+      if (ia) ia.style.display = 'none';
+      // 快捷工具按钮保留（开机自启动/蓝屏分析=服务器直处理，不经 AI）
+    }
+  }
+}).catch(() => {});
 let pendingApprovalId = null;
 let approvalTimerInterval = null;
 let approvalDeadline = 0;
@@ -868,10 +813,6 @@ const sendBtn = document.getElementById('send-btn');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const roomDisplay = document.getElementById('room-display');
-const overlay = document.getElementById('connect-overlay');
-const roomInput = document.getElementById('room-input');
-const joinBtn = document.getElementById('join-btn');
-const createRoomLink = document.getElementById('create-room-link');
 const exportBtn = document.getElementById('export-btn');
 const langSwitcher = document.getElementById('lang-switcher');
 const approvalOverlay = document.getElementById('approval-overlay');
@@ -903,6 +844,7 @@ function updateBridgeStatus(connected) {
   // 一键连接信息栏的桥接器状态
   const ri = document.getElementById('ri-bridge');
   if (ri) { ri.innerHTML = connected ? '<span style="color:#2ecc71;">● 在线</span>' : '<span style="color:#888;">● 离线</span>'; }
+  updateQuickActions();  // 快捷功能按钮随桥接器连接状态启停
 }
 
 function updateAutoApproveBtnState() {
@@ -935,9 +877,10 @@ function connect(room) {
 
   ws.onopen = () => {
     reconnectAttempts = 0;
-    overlay.style.display = 'none';
     document.getElementById('reconnect-btn').style.display = 'none';
     exportBtn.style.display = 'inline-block';
+    const reportBtn = document.getElementById('report-btn');
+    if (reportBtn) reportBtn.style.display = 'inline-block';
     addSystemMsg(t('msg_connected'));
     loadHistory(roomCode);  // 断线重连/刷新后恢复历史对话
     // Sync auto-approve state with server
@@ -977,6 +920,10 @@ function goBackToWorkbench() {
 
 // 从 SQLite 拉取该房间历史并渲染（登录用户可访问 /api/history/{room}）
 async function loadHistory(room) {
+  if (myRole === 'field') {
+    // 上门工程师：不加载对话历史（连接功能不受影响）
+    return;
+  }
   try {
     const resp = await fetch('/api/history/' + room);
     if (resp.status === 401) { addSystemMsg('登录已过期，请重新登录后查看历史记录'); return; }
@@ -1110,12 +1057,28 @@ function fallbackCopy(text, done) {
 }
 
 // ===== 结束诊断（一键关闭：令牌作废 + 房间归档 + 断开桥接器）=====
+async function downloadReport() {
+  if (!roomCode) return;
+  try {
+    const resp = await fetch('/api/report/' + encodeURIComponent(roomCode));
+    if (!resp.ok) { alert('报告生成失败（' + resp.status + '）'); return; }
+    const text = await resp.text();
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'report-' + roomCode + '.txt';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  } catch (e) { alert('网络错误: ' + e.message); }
+}
+
 async function closeRoom() {
   if (!roomCode) return;
   if (!confirm('结束诊断后：桥接器将断开、房间关闭、历史封存（仅管理员可查看）。\n确定结束诊断吗？')) return;
   try {
     const resp = await fetch('/api/room_close/' + encodeURIComponent(roomCode), { method: 'POST' });
     if (resp.ok) {
+      await downloadReport();  // 结束诊断时自动生成并下载观察报告
       alert('房间已结束诊断');
       location.href = '/dashboard';
     } else {
@@ -1205,6 +1168,12 @@ function handleMessage(msg) {
     case 'ai_message':
       addAiMessage(msg.content);
       break;
+    case 'startup_list':
+      renderStartupPanel(msg.items || []);
+      break;
+    case 'startup_result':
+      handleStartupResult(msg);
+      break;
     case 'ai_done':
       sendBtn.disabled = false; inputBox.focus();
       break;
@@ -1215,6 +1184,115 @@ function handleMessage(msg) {
     default:
       console.log('Unknown message type:', msg.type, msg);
   }
+}
+
+// ============================================================
+// 快捷功能：开机自启动（QUICK_ACTION）
+// ============================================================
+const CAT_LABEL = { necessary: '🟢 必需', common: '🟡 常用', advisory: '🔴 建议关闭', suspicious: '⚠️ 可疑' };
+let startupPanelEl = null;
+
+function quickStartupScan() {
+  if (!bridgeConnected) { alert('请先连接客户机（📶 连接你的电脑）后再使用此功能'); return; }
+  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立，请稍候'); return; }
+  addSystemMsg('正在查询本机开机自启动项...');
+  ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_scan]' }));
+}
+
+function quickDumpAnalyze() {
+  if (!bridgeConnected) { alert('请先连接客户机（📶 连接你的电脑）后再使用此功能'); return; }
+  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立，请稍候'); return; }
+  addSystemMsg('正在分析本机蓝屏记录与转储（约 1-2 分钟）...');
+  ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:dump_analyze]' }));
+}
+
+function renderStartupPanel(items) {
+  if (startupPanelEl && startupPanelEl.parentNode) startupPanelEl.remove();
+  const panel = document.createElement('div');
+  panel.className = 'startup-panel';
+  let rows = '';
+  items.slice(0, 30).forEach((it, idx) => {
+    const cat = it.category || 'common';
+    const disabled = cat === 'necessary';
+    const checked = !!it.recommend && !disabled;
+    rows += '<div class="startup-item' + (disabled ? ' disabled' : '') + '" onclick="toggleStartupItem(this,' + idx + ')">'
+      + '<input type="checkbox" data-idx="' + idx + '" ' + (checked ? 'checked' : '') + (disabled ? ' disabled' : '') + '>'
+      + '<span class="st-name" title="' + escapeHtml(it.name || '') + '">' + escapeHtml(it.name || '?') + '</span>'
+      + '<div style="flex:1;min-width:0;">'
+      + '<span class="st-desc">' + escapeHtml((it.display && it.display !== it.name ? it.display + ' — ' : '') + (it.desc || '')) + '</span>'
+      + '<span class="st-path" title="' + escapeHtml(it.command || '') + '">' + escapeHtml(it.command || '') + '</span>'
+      + '</div>'
+      + (it.publisher ? '<span class="st-pub">' + escapeHtml(it.publisher) + '</span>' : '')
+      + '<span class="st-cat ' + cat + '">' + (CAT_LABEL[cat] || cat) + '</span>'
+      + '</div>';
+  });
+  panel.innerHTML = '<h4>🔌 开机自启动项（共 ' + items.length + ' 项）</h4>'
+    + rows
+    + '<div class="startup-actions">'
+    + '<button class="qa-btn" style="background:var(--accent);color:#fff;border:none;font-weight:600;" onclick="confirmStartupClose()">✔ 关闭所选</button>'
+    + '<button class="qa-btn" onclick="clearStartupSel()">全不选</button>'
+    + '<span style="font-size:12px;color:var(--text2);" id="st-count">已选 0 项</span>'
+    + '<span style="font-size:11px;color:var(--text2);margin-left:auto;">🔴 建议关闭项已预勾选 · 🟢 系统必需不可关闭</span>'
+    + '</div>';
+  panel._items = items;
+  messagesEl.appendChild(panel);
+  startupPanelEl = panel;
+  updateStartupCount();
+  scrollBottom();
+}
+
+function toggleStartupItem(row, idx) {
+  const cb = row.querySelector('input');
+  if (cb.disabled) return;
+  cb.checked = !cb.checked;
+  updateStartupCount();
+}
+
+function clearStartupSel() {
+  if (!startupPanelEl) return;
+  startupPanelEl.querySelectorAll('input[type=checkbox]:not(:disabled)').forEach(cb => { cb.checked = false; });
+  updateStartupCount();
+}
+
+function updateStartupCount() {
+  if (!startupPanelEl) return;
+  const n = startupPanelEl.querySelectorAll('input[type=checkbox]:checked').length;
+  const el = startupPanelEl.querySelector('#st-count');
+  if (el) el.textContent = '已选 ' + n + ' 项';
+}
+
+function confirmStartupClose() {
+  if (!startupPanelEl) return;
+  const items = [];
+  const displays = [];
+  startupPanelEl.querySelectorAll('input[type=checkbox]:checked').forEach(cb => {
+    const it = startupPanelEl._items[parseInt(cb.dataset.idx)];
+    if (it) { items.push({ name: it.name, location: it.location, command: it.command }); displays.push(it.display || it.name); }
+  });
+  if (items.length === 0) { alert('请先勾选要关闭的启动项'); return; }
+  if (!confirm('将关闭以下开机自启动项（执行前自动备份到桌面）：\n\n' + displays.join('、') + '\n\n确定执行？')) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立'); return; }
+  addSystemMsg('正在关闭所选启动项...');
+  ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_close] ' + JSON.stringify({ items: items }) }));
+}
+
+function handleStartupResult(msg) {
+  const closed = msg.closed || [];
+  if (startupPanelEl && startupPanelEl._items) {
+    const remain = startupPanelEl._items.filter(it => !closed.includes(it.name));
+    renderStartupPanel(remain);
+  }
+  let txt = '✅ 已关闭 ' + closed.length + ' 项' + (closed.length ? '：' + closed.join('、') : '');
+  if (msg.failed && msg.failed.length) txt += '\n❌ 失败：' + msg.failed.join('、');
+  if (msg.backup) txt += '\n💾 备份位置：' + msg.backup;
+  txt += '\n（误删可恢复：reg import 备份文件 / 复制回原启动文件）';
+  addSystemMsg(txt);
+}
+
+// 桥接器连接状态联动快捷按钮
+function updateQuickActions() {
+  const btns = document.querySelectorAll('.qa-btn');
+  btns.forEach(b => { b.disabled = !bridgeConnected; });
 }
 
 // ============================================================
@@ -1472,30 +1550,13 @@ inputBox.addEventListener('input', () => {
   inputBox.style.height = Math.min(inputBox.scrollHeight, 120) + 'px';
 });
 
-joinBtn.addEventListener('click', () => {
-  let code = roomInput.value.trim().toUpperCase();
-  if (code.length === 8) { connect(code); }
-  else { alert(t('alert_room_code')); }
-});
-roomInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinBtn.click(); });
-createRoomLink.addEventListener('click', () => {
-  // 创建房间已移至工作台（需登录 + 绑定 SN/工单号）
-  goBackToWorkbench();
-});
-
 langSwitcher.addEventListener('change', () => { applyLang(langSwitcher.value); });
 
-// Close / reopen connect dialog
-document.getElementById('close-connect-btn').addEventListener('click', () => {
-  overlay.style.display = 'none';
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    document.getElementById('reconnect-btn').style.display = 'inline-block';
-  }
-});
+// 手动重新连接：直接用当前房间码重连（不弹加入房间框）
 document.getElementById('reconnect-btn').addEventListener('click', () => {
   document.getElementById('reconnect-btn').style.display = 'none';
-  overlay.style.display = 'flex';
-  roomInput.focus();
+  if (roomCode) { connect(roomCode); }
+  else { location.href = '/dashboard'; }
 });
 
 // ============================================================
@@ -1535,6 +1596,7 @@ exportBtn.addEventListener('click', () => {
 langSwitcher.value = currentLang;
 applyLang(currentLang);
 updateAutoApproveBtnState();
+updateQuickActions();  // 初始：未连接时快捷按钮禁用
 // 从 URL 参数进入房间；无参数则回工作台（创建/加入均在工作台完成）
 const urlParams = new URLSearchParams(location.search);
 const roomFromUrl = (urlParams.get('room') || '').trim().toUpperCase();

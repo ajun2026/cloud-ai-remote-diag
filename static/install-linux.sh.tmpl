@@ -15,6 +15,14 @@
 # ============================================================
 
 SERVER="{{PUBLIC_URL}}"
+# 443 被拦时自动切换到 8443 备选端口（探测 /api/health）
+if ! curl -sf --max-time 5 "$SERVER/api/health" >/dev/null 2>&1; then
+    echo "  443 端口不可达，自动使用 8443 备选端口..."
+    SERVER="${SERVER}:8443"
+fi
+# WS 地址由 SERVER 推导（https→wss，http→ws）
+WS_URL="${SERVER/http:\/\//ws:\/\/}"
+WS_URL="${WS_URL/https:\/\//wss:\/\/}"
 INSTALL_DIR="/usr/local/bin"
 
 # 颜色
@@ -94,15 +102,15 @@ echo "  运行方式(一次性使用, 重启后手动启动即可):"
 echo "   bridge"
 echo ""
 echo "  或指定服务器和房间码:"
-echo "   bridge -server {{WS_URL}} -room 房间码"
+echo "   bridge -server $WS_URL -room 房间码"
 echo ""
 if [ -n "$ROOM_ARG" ]; then
   echo "  检测到房间码参数: $ROOM_ARG，直接连接..."
   echo "----------------------------------------------"
   if [ -n "$TOKEN_ARG" ]; then
-    exec "$INSTALL_DIR/bridge" -server {{WS_URL}} -room "$ROOM_ARG" -token "$TOKEN_ARG"
+    exec "$INSTALL_DIR/bridge" -server $WS_URL -room "$ROOM_ARG" -token "$TOKEN_ARG"
   else
-    exec "$INSTALL_DIR/bridge" -server {{WS_URL}} -room "$ROOM_ARG"
+    exec "$INSTALL_DIR/bridge" -server $WS_URL -room "$ROOM_ARG"
   fi
 else
   echo "  现在为你启动交互模式, 请输入房间码:"

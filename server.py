@@ -14,6 +14,7 @@ import re
 import secrets
 import sqlite3
 import time
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -1031,7 +1032,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.12.0")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.7")
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1488,7 +1489,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.12.0"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.7"}
 
 
 @app.post("/api/debug_log")
@@ -1620,6 +1621,22 @@ def token_hash(token: str) -> str:
 
 def generate_connect_token() -> str:
     return secrets.token_urlsafe(24)
+
+
+# 连接令牌明文缓存（有效期内复用——避免多次获取「连接你的电脑」互相顶掉令牌）
+CONNECT_TOKEN_CACHE: dict[str, dict] = {}  # room_code -> {token, exp}
+
+
+def get_or_create_room_token(room_code: str) -> str:
+    """获取房间连接令牌：有效期内复用同一令牌（多次查看/复制命令不互相作废）。"""
+    now = time.time()
+    entry = CONNECT_TOKEN_CACHE.get(room_code)
+    if entry and entry["exp"] > now:
+        return entry["token"]
+    token = generate_connect_token()
+    set_room_token(room_code, token)
+    CONNECT_TOKEN_CACHE[room_code] = {"token": token, "exp": now + TOKEN_TTL}
+    return token
 
 
 def token_expiry_str() -> str:
@@ -1803,14 +1820,50 @@ async def room_connect(room_code: str, request: Request):
 
     public_url = get_public_url(request)
     ws_url = get_ws_url(request)
+    _domain = urllib.parse.urlparse(public_url).netloc.split(":")[0]
 
-    # 生成/刷新连接令牌（每次获取一键连接 = 新令牌，旧令牌作废；同时激活房间）
-    token = generate_connect_token()
-    set_room_token(room_code, token)
+    # 连接令牌：有效期内复用（多次获取不互相顶掉）
+    token = get_or_create_room_token(room_code)
 
-    ps1_cmd = ('$env:BRIDGE_ROOM="' + room_code + '"; $env:BRIDGE_TOKEN="' + token + '"; iex (iwr "' + public_url + '/static/bridge.ps1").Content')
-    bat = "@echo off\r\nbridge-win64.exe -server " + ws_url + " -room " + room_code + " -token " + token + "\r\n"
-    linux_cmd = ("curl -sL \"" + public_url + "/static/install-linux.sh\" | bash -s -- " + room_code + " " + token)
+    ps1_cmd = (
+        '$u="https://' + _domain + '"; '
+        + 'if (!(curl.exe -sk --max-time 5 "$u/api/health" -o NUL 2>$null)) { $u="https://' + _domain + ':8443" }; '
+        + '$env:BRIDGE_SERVER=($u -replace "^http","ws"); $env:BRIDGE_ROOM="' + room_code + '"; $env:BRIDGE_TOKEN="' + token + '"; '
+        + 'iex (iwr "$u/static/bridge.ps1" -UseBasicParsing).Content'
+    )
+    bat = (
+        "@echo off\r\n"
+        "chcp 65001 >nul\r\n"
+        "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
+        "cd /d \"%~dp0\"\r\n"
+        "echo [1/3] Checking network...\r\n"
+        "curl -sk --max-time 5 -o NUL \"https://" + _domain + "/api/health\"\r\n"
+        "if errorlevel 1 (\r\n"
+        "    echo [1/3] Port 443 blocked, using 8443 fallback...\r\n"
+        "    set \"SRV=https://" + _domain + ":8443\"\r\n"
+        "    set \"WSRV=wss://" + _domain + ":8443\"\r\n"
+        ") else (\r\n"
+        "    set \"SRV=https://" + _domain + "\"\r\n"
+        "    set \"WSRV=wss://" + _domain + "\"\r\n"
+        ")\r\n"
+        "echo [2/3] Downloading latest bridge...\r\n"
+        "curl -sL -o \"bridge-win64.exe\" \"%SRV%/static/bridge-win64.exe\"\r\n"
+        "if errorlevel 1 (\r\n"
+        "    echo Download failed. Please check network and retry.\r\n"
+        "    pause\r\n"
+        "    exit /b 1\r\n"
+        ")\r\n"
+        "echo [3/3] Connecting to room " + room_code + " ...\r\n"
+        "echo Keep this window open. Go back to the browser chat page.\r\n"
+        "echo.\r\n"
+        "\"bridge-win64.exe\" -server %WSRV% -room " + room_code + " -token " + token + "\r\n"
+        "pause\r\n"
+    )
+    linux_cmd = (
+        "U=\"https://" + _domain + "\"; "
+        "curl -sf --max-time 5 \"$U/api/health\" >/dev/null 2>&1 || U=\"https://" + _domain + ":8443\"; "
+        "curl -sL \"$U/static/install-linux.sh\" | bash -s -- " + room_code + " " + token
+    )
 
     return {
         "room_code": room_code,
@@ -1855,27 +1908,39 @@ async def room_bat(room_code: str, request: Request):
         return JSONResponse({"error": "无权访问该房间"}, status_code=403)
     public_url = get_public_url(request)
     ws_url = get_ws_url(request)
+    _domain = urllib.parse.urlparse(public_url).netloc.split(":")[0]
 
-    # 生成/刷新连接令牌（每次获取一键连接 = 新令牌，旧令牌作废）
-    token = generate_connect_token()
-    set_room_token(room_code, token)
+    # 连接令牌：有效期内复用（多次获取不互相顶掉）
+    token = get_or_create_room_token(room_code)
 
-    bat = ("@echo off\r\n"
-           "chcp 65001 >nul\r\n"
-           "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
-           "cd /d \"%~dp0\"\r\n"
-           "echo [1/2] Downloading latest bridge...\r\n"
-           "curl -sL -o \"bridge-win64.exe\" \"" + public_url + "/static/bridge-win64.exe\"\r\n"
-           "if errorlevel 1 (\r\n"
-           "    echo Download failed. Please check network and retry.\r\n"
-           "    pause\r\n"
-           "    exit /b 1\r\n"
-           ")\r\n"
-           "echo [2/2] Connecting to room " + room_code + " ...\r\n"
-           "echo Keep this window open. Go back to the browser chat page.\r\n"
-           "echo.\r\n"
-           "\"bridge-win64.exe\" -server " + ws_url + " -room " + room_code + " -token " + token + "\r\n"
-           "pause\r\n")
+    bat = (
+        "@echo off\r\n"
+        "chcp 65001 >nul\r\n"
+        "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
+        "cd /d \"%~dp0\"\r\n"
+        "echo [1/3] Checking network...\r\n"
+        "curl -sk --max-time 5 -o NUL \"https://" + _domain + "/api/health\"\r\n"
+        "if errorlevel 1 (\r\n"
+        "    echo [1/3] Port 443 blocked, using 8443 fallback...\r\n"
+        "    set \"SRV=https://" + _domain + ":8443\"\r\n"
+        "    set \"WSRV=wss://" + _domain + ":8443\"\r\n"
+        ") else (\r\n"
+        "    set \"SRV=https://" + _domain + "\"\r\n"
+        "    set \"WSRV=wss://" + _domain + "\"\r\n"
+        ")\r\n"
+        "echo [2/3] Downloading latest bridge...\r\n"
+        "curl -sL -o \"bridge-win64.exe\" \"%SRV%/static/bridge-win64.exe\"\r\n"
+        "if errorlevel 1 (\r\n"
+        "    echo Download failed. Please check network and retry.\r\n"
+        "    pause\r\n"
+        "    exit /b 1\r\n"
+        ")\r\n"
+        "echo [3/3] Connecting to room " + room_code + " ...\r\n"
+        "echo Keep this window open. Go back to the browser chat page.\r\n"
+        "echo.\r\n"
+        "\"bridge-win64.exe\" -server %WSRV% -room " + room_code + " -token " + token + "\r\n"
+        "pause\r\n"
+    )
     return Response(content=bat, media_type="text/plain; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="connect-{room_code}.bat"'})
 
@@ -1911,6 +1976,70 @@ async def room_close(room_code: str, request: Request):
         room.bridge_ws = None
     run_logger.info(f"[{room_code}] room closed by {user['username']} (archived)")
     return {"ok": True, "status": "archived"}
+
+
+@app.get("/api/report/{room_code}")
+async def room_report(room_code: str, request: Request):
+    """生成诊断观察报告（txt）：只列真实执行记录与采集数据，不做 AI 分析推断。
+    观察级统计（零幻觉）：工具调用清单 + 输出摘要 + 计数统计。仅房间主人/管理员。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = room_code.upper()
+    try:
+        conn = _db_connect()
+        row = conn.execute(
+            "SELECT sn, ticket_no, machine_model, engineer_username, created_at, status FROM rooms WHERE room_code=?",
+            (room_code,),
+        ).fetchone()
+        msgs = conn.execute(
+            "SELECT role, tool_name, content, created_at FROM messages WHERE room_code=? ORDER BY id",
+            (room_code,),
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return JSONResponse({"error": "数据库错误"}, status_code=500)
+    if not row:
+        return JSONResponse({"error": "房间不存在"}, status_code=404)
+    if user.get("role") != "admin" and row["engineer_username"] != user["username"]:
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+
+    tool_msgs = [m for m in msgs if m["role"] == "tool" and m["tool_name"]]
+    user_msgs = [m for m in msgs if m["role"] == "user"]
+    ai_msgs = [m for m in msgs if m["role"] == "ai"]
+
+    lines = []
+    lines.append("================= 诊断观察报告 =================")
+    lines.append(f"房间: {room_code}")
+    lines.append(f"SN: {row['sn'] or '-'} | 工单: {row['ticket_no'] or '-'} | 型号: {row['machine_model'] or '-'}")
+    lines.append(f"工程师: {row['engineer_username'] or '-'} | 创建: {row['created_at'] or '-'}")
+    lines.append(f"房间状态: {row['status'] or 'active'}")
+    lines.append("-------------------------------------------------")
+    lines.append("【执行记录】（按时间，观察级）")
+    if tool_msgs:
+        for m in tool_msgs:
+            ts = (m["created_at"] or "")[11:16] if m["created_at"] else "--:--"
+            lines.append(f"[{ts}] 工具: {m['tool_name']}（输出 {len(m['content'] or '')} 字符）")
+    else:
+        lines.append("（无工具执行记录）")
+    lines.append("-------------------------------------------------")
+    lines.append("【采集数据摘要】（每项截断 500 字符）")
+    if tool_msgs:
+        for m in tool_msgs[:30]:
+            lines.append(f"--- {m['tool_name']} ---")
+            lines.append((m["content"] or "").strip()[:500])
+    else:
+        lines.append("（无）")
+    lines.append("-------------------------------------------------")
+    lines.append("【统计】")
+    lines.append(f"用户提问: {len(user_msgs)} 次")
+    lines.append(f"工具调用: {len(tool_msgs)} 次")
+    lines.append(f"AI 回复: {len(ai_msgs)} 次")
+    lines.append(f"消息总数: {len(msgs)} 条")
+    lines.append("================= 报告结束 =================")
+    txt = "\r\n".join(lines)
+    return Response(content=txt, media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="report-{room_code}.txt"'})
 
 
 @app.get("/api/history/{room_code}")
@@ -2003,7 +2132,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.12.0",
+        "version": "0.13.7",
     }
 
 
@@ -2183,7 +2312,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.12.0</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.7</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -2832,6 +2961,16 @@ Body: {{"room_code": "{room.code}", "tool": "<工具名>", "args": {{...}}}}
 - 遇到与电脑诊断**无关**的请求（如播放音乐/视频、游戏、娱乐、购物、闲聊等）：**不要执行、不要反复尝试找办法**，直接礼貌回复：「当前远程诊断助手专注于电脑问题诊断，无法执行这类操作。如果您有电脑故障需要排查，请告诉我具体问题。」
 - 判断标准：该请求是否服务于电脑问题诊断/维修目的。不是 → 按上一条处理，不要消耗时间硬做。
 
+### 快捷功能指令（用户点击对话页快捷按钮时你会收到，必须按格式返回）
+1. 收到 `[QUICK_ACTION:startup_scan]`：查询本机开机自启动项（注册表 Run：HKCU/HKLM/WOW6432Node + RunOnce：HKCU/HKLM + 启动文件夹：用户/公用 + 开机触发的计划任务），整理成 JSON 后**在回复末尾**用标记包裹（不要省略、不要改格式）：
+[[STARTUP_LIST]]{"items":[{"name":"BaiduYunDetect","display":"百度网盘","command":"C:\\Users\\x\\AppData\\Roaming\\baidu\\BaiduNetdisk\\YunDetectService.exe","location":"HKCU\\Run","category":"advisory","recommend":true}]}[[/STARTUP_LIST]]
+- category 取值：necessary(系统必需,如 ctfmon)/common(常用软件)/advisory(建议关闭)/suspicious(可疑)
+- recommend=true 仅对 advisory 项（前端预勾选）；necessary 项必填 false
+- 标记之外的部分写简短说明（查到 N 项等），不要重复罗列全部项目
+2. 收到 `[QUICK_ACTION:startup_close]` 后跟 JSON（如 {"names":["BaiduYunDetect"]}）：用户已通过面板勾选确认。执行关闭流程：①备份（reg export 到桌面 run-backup-日期.reg）②删除对应注册表值/启动文件/禁用计划任务 ③验证消失。完成后在回复末尾附：
+[[STARTUP_CLOSED]]{"closed":["BaiduYunDetect"],"failed":[],"backup":"C:\\Users\\x\\Desktop\\run-backup-20260817.reg"}[[/STARTUP_CLOSED]]
+- 只关闭用户点名的项；🟢系统必需项绝不删除；标记之外写简要执行结果说明
+
 ### 工作流程
 1. 先诊断：用 Tier 1 工具或 RunCommand 只读命令收集信息（必要时多次调用，逐步深入）
 2. 用户要求操作时：简要说明后用 curl 调用对应工具，等待接口返回（期间浏览器会弹审批窗给用户）
@@ -2839,6 +2978,295 @@ Body: {{"room_code": "{room.code}", "tool": "<工具名>", "args": {{...}}}}
 4. {reply_lang}
 5. 信息不足时主动询问用户补充细节
 """
+
+
+def extract_marked_json(text: str, tag: str):
+    """从 AI 回复中提取 [[TAG]]{json}[[/TAG]] 标记块，返回 (dict, 剥离标记后的文本)。"""
+    import re as _re
+    pattern = _re.compile(r"\[\[" + _re.escape(tag) + r"\]\](.*?)\[\[/" + _re.escape(tag) + r"\]\]", _re.S)
+    m = pattern.search(text)
+    if not m:
+        return None, text
+    try:
+        data = json.loads(m.group(1).strip())
+    except Exception:
+        return None, text
+    return data, pattern.sub("", text)
+
+
+# ============================================================
+# 快捷功能（QUICK_ACTION）：服务器直接处理，保证结构化输出
+# ============================================================
+STARTUP_SCAN_CMD = (
+    "$paths = @('HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run',"
+    "'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run',"
+    "'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run',"
+    "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce',"
+    "'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce',"
+    "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run',"
+    "'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run');"
+    "foreach ($p in $paths) { if (Test-Path $p) { Write-Output ('=== ' + $p + ' ==='); "
+    "$item = Get-ItemProperty $p; $item.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | "
+    "ForEach-Object { $raw = [string]$_.Value; $exe = ($raw -replace '\"','' -split '\\s+')[0]; "
+    "$sig = ''; if ($exe -and (Test-Path $exe)) { try { $sig = (Get-AuthenticodeSignature $exe).SignerCertificate.Subject } catch {} }; "
+    "Write-Output ($_.Name + '|' + $raw + '|' + $sig) } } };"
+    "Write-Output '=== STARTUP-FOLDER ===';"
+    "Get-ChildItem \"$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\" -ErrorAction SilentlyContinue | "
+    "ForEach-Object { $sig = ''; try { $sig = (Get-AuthenticodeSignature $_.FullName).SignerCertificate.Subject } catch {}; "
+    "Write-Output ('FOLDER|' + $_.Name + '|' + $_.FullName + '|' + $sig) };"
+    "Get-ChildItem 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\StartUp' -ErrorAction SilentlyContinue | "
+    "ForEach-Object { $sig = ''; try { $sig = (Get-AuthenticodeSignature $_.FullName).SignerCertificate.Subject } catch {}; "
+    "Write-Output ('FOLDER|' + $_.Name + '|' + $_.FullName + '|' + $sig) };"
+    "Write-Output '=== SCHEDULED-TASKS ===';"
+    "Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.Triggers.CimClass.CimClassName -match 'Boot|Logon' } | "
+    "ForEach-Object { $exe = $_.Actions | Select-Object -First 1 -ExpandProperty Execute -ErrorAction SilentlyContinue; "
+    "$sig = ''; if ($exe -and (Test-Path $exe)) { try { $sig = (Get-AuthenticodeSignature $exe).SignerCertificate.Subject } catch {} }; "
+    "Write-Output ('TASK|' + $_.TaskName + '|' + $_.TaskPath + '|' + $sig) }"
+)
+
+STARTUP_NECESSARY_KEYWORDS = ["ctfmon", "securityhealth", "onedrive"]
+STARTUP_ADVISORY_KEYWORDS = [
+    "updater", "update", "detect", "yun", "baidunetdisk", "quark", "qclaw",
+    "autolaunch", "music", "音乐", "edgeupdate", "googleupdate", "teamsupdate",
+    "nwizard", "rtkaud", "officeupdate",
+]
+
+# 已知启动项库：(关键词列表, 中文名, 功能说明, category, 是否预勾选关闭)
+KNOWN_STARTUP = [
+    (["qqnt", "腾讯qq", "\\qq.exe"], "QQ", "腾讯即时通讯软件，开机自启便于接收消息", "common", False),
+    (["dingtalk", "dingding"], "钉钉", "阿里办公通讯软件，开机自启便于接收工作消息", "common", False),
+    (["feishu", "lark"], "飞书", "字节跳动办公协同软件", "common", False),
+    (["msteams", "teams"], "Microsoft Teams", "微软团队协作软件", "common", False),
+    (["wechat", "weixin"], "微信", "腾讯微信，开机自启便于接收消息", "common", False),
+    (["everything"], "Everything", "极速本地文件搜索工具（常驻建立索引）", "common", False),
+    (["baidunetdisk", "baiduyun", "yundetect"], "百度网盘", "百度网盘后台检测服务（非必要常驻）", "advisory", True),
+    (["thunder", "xunlei"], "迅雷", "下载工具", "common", False),
+    (["wps"], "WPS Office", "金山办公软件套件", "common", False),
+    (["cloudmusic", "网易云"], "网易云音乐", "音乐播放软件（可手动打开）", "advisory", True),
+    (["kuwo", "kugou", "qqmusic", "汽水音乐"], "音乐播放器", "音乐软件（可手动打开）", "advisory", True),
+    (["nwizard", "nvidia"], "NVIDIA 更新助手", "NVIDIA 显卡驱动/GeForce 后台更新", "advisory", True),
+    (["rtkaud"], "瑞昱声卡服务", "Realtek 音频控制面板后台服务", "advisory", True),
+    (["quark"], "夸克更新器", "夸克浏览器/网盘后台更新程序", "advisory", True),
+    (["edgeupdate", "microsoftedge"], "Edge 更新任务", "Edge 浏览器后台自动更新", "advisory", True),
+    (["googleupdater", "googleupdate"], "Google 更新器", "Chrome 及 Google 软件后台更新", "advisory", True),
+    (["lenovovantage", "background monitor", "lenovo"], "联想电源管理", "联想电脑管家电池/功耗后台监控", "common", False),
+    (["360safe", "360tray", "360"], "360 安全软件", "安全防护软件（建议保留）", "necessary", False),
+    (["huorong", "火绒"], "火绒安全", "安全防护软件（建议保留）", "necessary", False),
+    (["steam"], "Steam", "游戏平台（可手动启动）", "advisory", True),
+    (["epicgames", "epic"], "Epic Games", "游戏平台启动器", "advisory", True),
+    (["adobe", "creative cloud"], "Adobe Creative Cloud", "Adobe 软件更新与云端服务", "advisory", True),
+    (["teamviewer"], "TeamViewer", "远程控制软件", "common", False),
+    (["todesk"], "ToDesk", "远程控制软件", "common", False),
+    (["sunlogin", "向日葵"], "向日葵远程控制", "远程控制软件", "common", False),
+    (["tencent meeting", "wemeet"], "腾讯会议", "视频会议软件", "common", False),
+    (["onecloud", "onedrive"], "OneDrive", "微软云盘同步", "common", False),
+    (["baidunetdisk"], "百度网盘", "百度网盘同步/备份服务", "advisory", True),
+]
+
+
+def lookup_known_startup(name: str, path: str) -> dict:
+    """已知库匹配：返回 {display, desc, category, recommend} 或 None。"""
+    low = (name + " " + (path or "")).lower()
+    for keywords, display, desc, cat, rec in KNOWN_STARTUP:
+        if any(k.lower() in low for k in keywords):
+            return {"display": display, "desc": desc, "category": cat, "recommend": rec}
+    return None
+
+
+def parse_publisher(subject: str) -> str:
+    """从签名 Subject 提取公司名（CN=xxx）。"""
+    if not subject:
+        return ""
+    m = re.search(r"CN=([^,]+)", subject)
+    return m.group(1).strip().strip('"') if m else subject[:50]
+
+
+def classify_startup(name: str, path: str) -> str:
+    low = (name + " " + path).lower()
+    if any(k in low for k in STARTUP_NECESSARY_KEYWORDS):
+        return "necessary"
+    if any(k in low for k in STARTUP_ADVISORY_KEYWORDS):
+        return "advisory"
+    return "common"
+
+
+def is_windows_builtin(name: str, path: str, location: str, category: str) -> bool:
+    """判断是否为 Windows 系统自带启动项（面板不展示）。"""
+    low_path = (path or "").lower()
+    if location == "SCHEDULED-TASK":
+        # Microsoft 计划任务目录（\Microsoft\...）视为系统自带
+        return (path or "").lower().startswith("\\microsoft\\")
+    if category == "necessary":
+        return True
+    if low_path.startswith("c:\\windows\\") or "windowsapps" in low_path or "system32" in low_path:
+        return True
+    return False
+
+
+def parse_startup_items(out: str) -> list:
+    """解析查询输出（=== 位置 === + 名称|路径|签名）为结构化 items（已过滤 Windows 自带）。"""
+    items = []
+    current_loc = ""
+    for line in (out or "").splitlines():
+        line = line.strip()
+        if line.startswith("===") and line.endswith("==="):
+            current_loc = line.strip("= ").strip()
+        elif line.startswith("TASK|"):
+            parts = line.split("|", 3)
+            if len(parts) >= 3:
+                name, path, sig = parts[1], parts[2], (parts[3] if len(parts) > 3 else "")
+                cat = classify_startup(name, path)
+                items.append({"name": name, "command": path.strip(),
+                              "location": "SCHEDULED-TASK", "category": cat,
+                              "recommend": cat == "advisory", "publisher": parse_publisher(sig)})
+        elif line.startswith("FOLDER|"):
+            parts = line.split("|", 3)
+            if len(parts) >= 3:
+                name, path, sig = parts[1], parts[2], (parts[3] if len(parts) > 3 else "")
+                cat = classify_startup(name, path)
+                items.append({"name": name, "command": path,
+                              "location": "STARTUP-FOLDER", "category": cat,
+                              "recommend": cat == "advisory", "publisher": parse_publisher(sig)})
+        elif "|" in line:
+            parts = line.split("|", 2)
+            name, raw, sig = parts[0].strip(), parts[1].strip(), (parts[2] if len(parts) > 2 else "")
+            if name and current_loc:
+                cat = classify_startup(name, raw)
+                items.append({"name": name, "command": raw,
+                              "location": current_loc, "category": cat,
+                              "recommend": cat == "advisory", "publisher": parse_publisher(sig)})
+    # 已知库增强：命中则覆盖中文名/功能/分类；未知项标注
+    for it in items:
+        known = lookup_known_startup(it["name"], it["command"])
+        if known:
+            it["display"] = known["display"]
+            it["desc"] = known["desc"]
+            it["category"] = known["category"]
+            it["recommend"] = known["recommend"]
+        else:
+            it["display"] = it["name"]
+            it["desc"] = (it["publisher"] + " 提供的程序") if it["publisher"] else "未识别程序"
+    # 过滤 Windows 自带项（面板只展示第三方/用户启动项）
+    filtered = [it for it in items if not is_windows_builtin(it["name"], it["command"], it["location"], it["category"])]
+    return filtered
+
+
+async def handle_quick_action(room, content: str, websocket) -> bool:
+    """处理快捷功能指令，返回 True 表示已处理（跳过 AI）。"""
+    try:
+        if content.startswith("[QUICK_ACTION:startup_scan]"):
+            await websocket.send_json({"type": "status", "content": "正在查询开机自启动项..."})
+            cmd_id = f"qa_{secrets.token_hex(4)}"
+            try:
+                out = await asyncio.wait_for(
+                    execute_bridge_command(room, "RunCommand", {"command": STARTUP_SCAN_CMD}, cmd_id, tier=1),
+                    timeout=60,
+                )
+            except Exception as e:
+                await websocket.send_json({"type": "error", "content": f"查询失败: {e}"})
+                return True
+            items = parse_startup_items(out)
+            run_logger.info(f"[{room.code}] QUICK_ACTION startup_scan: {len(items)} items")
+            await websocket.send_json({"type": "startup_list", "items": items})
+            return True
+
+        if content.startswith("[QUICK_ACTION:dump_analyze]"):
+            await websocket.send_json({"type": "status", "content": "正在分析本机蓝屏记录与转储（约 1-2 分钟）..."})
+            cmd_id = f"qa_{secrets.token_hex(4)}"
+            public_url = os.getenv("PUBLIC_URL", "").strip().rstrip("/") or "https://clouddiag.online"
+            cmd = (
+                "$s = \"$env:TEMP\\dump_analyze.ps1\"; "
+                f"curl.exe -sL -o $s '{public_url}/static/tools/dump_analyze.ps1'; "
+                "if (!(Test-Path $s)) { Write-Output '[DOWNLOAD_FAIL]'; exit }; "
+                "powershell -NoProfile -ExecutionPolicy Bypass -File $s"
+            )
+            try:
+                out = await asyncio.wait_for(
+                    execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 180}, cmd_id, tier=1),
+                    timeout=200,
+                )
+            except Exception as e:
+                await websocket.send_json({"type": "error", "content": f"蓝屏分析失败: {e}"})
+                return True
+            out = out or ""
+            if "DOWNLOAD_FAIL" in out:
+                await websocket.send_json({"type": "error", "content": "分析脚本下载失败（客户机网络异常）"})
+                return True
+            report = build_dump_report(room.code, out)
+            run_logger.info(f"[{room.code}] QUICK_ACTION dump_analyze done: {len(out)} chars")
+            await websocket.send_json({"type": "ai_message", "content": report})
+            return True
+
+        if content.startswith("[QUICK_ACTION:startup_close]"):
+            try:
+                payload = json.loads(content[len("[QUICK_ACTION:startup_close]"):].strip())
+            except Exception:
+                await websocket.send_json({"type": "error", "content": "关闭指令格式错误"})
+                return True
+            targets = payload.get("items") or []
+            if not targets:
+                await websocket.send_json({"type": "error", "content": "未指定要关闭的启动项"})
+                return True
+            # 备份（桌面）
+            backup_file = f"run-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.reg"
+            bak_cmd = (f"reg export 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' "
+                       f"\"$env:USERPROFILE\\Desktop\\{backup_file}\" /y 2>&1 | Out-Null; "
+                       f"reg export 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' "
+                       f"\"$env:USERPROFILE\\Desktop\\{backup_file}\" /y 2>&1 | Out-Null; "
+                       f"Write-Output 'BACKUP_OK'")
+            try:
+                await asyncio.wait_for(
+                    execute_bridge_command(room, "RunCommand", {"command": bak_cmd}, f"qa_{secrets.token_hex(4)}", tier=3),
+                    timeout=60,
+                )
+            except Exception:
+                pass
+            # 逐个删除
+            closed, failed = [], []
+            for t in targets:
+                name = t.get("name", "")
+                loc = t.get("location", "")
+                path = t.get("command", "")
+                if not name:
+                    continue
+                try:
+                    if loc.startswith("HKCU") or loc.startswith("HKLM"):
+                        del_cmd = (f"Remove-ItemProperty -Path '{loc}' -Name '{name}' -ErrorAction SilentlyContinue; "
+                                   f"Write-Output 'DEL_OK'")
+                    elif loc == "STARTUP-FOLDER":
+                        del_cmd = f"Remove-Item '{path}' -Force -ErrorAction SilentlyContinue; Write-Output 'DEL_OK'"
+                    elif loc == "SCHEDULED-TASK":
+                        del_cmd = (f"Disable-ScheduledTask -TaskName '{name}' -TaskPath '{path}' -ErrorAction SilentlyContinue | Out-Null; "
+                                   f"Write-Output 'DEL_OK'")
+                    else:
+                        failed.append(name)
+                        continue
+                    res = await asyncio.wait_for(
+                        execute_bridge_command(room, "RunCommand", {"command": del_cmd}, f"qa_{secrets.token_hex(4)}", tier=3),
+                        timeout=60,
+                    )
+                    if "DEL_OK" in (res or ""):
+                        closed.append(name)
+                    else:
+                        failed.append(name)
+                except Exception:
+                    failed.append(name)
+            run_logger.info(f"[{room.code}] QUICK_ACTION startup_close: closed={closed} failed={failed}")
+            await websocket.send_json({
+                "type": "startup_result",
+                "closed": closed,
+                "failed": failed,
+                "backup": f"C:\\Users\\<用户>\\Desktop\\{backup_file}",
+            })
+            return True
+    except Exception as e:
+        run_logger.exception(f"[{room.code}] QUICK_ACTION error: {e}")
+        try:
+            await websocket.send_json({"type": "error", "content": f"快捷功能执行出错: {e}"})
+        except Exception:
+            pass
+        return True
+    return False
 
 
 async def run_agent_hermes(
@@ -3757,6 +4185,732 @@ LINUX_LOGPACK_CMD = (
 )
 
 
+# ============================================================
+# 蓝屏分析知识库（微软官方 bugcheck 参考 + 已知坏驱动库）
+# ============================================================
+def load_bugcheck_kb():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'bugcheck_kb.json'), encoding='utf-8') as f:
+            return json.load(f).get('codes', {})
+    except Exception:
+        return {}
+
+
+def load_bad_drivers():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'known_bad_drivers.json'), encoding='utf-8') as f:
+            d = json.load(f)
+            return d.get('drivers', {})
+    except Exception:
+        return {}
+
+
+def norm_bugcheck_code(code: str) -> str:
+    """0x0000003B / 0x3B / 3B → 0x3B（知识库 key 规范格式）"""
+    try:
+        return "0x" + format(int(str(code).strip(), 16), "X")
+    except Exception:
+        return str(code).strip().upper()
+
+
+# 售后实战建议库（高频停止码：具体行动 + 参数含义）——微软页面无直接步骤，由旺财按实战经验补充
+ACTION_KB = {
+    "0x116": {"actions": [
+        "更新 / 回滚显卡驱动（优先官网最新 WHQL 版）",
+        "检查 GPU 温度与散热（清灰、换硅脂、风扇状态）",
+        "调高 TDR 延迟：注册表 HKLM\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers 新建 DWORD TdrDelay=10",
+        "用 GPU 压力测试（FurMark）验证稳定性"],
+        "params": {"1": "设备对象（出问题的 GPU）", "2": "驱动内部函数地址", "4": "TDR 原因码（0xC000009A=资源不足 / 0xC000000D=设备超时）"}},
+    "0x124": {"actions": [
+        "查看 WHEA 事件详情（事件查看器→系统→WHEA-Logger）定位错误源",
+        "优先排查 CPU / 内存 / 主板（内存可跑 memtest86）",
+        "BIOS 恢复默认设置，检查 CPU 电压 / 温度",
+        "更新 BIOS 与芯片组驱动"],
+        "params": {"1": "错误源类型（0=处理器 1=内存 2=PCIe 3=显卡）", "2": "错误源 GUID"}},
+    "0x3B": {"actions": [
+        "回滚最近安装的驱动 / 软件（尤其是显卡驱动）",
+        "运行 sfc /scannow 与 DISM 检查系统文件",
+        "内存检测（Windows 内存诊断 / memtest86）",
+        "更新系统到最新补丁"],
+        "params": {"1": "异常代码（0xC0000005=访问冲突）", "2": "发生异常的地址", "3": "陷阱帧"}},
+    "0x50": {"actions": [
+        "检查内存（Windows 内存诊断 / memtest86）",
+        "回滚最近安装的驱动（网卡 / 显卡 / 存储驱动常见）",
+        "扫描杀毒（防病毒软件触发）",
+        "chkdsk /f 检查磁盘（NTFS 损坏也会触发）"],
+        "params": {"1": "错误的内存地址", "2": "0=读 1=写 8=执行", "3": "引用该地址的指令"}},
+    "0xA": {"actions": [
+        "更新 / 回滚网卡、存储、显卡驱动（IRQL 冲突常见于驱动）",
+        "禁用可疑的过滤驱动（防火墙 / 杀毒）",
+        "运行 sfc /scannow 修复系统文件",
+        "内存检测排除硬件因素"],
+        "params": {"1": "被引用的地址", "2": "发生时的 IRQL", "3": "0=读 1=写", "4": "引用地址的指令"}},
+    "0xD1": {"actions": [
+        "更新 / 回滚网卡、显卡、存储驱动（最常见原因）",
+        "检查是否有第三方过滤驱动（杀毒 / VPN / 防火墙）",
+        "更新 BIOS",
+        "内存检测排除硬件因素"],
+        "params": {"1": "被引用的内存地址", "2": "0=读 1=写", "3": "引用地址的指令", "4": "当前 IRQL"}},
+    "0x7E": {"actions": [
+        "回滚最近安装的驱动（尤其显卡驱动）",
+        "运行 sfc /scannow 修复系统文件",
+        "内存检测（0x7E 常见内存/驱动）",
+        "更新系统补丁"],
+        "params": {"1": "异常代码", "2": "异常地址", "3": "陷阱帧"}},
+    "0x9F": {"actions": [
+        "更新显卡 / 网卡 / USB 控制器驱动（电源状态转换失败）",
+        "更新 BIOS（电源管理相关修复）",
+        "检查电源管理设置（PCI Express 电源管理禁用测试）",
+        "外设逐一断开排查（USB 设备导致睡眠失败）"],
+        "params": {"1": "设备对象", "2": "设备对象状态", "3": "电源 IRP", "4": "设备名"}},
+    "0x133": {"actions": [
+        "更新显卡 / 存储驱动（DPC 长时间占用）",
+        "检查存储设备（SSD 固件更新——部分 SSD 固件 bug 触发）",
+        "检查是否开启了内核调试（bcdedit 删除 debug 设置）"],
+        "params": {"1": "保留", "2": "保留"}},
+    "0x139": {"actions": [
+        "更新 / 回滚最近安装的驱动",
+        "运行 sfc /scannow 与 DISM 修复系统",
+        "内存检测（内核数据结构损坏常与内存有关）",
+        "检查超频设置（CPU/内存恢复默认）"],
+        "params": {"1": "校验失败类型", "2": "保留", "3": "保留"}},
+    "0xEF": {"actions": [
+        "检查系统关键进程（svchost / csrss 等被杀）",
+        "杀毒全盘扫描（确认是否杀毒误杀系统进程）",
+        "恢复最近系统更改（回滚驱动/卸载软件）"],
+        "params": {"1": "终止的进程名"}},
+    "0x24": {"actions": [
+        "chkdsk /f 检查 NTFS 卷",
+        "更新存储驱动（AHCI/NVMe）",
+        "检查硬盘健康（SMART——坏道/即将故障）",
+        "备份数据，考虑更换硬盘"],
+        "params": {"1": "源文件与行号", "2": "NTFS 状态"}},
+    "0x77": {"actions": [
+        "检查硬盘健康（SMART）——内核栈页错误多与磁盘故障相关",
+        "更换 SATA 数据线 / 接口测试",
+        "更新存储驱动"],
+        "params": {"1": "I/O 状态码"}},
+    "0x1A": {"actions": [
+        "内存检测（memtest86）——最常见内存故障",
+        "更新 BIOS / 芯片组驱动",
+        "检查超频设置恢复默认"],
+        "params": {"1": "子类型码"}},
+    "0xC2": {"actions": [
+        "更新 / 回滚驱动（内存池请求错误常见驱动 bug）",
+        "运行 sfc /scannow",
+        "杀毒扫描（恶意软件篡改池）"],
+        "params": {"1": "池类型", "2": "池标记"}},
+    "0x101": {"actions": [
+        "检查 CPU 温度 / 散热（过热降频触发）",
+        "BIOS 恢复默认（关闭超频 / 关闭 C-State 测试）",
+        "更新 BIOS"],
+        "params": {"1": "时钟看门狗超时的处理器"}},
+    "0x10E": {"actions": [
+        "更新显卡驱动（视频内存管理内部错误=驱动 bug）",
+        "回滚到上一稳定版本测试"],
+        "params": {"1": "驱动内存地址"}},
+}
+
+
+def build_dump_report(room_code: str, raw: str) -> str:
+    """解析 dump_analyze.ps1 输出 → 匹配知识库 → 生成中文分析报告。"""
+    kb = load_bugcheck_kb()
+    bd = load_bad_drivers()
+    lines = []
+    events = {}
+    sysinfo = {}
+    bsods = []
+    dumps = []
+    winDbg = {}
+    section = ""
+    for ln in (raw or "").splitlines():
+        ln = ln.strip()
+        if ln.startswith("[EVENTS]"):
+            section = "events"; continue
+        if ln.startswith("[SYSINFO]"):
+            section = "sysinfo"; continue
+        if ln.startswith("[BSODS]"):
+            section = "bsods"; continue
+        if ln.startswith("[DUMPS]"):
+            section = "dumps"; continue
+        if ln.startswith("[WINDBG]"):
+            section = "windbg"; continue
+        if ln.startswith("[NO_DUMP]"):
+            section = "nodump"; continue
+        if section == "events" and "=" in ln:
+            k, v = ln.split("=", 1)
+            events[k] = v
+        elif section == "sysinfo" and "=" in ln:
+            k, v = ln.split("=", 1)
+            if k == "GPU":
+                sysinfo.setdefault("GPUS", []).append(v)
+            else:
+                sysinfo[k] = v
+        elif section == "bsods" and ln.startswith("EVT="):
+            parts = ln.split("|")
+            bsods.append({"time": parts[0][4:] if len(parts) > 1 else "", "code": parts[1] if len(parts) > 1 else ""})
+        elif section == "dumps" and "=" in ln:
+            k, v = ln.split("=", 1)
+            if k == "FILE":
+                dumps.append({"file": v})
+            elif dumps:
+                dumps[-1][k.lower()] = v
+        elif section == "windbg" and "=" in ln:
+            k, v = ln.split("=", 1)
+            winDbg[k] = v
+
+    # 事件信号（说清楚：内存诊断结果 + 磁盘错误细分）
+    kp = int(events.get("KERNEL_POWER_41", 0) or 0)
+    whea = int(events.get("WHEA", 0) or 0)
+    mem_total = int(events.get("MEMORY_DIAG", 0) or 0)
+    mem_fail = int(events.get("MEMORY_DIAG_FAIL", 0) or 0)
+    d7 = int(events.get("DISK_ID7", 0) or 0)
+    d51 = int(events.get("DISK_ID51", 0) or 0)
+    d55 = int(events.get("DISK_ID55", 0) or 0)
+    disk_total = d7 + d51 + d55
+    disk_last = events.get("DISK_LAST", "")
+    therm = int(events.get("THERMAL", 0) or 0)
+    risk = []
+    if kp >= 3: risk.append(f"Kernel-Power 41 意外断电/重启 {kp} 次（⚠ 电源/主板嫌疑）")
+    elif kp > 0: risk.append(f"Kernel-Power 41 意外断电/重启 {kp} 次")
+    if whea > 0: risk.append(f"WHEA 硬件错误 {whea} 次（⚠ 硬件故障信号）")
+    if mem_total > 0:
+        if mem_fail > 0:
+            risk.append(f"Windows 内存诊断 {mem_total} 次（其中 {mem_fail} 次检出错误——⚠ 内存确实有问题）")
+        else:
+            risk.append(f"Windows 内存诊断 {mem_total} 次（结果通过——内存健康，无嫌疑）")
+    if disk_total > 0:
+        parts = []
+        if d7: parts.append(f"ID 7 磁盘坏块/损坏警告 {d7} 次")
+        if d51: parts.append(f"ID 51 分页/IO 错误 {d51} 次")
+        if d55: parts.append(f"ID 55 NTFS 文件系统损坏 {d55} 次")
+        detail = "；".join(parts) + (f"（最近 {disk_last}）" if disk_last else "")
+        if d7 >= 10 or d51 >= 3 or d55 >= 3:
+            risk.append(f"磁盘错误 {disk_total} 次——{detail}（⚠ 硬盘/存储存在持续问题）")
+        else:
+            risk.append(f"磁盘错误 {disk_total} 次——{detail}（偶发，暂不构成强烈嫌疑）")
+    if therm > 0: risk.append(f"热事件 {therm} 次（⚠ 散热/温度嫌疑）")
+
+    lines.append("💥 蓝屏 / Dump 分析报告")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+    # 系统信息
+    if sysinfo.get("MODEL"):
+        gpu_str = "；".join(g.split("|")[0] for g in sysinfo.get("GPUS", []))
+        lines.append(f"💻 {sysinfo.get('MANUFACTURER', '')} {sysinfo.get('MODEL', '')}｜{sysinfo.get('OS', '')}")
+        info_bits = []
+        if sysinfo.get("CPU"): info_bits.append(f"CPU: {sysinfo['CPU'][:60]}")
+        if gpu_str: info_bits.append(f"GPU: {gpu_str[:80]}")
+        if sysinfo.get("BIOS"): info_bits.append(f"BIOS: {sysinfo['BIOS'][:40]}")
+        if info_bits:
+            lines.append("  " + "｜".join(info_bits))
+        lines.append("")
+    # 蓝屏记录（90 天）
+    if bsods:
+        lines.append(f"🔴 蓝屏 / 异常记录（90 天共 {len(bsods)} 次）")
+        code_counter = {}
+        for b in bsods:
+            code_counter[b["code"]] = code_counter.get(b["code"], 0) + 1
+            lines.append(f"  {b.get('time', '?')} | {b.get('code', '无代码')}")
+        same_codes = {c: n for c, n in code_counter.items() if n >= 2 and c}
+        if same_codes:
+            for c, n in same_codes.items():
+                name = (kb.get(norm_bugcheck_code(c)) or {}).get("name", "")
+                lines.append(f"  ⚠ 停止码 {c} {name} 出现 {n} 次——多次相同代码，根因一致，非偶发")
+        lines.append("")
+    if dumps:
+        lines.append(f"🔴 崩溃转储（{len(dumps)} 个）")
+        for d in dumps[:5]:
+            code = d.get("bugcheck", "")
+            lines.append(f"  📄 {d.get('file', '?')} | {d.get('time', '?')} | {d.get('size_mb', '?')} MB")
+            if code:
+                kb_entry = kb.get(norm_bugcheck_code(code))
+                act = ACTION_KB.get(norm_bugcheck_code(code))
+                name = kb_entry.get("name", "") if kb_entry else ""
+                lines.append(f"     停止码: {code} {name}")
+                if d.get("params"):
+                    lines.append(f"     参数: {d['params']}")
+                    # 参数解读
+                    if act and act.get("params"):
+                        plist = [p.strip() for p in d["params"].split("|") if p.strip()]
+                        for i, pv in enumerate(plist[:4], start=1):
+                            desc_p = act["params"].get(str(i))
+                            if desc_p:
+                                lines.append(f"       P{i}: {pv} → {desc_p}")
+                if kb_entry:
+                    if kb_entry.get("desc"):
+                        lines.append(f"     📚 说明: {kb_entry['desc'][:150]}")
+                    if kb_entry.get("cause"):
+                        lines.append(f"     📚 常见原因: {kb_entry['cause'][:150]}")
+                if act and act.get("actions"):
+                    lines.append(f"     🔧 排查行动:")
+                    for a in act["actions"]:
+                        lines.append(f"        · {a}")
+            else:
+                lines.append(f"     （{d.get('parse_skip', '无法解析')}）")
+            # 坏驱动匹配（从参数/模块名近似——从 BUGCHECK_MSG/文件名无法直接得模块——WinDbg 层补充）
+    else:
+        lines.append("ℹ️ 未找到 dump 文件（C:\\Windows\\Minidump / MEMORY.DMP）")
+    if winDbg:
+        lines.append("")
+        lines.append("🔬 WinDbg 深度分析")
+        if winDbg.get("CAUSED_BY"):
+            lines.append(f"  🎯 肇事驱动: {winDbg['CAUSED_BY']}")
+        if winDbg.get("BUCKET"):
+            lines.append(f"  故障桶: {winDbg['BUCKET']}")
+    lines.append("")
+    lines.append("📊 系统事件信号（近 30 天）")
+    if risk:
+        for r in risk:
+            lines.append(f"  {r}")
+    else:
+        lines.append("  无显著异常信号")
+    # 组合推断（无 WinDbg 时按停止码 + 事件信号给方向）
+    if dumps and dumps[0].get("bugcheck"):
+        code_n = norm_bugcheck_code(dumps[0]["bugcheck"])
+        hints = []
+        if code_n == "0x116" or code_n == "0x117" or code_n == "0x119" or code_n == "0x10E":
+            hints.append("🎯 显卡驱动嫌疑高（TDR/视频内存类停止码）——优先更新或回滚显卡驱动")
+        elif code_n == "0x124":
+            hints.append("🎯 WHEA 硬件错误——重点排查 CPU / 内存 / 主板")
+        elif code_n in ("0x50", "0x1A", "0xC2", "0x139"):
+            hints.append("🎯 内存相关嫌疑高——优先内存检测")
+            if mem_fail > 0:
+                hints.append("    （内存诊断曾检出错误，强化内存嫌疑）")
+            elif mem_total > 0:
+                hints.append("    （注：内存诊断结果为通过，嫌疑以代码特征为主）")
+        elif code_n in ("0x24", "0x77"):
+            hints.append("🎯 存储相关嫌疑高——优先检查硬盘健康（SMART）")
+            if disk_total > 0:
+                hints.append("    （磁盘错误事件同时存在，强化硬盘嫌疑）")
+        if disk_total >= 50:
+            hints.append(f"⚠ 磁盘错误事件高达 {disk_total} 次——强烈建议检查硬盘健康（SMART 工具）")
+        if hints:
+            lines.append("")
+            lines.append("🔎 综合判断")
+            for h in hints:
+                lines.append(f"  {h}")
+    # 证据链分析
+    if dumps and dumps[0].get("bugcheck"):
+        code_n = norm_bugcheck_code(dumps[0]["bugcheck"])
+        act = ACTION_KB.get(code_n)
+        lines.append("")
+        lines.append("🧩 证据链分析")
+        if whea == 0:
+            lines.append("  · WHEA 硬件错误日志: 无记录 → 倾向排除 CPU/内存硬件级故障")
+        else:
+            lines.append(f"  · WHEA 硬件错误日志: {whea} 条 → ⚠ 存在硬件级错误信号")
+        disp4101 = int(events.get("DISPLAY_4101", 0) or 0)
+        if code_n in ("0x116", "0x10E", "0x117", "0x119"):
+            if disp4101 == 0:
+                lines.append("  · Display 事件 4101（驱动恢复）: 无记录 → 驱动直接崩溃，未走【停止响应→恢复】流程")
+            else:
+                lines.append(f"  · Display 事件 4101（驱动恢复）: {disp4101} 次 → 驱动曾超时但恢复成功")
+        if kp > 0:
+            lines.append(f"  · Kernel-Power 41: {kp} 次 → 与蓝屏时间吻合（崩溃伴随意外断电重启）")
+        if mem_total > 0:
+            lines.append(f"  · 内存诊断: {mem_total} 次" + ("（检出错误——内存问题）" if mem_fail > 0 else "（通过——内存健康）"))
+        if bsods:
+            first_code = bsods[0].get("code", "")
+            if first_code and all(b.get("code") == first_code for b in bsods if b.get("code")):
+                lines.append(f"  · 多次崩溃停止码一致（{first_code}）→ 根因稳定指向同一类问题")
+        # 结论
+        lines.append("")
+        lines.append("📌 结论")
+        if code_n in ("0x116", "0x10E", "0x117", "0x119"):
+            lines.append(f"  蓝屏为 {code_n} {kb.get(code_n, {}).get('name', '')}——显卡驱动超时/视频内存错误，属驱动级软件故障（非硬件损坏概率高）")
+        elif code_n == "0x124":
+            lines.append("  蓝屏为 WHEA 不可纠正硬件错误——CPU/内存/主板硬件故障概率高，需逐项排除")
+        elif code_n in ("0x50", "0x1A", "0xC2", "0x139"):
+            lines.append("  蓝屏与内存相关——内存故障或驱动内存操作错误，需内存检测确认")
+        elif code_n in ("0x24", "0x77"):
+            lines.append("  蓝屏与存储相关——硬盘/文件系统故障概率高，需 SMART 检测确认")
+        else:
+            lines.append(f"  蓝屏停止码 {code_n}——见上方知识库说明与排查行动")
+        # 优先级建议
+        if act and act.get("actions"):
+            lines.append("")
+            lines.append("🛠 修复建议（按优先级）")
+            for i, a in enumerate(act["actions"], start=1):
+                tag = "核心" if i == 1 else ""
+                lines.append(f"  {i}. {a}" + (f"（核心）" if tag else ""))
+    # 坏驱动知识库命中提示
+    if winDbg.get("CAUSED_BY"):
+        for drv, info in bd.items():
+            if drv.lower() in winDbg["CAUSED_BY"].lower():
+                lines.append("")
+                lines.append(f"📌 已知坏驱动命中: {drv}（{info.get('VendorName', '')} {info.get('DriverType', '')}）")
+                issues = info.get("KnownIssues", [])
+                for it in issues[:2]:
+                    lines.append(f"  ⚠ {it.get('IssueDescription', '')[:120]}")
+                    if it.get("Resolution"):
+                        lines.append(f"  ✅ 解决: {it.get('Resolution', '')[:120]}")
+    lines.append("")
+    lines.append("📝 建议")
+    if dumps and dumps[0].get("bugcheck"):
+        code_n = norm_bugcheck_code(dumps[0]["bugcheck"])
+        kb_entry = kb.get(code_n)
+        act = ACTION_KB.get(code_n)
+        if act and act.get("actions"):
+            lines.append(f"  ⭐ 首选: {act['actions'][0]}")
+            lines.append(f"  完整排查步骤见上方「🔧 排查行动」（共 {len(act['actions'])} 项）")
+        else:
+            adv = ""
+            if kb_entry:
+                adv = (kb_entry.get("advice") or "").replace("Ask Learn", "").strip()
+                if len(adv) < 20 or "想要尝试使用" in adv or "Microsoft Edge" in adv or "Edge" in adv:
+                    adv = kb_entry.get("cause") or ""
+            if adv and len(adv) > 15:
+                lines.append(f"  {adv[:200]}")
+            elif kb_entry and kb_entry.get("name"):
+                lines.append(f"  {kb_entry['name']}——建议排查最近安装的驱动/软件，并用 WinDbg 深度定位肇事驱动。")
+            else:
+                lines.append("  根据停止码查阅微软官方文档确认详细排查步骤。")
+    else:
+        lines.append("  当前无崩溃转储——如有蓝屏问题，建议：启用小转储（系统属性→启动和故障恢复→写入调试信息→小内存转储 256KB）后再观察。")
+    if not winDbg.get("CAUSED_BY"):
+        lines.append("  💡 深度定位: 在客户机安装 WinDbg（winget install Microsoft.WinDbg）后重新分析，可精确定位肇事驱动。")
+    return "\n".join(lines)
+
+
+@app.post("/api/tools/dump_analyze")
+async def tools_dump_analyze(request: Request):
+    """蓝屏 / Dump 分析——下载分析脚本到客户机执行（事件日志+minidump 解析+WinDbg 可选），服务器端匹配知识库生成报告。
+    数据不上云：dump 文件不传输，只回传分析结果。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+    public_url = get_public_url(request)
+
+    # 可选指定 dump 路径（安全过滤：仅允许路径字符，阻止命令注入）
+    dump_path = str(body.get("path", "") or "").strip()
+    if dump_path:
+        dump_path = re.sub(r"['\"`;|&<>()$]", "", dump_path)[:200]
+        path_arg = f" -DumpPath '{dump_path}'"
+    else:
+        path_arg = ""
+
+    cmd = (
+        "$s = \"$env:TEMP\\dump_analyze.ps1\"; "
+        f"curl.exe -sL -o $s '{public_url}/static/tools/dump_analyze.ps1'; "
+        "if (!(Test-Path $s)) { Write-Output '[DOWNLOAD_FAIL]'; exit }; "
+        f"powershell -NoProfile -ExecutionPolicy Bypass -File $s{path_arg}"
+    )
+    run_logger.info(f"[{room_code}] tools_dump_analyze exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 180, "cwd": ""},
+                                   f"dump_analyze_{int(time.time())}", tier=1), timeout=200)
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+    result = result or ""
+    if "DOWNLOAD_FAIL" in result:
+        return JSONResponse({"error": "脚本下载失败（客户机网络异常）"}, status_code=500)
+    run_logger.info(f"[{room_code}] tools_dump_analyze done: {len(result)} chars")
+    report = build_dump_report(room_code, result)
+    return {"ok": True, "report": report, "raw": result}
+
+
+@app.post("/api/tools/raid")
+async def tools_raid(request: Request):
+    """RAID 信息抓取（联想售后三件套：IntelVROCCli / rstcli64 / storcli64）——自动分发到客户机执行。
+    覆盖：Intel VROC / Intel RSTe / Broadcom(LSI) RAID。只读操作。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+    public_url = get_public_url(request)
+
+    cmd = (
+        "$d = \"$env:TEMP\\raid_tools\"; $z = \"$env:TEMP\\raid_tools.zip\"; "
+        f"curl.exe -sL -o $z '{public_url}/static/tools/raid-tools.zip'; "
+        "if (!(Test-Path $z)) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
+        "Expand-Archive $z $d -Force -ErrorAction SilentlyContinue; "
+        "if (!(Test-Path \"$d\\storcli64.exe\")) { Write-Output 'EXTRACT_FAIL'; exit }; "
+        "Push-Location $d; "
+        "$out = @('========== Intel VROC =========='); "
+        "$out += & .\\IntelVROCCli.exe -V 2>&1; "
+        "$out += & .\\IntelVROCCli.exe -I 2>&1; "
+        "$out += ''; $out += '========== Intel RSTe =========='; "
+        "$out += & .\\rstcli64.exe -V 2>&1; "
+        "$out += & .\\rstcli64.exe -I 2>&1; "
+        "$out += ''; $out += '========== Broadcom / LSI (storcli) =========='; "
+        "$out += & .\\storcli64.exe /call/eall/sall show all 2>&1; "
+        "$out += ''; $out += '========== RAID Events =========='; "
+        "$out += & .\\storcli64.exe /call show events 2>&1; "
+        "Pop-Location; "
+        "$out -join \"`n\""
+    )
+    run_logger.info(f"[{room_code}] tools_raid exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 180, "cwd": ""},
+                                   f"raid_{int(time.time())}", tier=1), timeout=200)
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+    result = result or ""
+    if "DOWNLOAD_FAIL" in result:
+        return JSONResponse({"error": "工具下载失败（客户机网络异常）", "log": result[:300]}, status_code=500)
+    run_logger.info(f"[{room_code}] tools_raid done: {len(result)} chars")
+    return {"ok": True, "log": result}
+
+
+@app.post("/api/tools/winlogs")
+async def tools_winlogs(request: Request):
+    """Windows 系统日志收集（System/Application/Security .evtx）——整理到客户机本地 C:\\DiagLogs\\日期\\logs\\。
+    数据不经过云端：只返回文件清单与路径，不传输文件内容。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    cmd = (
+        "$dir = \"C:\\DiagLogs\\$(Get-Date -Format yyyyMMdd)\\logs\"; "
+        "New-Item -ItemType Directory -Force -Path $dir | Out-Null; "
+        "$n1 = 0; $total = 0; "
+        "Get-ChildItem 'C:\\Windows\\System32\\winevt\\Logs\\*.evtx' -ErrorAction SilentlyContinue | ForEach-Object { "
+        "try { Copy-Item $_.FullName \"$dir\\$($_.Name)\" -Force -ErrorAction Stop; $n1++; $total += $_.Length } catch {} }; "
+        "wevtutil epl System \"$dir\\System.evtx\" 2>$null | Out-Null; "
+        "wevtutil epl Application \"$dir\\Application.evtx\" 2>$null | Out-Null; "
+        "wevtutil epl Security \"$dir\\Security.evtx\" 2>$null | Out-Null; "
+        "$n2 = (Get-ChildItem $dir -File).Count; "
+        "Write-Output ('[OK] Collected'); "
+        "Write-Output ('Location: ' + $dir); "
+        "Write-Output ('Log files: ' + $n2 + ' (copied ' + $n1 + ' + exported 3)'); "
+        "Write-Output ('Total size: ' + [math]::Round($total/1MB, 1) + ' MB')"
+    )
+    run_logger.info(f"[{room_code}] tools_winlogs exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 120, "cwd": ""},
+                                   f"winlogs_{int(time.time())}", tier=1), timeout=150)
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+    run_logger.info(f"[{room_code}] tools_winlogs done: {len(result or '')} chars")
+    return {"ok": True, "log": result or ""}
+
+
+@app.post("/api/tools/dump")
+async def tools_dump(request: Request):
+    """Windows 蓝屏 Dump 收集（Minidump + MEMORY.DMP）——复制到客户机本地 C:\\DiagLogs\\日期\\dump\\。
+    数据不经过云端：只返回文件清单与路径，不传输文件内容。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    cmd = (
+        "$dir = \"C:\\DiagLogs\\$(Get-Date -Format yyyyMMdd)\\dump\"; "
+        "New-Item -ItemType Directory -Force -Path $dir | Out-Null; "
+        "$n = 0; $total = 0; "
+        "if (Test-Path 'C:\\Windows\\Minidump') { $files = Get-ChildItem 'C:\\Windows\\Minidump' -File -ErrorAction SilentlyContinue; "
+        "foreach ($f in $files) { Copy-Item $f.FullName $dir -Force -ErrorAction SilentlyContinue; $n++; $total += $f.Length } }; "
+        "if (Test-Path 'C:\\Windows\\MEMORY.DMP') { $m = Get-Item 'C:\\Windows\\MEMORY.DMP'; Copy-Item $m.FullName $dir -Force -ErrorAction SilentlyContinue; $n++; $total += $m.Length }; "
+        "if ($n -eq 0) { Write-Output '[WARN] No dump files found (no BSOD record or different location)' } else { "
+        "Write-Output '[OK] Collected'; "
+        "Write-Output ('Location: ' + $dir); "
+        "Write-Output ('Dump files: ' + $n); "
+        "Write-Output ('Total size: ' + [math]::Round($total/1MB, 1) + ' MB'); "
+        "Write-Output ('Oldest: ' + (Get-ChildItem $dir | Sort-Object LastWriteTime | Select-Object -First 1).LastWriteTime); "
+        "Write-Output ('Latest: ' + (Get-ChildItem $dir | Sort-Object LastWriteTime | Select-Object -Last 1).LastWriteTime) }"
+    )
+    run_logger.info(f"[{room_code}] tools_dump exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 120, "cwd": ""},
+                                   f"dump_{int(time.time())}", tier=1), timeout=150)
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+    run_logger.info(f"[{room_code}] tools_dump done: {len(result or '')} chars")
+    return {"ok": True, "log": result or ""}
+
+
+@app.post("/api/tools/smart")
+async def tools_smart(request: Request):
+    """硬盘健康检测（SMART）——Windows 分发 smartctl.exe；Linux 自动安装 smartmontools 后执行。
+    返回每块盘的 SMART 健康状态 + 属性表。只读操作。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    platform = (room.machine or {}).get("platform", room.platform)
+    public_url = get_public_url(request)
+
+    if platform == "linux":
+        cmd = (
+            "command -v smartctl >/dev/null 2>&1 || (sudo apt install -y smartmontools >/dev/null 2>&1 || sudo yum install -y smartmontools >/dev/null 2>&1); "
+            "for d in $(lsblk -d -o NAME -n 2>/dev/null | grep -E '^(sd|nvme|hd)'); do "
+            "echo \"========== /dev/$d ==========\"; "
+            "sudo smartctl -a /dev/$d 2>&1; "
+            "done"
+        )
+    else:
+        cmd = (
+            "$z = \"$env:TEMP\\smartctl.exe\"; $db = \"$env:TEMP\\smartctl-drivedb.h\"; "
+            f"curl.exe -sL -o $z '{public_url}/static/tools/smartctl.exe'; "
+            f"curl.exe -sL -o $db '{public_url}/static/tools/smartctl-drivedb.h' -ErrorAction SilentlyContinue; "
+            "if (!(Test-Path $z)) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
+            "$scan = (& $z --scan) | ForEach-Object { if ($_ -match '^([^\\s]+)') { $matches[1] } }; "
+            "if (!$scan) { Write-Output 'NO_DISK_FOUND'; exit }; "
+            "$out = @(); "
+            "foreach ($disk in $scan) { $out += \"========== $disk ==========\"; "
+            "$out += & $z -a $disk } "
+            "$out -join \"`n\""
+        )
+
+    run_logger.info(f"[{room_code}] tools_smart: platform={platform}, exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 180, "cwd": ""},
+                                   f"smart_{int(time.time())}", tier=1),
+            timeout=200,
+        )
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+
+    result = result or ""
+    if "DOWNLOAD_FAIL" in result:
+        return JSONResponse({"error": "工具下载失败（客户机网络异常）", "log": result[:300]}, status_code=500)
+    run_logger.info(f"[{room_code}] tools_smart done: {len(result)} chars")
+    return {"ok": True, "platform": platform, "log": result}
+
+
+@app.post("/api/tools/sio_log")
+async def tools_sio_log(request: Request):
+    """抓取 SIO 硬件诊断日志（HWDiag /DUMPLOG）——自动下载工具到客户机并执行，返回日志文本。
+    支持 Windows（HwDiagWin.exe + LeCrud 驱动）与 Linux（root）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    platform = (room.machine or {}).get("platform", room.platform)
+    public_url = get_public_url(request)
+
+    if platform == "linux":
+        cmd = (
+            "cd /tmp && "
+            f"curl -sL -o /tmp/hwdiag '{public_url}/static/tools/hwdiag-linux' && "
+            "chmod +x /tmp/hwdiag && "
+            "(sudo /tmp/hwdiag /DUMPLOG > /tmp/sio_log.txt 2>&1 || /tmp/hwdiag /DUMPLOG > /tmp/sio_log.txt 2>&1) && "
+            "cat /tmp/sio_log.txt"
+        )
+    else:
+        cmd = (
+            "$d = \"$env:TEMP\\hwdiag\"; $z = \"$env:TEMP\\hwdiag.zip\"; "
+            f"curl.exe -sL -o $z '{public_url}/static/tools/hwdiag-win.zip'; "
+            "if (!(Test-Path $z)) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
+            "Expand-Archive $z $d -Force -ErrorAction SilentlyContinue; "
+            "if (!(Test-Path \"$d\\HwDiagWin.exe\")) { Write-Output 'EXTRACT_FAIL'; exit }; "
+            "Push-Location $d; cmd /c \"HwDiagWin.exe /DUMPLOG > sio_log.txt 2>&1\"; Pop-Location; "
+            "if (Test-Path \"$d\\sio_log.txt\") { Get-Content \"$d\\sio_log.txt\" -Raw } else { Write-Output 'RUN_FAIL' }"
+        )
+
+    run_logger.info(f"[{room_code}] tools_sio_log: platform={platform}, exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 180, "cwd": ""},
+                                   f"sio_{int(time.time())}", tier=1),
+            timeout=200,
+        )
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+
+    result = result or ""
+    if "DOWNLOAD_FAIL" in result or "EXTRACT_FAIL" in result or "RUN_FAIL" in result:
+        return JSONResponse({"error": "工具执行失败（可能客户机无管理员权限或下载失败）", "log": result[:500]}, status_code=500)
+
+    # 主链路失败检测：驱动加载失败类错误 → 自动降级到备用工具包（tslog 版 HwDiagWin）
+    DRIVER_FAIL_MARKS = ["StartService Error", "CreateFile Error", "Unable to get bios driver handle",
+                         "bios driver", "driver handle", "LoadLibrary failed", "The specified driver"]
+    if platform != "linux" and any(m.lower() in result.lower() for m in DRIVER_FAIL_MARKS):
+        run_logger.info(f"[{room_code}] tools_sio_log: primary failed (driver), fallback to alt tool")
+        alt_cmd = (
+            "$d = \"$env:TEMP\\hwdiag_alt\"; $z = \"$env:TEMP\\hwdiag_alt.zip\"; "
+            f"curl.exe -sL -o $z '{public_url}/static/tools/hwdiag-alt.zip'; "
+            "if (!(Test-Path $z)) { Write-Output 'ALT_DOWNLOAD_FAIL'; exit }; "
+            "Expand-Archive $z $d -Force -ErrorAction SilentlyContinue; "
+            "if (!(Test-Path \"$d\\HwDiagWin.exe\")) { Write-Output 'ALT_EXTRACT_FAIL'; exit }; "
+            "Push-Location $d; cmd /c \"HwDiagWin.exe /DUMPLOG > sio_log_alt.txt 2>&1\"; Pop-Location; "
+            "if (Test-Path \"$d\\sio_log_alt.txt\") { Get-Content \"$d\\sio_log_alt.txt\" -Raw } else { Write-Output 'ALT_RUN_FAIL' }"
+        )
+        try:
+            result = await asyncio.wait_for(
+                execute_bridge_command(room, "RunCommand", {"command": alt_cmd, "timeout": 180, "cwd": ""},
+                                       f"sio_alt_{int(time.time())}", tier=1),
+                timeout=200,
+            )
+        except Exception as e:
+            return JSONResponse({"error": f"备用链路执行失败: {e}"}, status_code=500)
+        result = result or ""
+        if "ALT_DOWNLOAD_FAIL" in result or "ALT_EXTRACT_FAIL" in result or "ALT_RUN_FAIL" in result:
+            return JSONResponse({"error": "主/备用工具均执行失败（建议手动检查客户机驱动状态）", "log": result[:500]}, status_code=500)
+        run_logger.info(f"[{room_code}] tools_sio_log fallback done: {len(result)} chars")
+        return {"ok": True, "platform": platform, "log": result, "tool": "alt"}
+
+    run_logger.info(f"[{room_code}] tools_sio_log done: {len(result)} chars")
+    return {"ok": True, "platform": platform, "log": result, "tool": "primary"}
+
+
 @app.post("/api/tools/linux/logpack")
 async def tools_linux_logpack(request: Request):
     """在 Linux 客户机上打包 /var/log 日志到桌面（SN_日期_logs.tar.gz）。"""
@@ -3838,6 +4992,10 @@ async def ws_browser(websocket: WebSocket, room_code: str):
         run_logger.info(f"Room re-created from DB (browser): {room_code}")
 
     room.browser_ws = websocket
+    # 浏览器身份（cookie 会话）——用于角色权限（field 上门工程师无对话权）
+    _ws_token = websocket.cookies.get("user_token", "")
+    _ws_sess = USER_SESSIONS.get(_ws_token)
+    ws_role = (_ws_sess or {}).get("role", "")
     # 浏览器重连：取消闲置倒计时（宽限期内回来 = 不关闭）
     if getattr(room, "idle_task", None):
         room.idle_task.cancel()
@@ -3860,6 +5018,12 @@ async def ws_browser(websocket: WebSocket, room_code: str):
             msg_data = json.loads(raw)
 
             if msg_data.get("type") == "chat":
+                # 上门工程师（field）：仅允许快捷工具指令（QUICK_ACTION），禁止对话消息
+                if ws_role == "field":
+                    user_message = msg_data["content"]
+                    if not user_message.startswith("[QUICK_ACTION:"):
+                        await websocket.send_json({"type": "error", "content": "上门工程师账号无对话权限——可使用「连接你的电脑」与快捷工具，对话诊断由远程工程师处理。"})
+                        continue
                 # 房间过期：禁止发新消息（历史可查看）
                 if room_expired_db(room_code):
                     await websocket.send_json({"type": "error", "content": "房间已过期，仅可查看历史记录。如需继续诊断请创建新房间。"})
@@ -3888,6 +5052,12 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                         "content": "Bridge not connected. Please start the bridge on the Windows PC and enter the room code.",
                     })
                     continue
+
+                # === 快捷功能指令：服务器直接处理（不经过 AI，保证结构化输出） ===
+                if user_message.startswith("[QUICK_ACTION:"):
+                    handled = await handle_quick_action(room, user_message, websocket)
+                    if handled:
+                        continue
 
                 # Send "analyzing" and log it
                 run_logger.info(f"[{room_code}] Starting agent (brain={brain}) for message: {user_message[:100]}")
@@ -3925,6 +5095,13 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                                 timeout=300.0  # 5 minute total timeout for agent
                             )
                         chat_logger.info(f"[{room_code}] AI ({brain}): {answer[:500]}")
+                        # 解析快捷功能结构化标记（startup_list / startup_result），剥离标记后发送文本
+                        list_data, answer = extract_marked_json(answer, "STARTUP_LIST")
+                        if list_data and isinstance(list_data, dict) and "items" in list_data:
+                            await safe_send({"type": "startup_list", "items": list_data["items"]})
+                        closed_data, answer = extract_marked_json(answer, "STARTUP_CLOSED")
+                        if closed_data and isinstance(closed_data, dict):
+                            await safe_send({"type": "startup_result", **closed_data})
                         await safe_send({
                             "type": "ai_message",
                             "content": answer,
@@ -4055,7 +5232,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.12.0+）：
+    # 服务器主动定期发业务 ping（v0.13.7+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -4180,7 +5357,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.12.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.7 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,

@@ -182,6 +182,12 @@ func (c *Client) dispatch(msg map[string]interface{}) error {
 	case "pong":
 		// 服务器对 heartbeat 的回复，静默处理（仅用于重置读超时）
 
+	case "status":
+		// 服务器状态/心跳消息（连接状态、房间状态等）——静默忽略，不影响功能
+
+	case "error":
+		c.cfg.Logger.Info("server error: %v", msg["content"])
+
 	case "command":
 		// 异步执行命令：命令可能耗时 60~90s，同步执行会阻塞读循环，
 		// 导致心跳 pong 无人读 → 75s 读超时 → 连接被误断。
