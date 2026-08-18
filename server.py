@@ -1031,7 +1031,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.3")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.4")
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1488,7 +1488,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.3"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.4"}
 
 
 @app.post("/api/debug_log")
@@ -2067,7 +2067,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.3",
+        "version": "0.13.4",
     }
 
 
@@ -2247,7 +2247,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.3</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.4</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -3016,6 +3016,27 @@ def parse_publisher(subject: str) -> str:
     return m.group(1).strip().strip('"') if m else subject[:50]
 
 
+# ============================================================
+# 磁盘空间分析命令（英文输出避免 GBK 乱码；扫描范围：磁盘总览+分区+用户目录+大文件 TOP20）
+# ============================================================
+DISKSPACE_CMD = (
+    "$out = @('===== DISKS ====='); "
+    "$out += Get-Volume | Where-Object { $_.DriveLetter } | ForEach-Object { "
+    "$t = $_.Size; $f = $_.SizeRemaining; "
+    "'{0}: {1} | Total {2} GB | Free {3} GB | Used {4}% | {5}' -f $_.DriveLetter, $_.FileSystemLabel, "
+    "[math]::Round($t/1GB,1), [math]::Round($f/1GB,1), [math]::Round(($t-$f)/$t*100,1), $_.FileSystem }; "
+    "$out += ''; $out += '===== USER FOLDER TOP ====='; "
+    "$out += Get-ChildItem $env:USERPROFILE -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object { "
+    "$s = (Get-ChildItem $_.FullName -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum; "
+    "'{0} GB  {1}' -f [math]::Round($s/1GB,2), $_.Name } | Sort-Object -Descending; "
+    "$out += ''; $out += '===== TOP 20 LARGE FILES ====='; "
+    "$out += Get-ChildItem $env:USERPROFILE -Recurse -Force -File -ErrorAction SilentlyContinue | "
+    "Sort-Object Length -Descending | Select-Object -First 20 | ForEach-Object { "
+    "'{0} GB  {1}' -f [math]::Round($_.Length/1GB,2), $_.FullName }; "
+    "$out -join \"`n\""
+)
+
+
 def classify_startup(name: str, path: str) -> str:
     low = (name + " " + path).lower()
     if any(k in low for k in STARTUP_NECESSARY_KEYWORDS):
@@ -3103,6 +3124,22 @@ async def handle_quick_action(room, content: str, websocket) -> bool:
             items = parse_startup_items(out)
             run_logger.info(f"[{room.code}] QUICK_ACTION startup_scan: {len(items)} items")
             await websocket.send_json({"type": "startup_list", "items": items})
+            return True
+
+        if content.startswith("[QUICK_ACTION:diskspace]"):
+            await websocket.send_json({"type": "status", "content": "正在分析磁盘空间..."})
+            cmd_id = f"qa_{secrets.token_hex(4)}"
+            try:
+                out = await asyncio.wait_for(
+                    execute_bridge_command(room, "RunCommand", {"command": DISKSPACE_CMD, "timeout": 120}, cmd_id, tier=1),
+                    timeout=130,
+                )
+            except Exception as e:
+                await websocket.send_json({"type": "error", "content": f"分析失败: {e}"})
+                return True
+            out = out or ""
+            run_logger.info(f"[{room.code}] QUICK_ACTION diskspace done: {len(out)} chars")
+            await websocket.send_json({"type": "ai_message", "content": "📊 磁盘空间分析结果：\n\n" + out})
             return True
 
         if content.startswith("[QUICK_ACTION:startup_close]"):
@@ -4093,6 +4130,360 @@ LINUX_LOGPACK_CMD = (
 )
 
 
+# ============================================================
+# 蓝屏分析知识库（微软官方 bugcheck 参考 + 已知坏驱动库）
+# ============================================================
+def load_bugcheck_kb():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'bugcheck_kb.json'), encoding='utf-8') as f:
+            return json.load(f).get('codes', {})
+    except Exception:
+        return {}
+
+
+def load_bad_drivers():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'known_bad_drivers.json'), encoding='utf-8') as f:
+            d = json.load(f)
+            return d.get('drivers', {})
+    except Exception:
+        return {}
+
+
+def norm_bugcheck_code(code: str) -> str:
+    """0x0000003B / 0x3B / 3B → 0x3B（知识库 key 规范格式）"""
+    try:
+        return "0x" + format(int(str(code).strip(), 16), "X")
+    except Exception:
+        return str(code).strip().upper()
+
+
+def build_dump_report(room_code: str, raw: str) -> str:
+    """解析 dump_analyze.ps1 输出 → 匹配知识库 → 生成中文分析报告。"""
+    kb = load_bugcheck_kb()
+    bd = load_bad_drivers()
+    lines = []
+    events = {}
+    dumps = []
+    winDbg = {}
+    section = ""
+    for ln in (raw or "").splitlines():
+        ln = ln.strip()
+        if ln.startswith("[EVENTS]"):
+            section = "events"; continue
+        if ln.startswith("[DUMPS]"):
+            section = "dumps"; continue
+        if ln.startswith("[WINDBG]"):
+            section = "windbg"; continue
+        if ln.startswith("[NO_DUMP]"):
+            section = "nodump"; continue
+        if section == "events" and "=" in ln:
+            k, v = ln.split("=", 1)
+            events[k] = v
+        elif section == "dumps" and "=" in ln:
+            k, v = ln.split("=", 1)
+            if k == "FILE" and dumps and not dumps[-1].get("empty"):
+                pass
+            if k == "FILE":
+                dumps.append({"file": v})
+            elif dumps:
+                dumps[-1][k.lower()] = v
+        elif section == "windbg" and "=" in ln:
+            k, v = ln.split("=", 1)
+            winDbg[k] = v
+
+    # 事件信号
+    kp = int(events.get("KERNEL_POWER_41", 0) or 0)
+    whea = int(events.get("WHEA", 0) or 0)
+    mem = int(events.get("MEMORY_DIAG", 0) or 0)
+    disk = int(events.get("DISK_ERR", 0) or 0)
+    therm = int(events.get("THERMAL", 0) or 0)
+    risk = []
+    if kp >= 3: risk.append(f"Kernel-Power 41 意外断电/重启 {kp} 次（⚠ 电源/主板嫌疑）")
+    elif kp > 0: risk.append(f"Kernel-Power 41 意外断电/重启 {kp} 次")
+    if whea > 0: risk.append(f"WHEA 硬件错误 {whea} 次（⚠ 硬件故障信号）")
+    if mem > 0: risk.append(f"内存诊断记录 {mem} 次（⚠ 内存嫌疑）")
+    if disk > 0: risk.append(f"存储/磁盘错误 {disk} 次（⚠ 硬盘嫌疑）")
+    if therm > 0: risk.append(f"热事件 {therm} 次（⚠ 散热/温度嫌疑）")
+
+    lines.append("💥 蓝屏 / Dump 分析报告")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+    if dumps:
+        lines.append(f"🔴 崩溃转储（{len(dumps)} 个）")
+        for d in dumps[:5]:
+            code = d.get("bugcheck", "")
+            lines.append(f"  📄 {d.get('file', '?')} | {d.get('time', '?')} | {d.get('size_mb', '?')} MB")
+            if code:
+                kb_entry = kb.get(norm_bugcheck_code(code))
+                name = kb_entry.get("name", "") if kb_entry else ""
+                lines.append(f"     停止码: {code} {name}")
+                if d.get("params"):
+                    lines.append(f"     参数: {d['params']}")
+                if kb_entry:
+                    if kb_entry.get("desc"):
+                        lines.append(f"     📚 说明: {kb_entry['desc'][:150]}")
+                    if kb_entry.get("cause"):
+                        lines.append(f"     📚 常见原因: {kb_entry['cause'][:150]}")
+            else:
+                lines.append(f"     （{d.get('parse_skip', '无法解析')}）")
+            # 坏驱动匹配（从参数/模块名近似——从 BUGCHECK_MSG/文件名无法直接得模块——WinDbg 层补充）
+    else:
+        lines.append("ℹ️ 未找到 dump 文件（C:\\Windows\\Minidump / MEMORY.DMP）")
+    if winDbg:
+        lines.append("")
+        lines.append("🔬 WinDbg 深度分析")
+        if winDbg.get("CAUSED_BY"):
+            lines.append(f"  🎯 肇事驱动: {winDbg['CAUSED_BY']}")
+        if winDbg.get("BUCKET"):
+            lines.append(f"  故障桶: {winDbg['BUCKET']}")
+    lines.append("")
+    lines.append("📊 系统事件信号（近 30 天）")
+    if risk:
+        for r in risk:
+            lines.append(f"  {r}")
+    else:
+        lines.append("  无显著异常信号")
+    # 坏驱动知识库命中提示
+    if winDbg.get("CAUSED_BY"):
+        for drv, info in bd.items():
+            if drv.lower() in winDbg["CAUSED_BY"].lower():
+                lines.append("")
+                lines.append(f"📌 已知坏驱动命中: {drv}（{info.get('VendorName', '')} {info.get('DriverType', '')}）")
+                issues = info.get("KnownIssues", [])
+                for it in issues[:2]:
+                    lines.append(f"  ⚠ {it.get('IssueDescription', '')[:120]}")
+                    if it.get("Resolution"):
+                        lines.append(f"  ✅ 解决: {it.get('Resolution', '')[:120]}")
+    lines.append("")
+    lines.append("📝 建议")
+    if dumps and dumps[0].get("bugcheck"):
+        kb_entry = kb.get(norm_bugcheck_code(dumps[0]["bugcheck"]))
+        adv = ""
+        if kb_entry:
+            adv = (kb_entry.get("advice") or "").replace("Ask Learn", "").strip()
+            if len(adv) < 20 or "想要尝试使用" in adv:
+                adv = kb_entry.get("cause") or ""
+        if adv and len(adv) > 15:
+            lines.append(f"  {adv[:200]}")
+        elif kb_entry and kb_entry.get("name"):
+            lines.append(f"  {kb_entry['name']}——建议排查最近安装的驱动/软件，并用 WinDbg 深度定位肇事驱动。")
+        else:
+            lines.append("  根据停止码查阅微软官方文档确认详细排查步骤。")
+    else:
+        lines.append("  当前无崩溃转储——如有蓝屏问题，建议：启用小转储（系统属性→启动和故障恢复→写入调试信息→小内存转储 256KB）后再观察。")
+    if not winDbg.get("CAUSED_BY"):
+        lines.append("  💡 深度定位: 在客户机安装 WinDbg（winget install Microsoft.WinDbg）后重新分析，可精确定位肇事驱动。")
+    return "\n".join(lines)
+
+
+@app.post("/api/tools/dump_analyze")
+async def tools_dump_analyze(request: Request):
+    """蓝屏 / Dump 分析——下载分析脚本到客户机执行（事件日志+minidump 解析+WinDbg 可选），服务器端匹配知识库生成报告。
+    数据不上云：dump 文件不传输，只回传分析结果。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+    public_url = get_public_url(request)
+
+    cmd = (
+        "$s = \"$env:TEMP\\dump_analyze.ps1\"; "
+        f"curl.exe -sL -o $s '{public_url}/static/tools/dump_analyze.ps1'; "
+        "if (!(Test-Path $s)) { Write-Output '[DOWNLOAD_FAIL]'; exit }; "
+        "powershell -NoProfile -ExecutionPolicy Bypass -File $s"
+    )
+    run_logger.info(f"[{room_code}] tools_dump_analyze exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 180, "cwd": ""},
+                                   f"dump_analyze_{int(time.time())}", tier=1), timeout=200)
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+    result = result or ""
+    if "DOWNLOAD_FAIL" in result:
+        return JSONResponse({"error": "脚本下载失败（客户机网络异常）"}, status_code=500)
+    run_logger.info(f"[{room_code}] tools_dump_analyze done: {len(result)} chars")
+    report = build_dump_report(room_code, result)
+    return {"ok": True, "report": report, "raw": result}
+
+
+@app.post("/api/tools/diskspace")
+async def tools_diskspace(request: Request):
+    """磁盘空间分析——固定命令一次执行（磁盘总览+分区+用户目录+大文件 TOP20）。只读操作。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+    run_logger.info(f"[{room_code}] tools_diskspace exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": DISKSPACE_CMD, "timeout": 120, "cwd": ""},
+                                   f"diskspace_{int(time.time())}", tier=1), timeout=130)
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+    run_logger.info(f"[{room_code}] tools_diskspace done: {len(result or '')} chars")
+    return {"ok": True, "log": result or ""}
+
+
+@app.post("/api/tools/raid")
+async def tools_raid(request: Request):
+    """RAID 信息抓取（联想售后三件套：IntelVROCCli / rstcli64 / storcli64）——自动分发到客户机执行。
+    覆盖：Intel VROC / Intel RSTe / Broadcom(LSI) RAID。只读操作。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+    public_url = get_public_url(request)
+
+    cmd = (
+        "$d = \"$env:TEMP\\raid_tools\"; $z = \"$env:TEMP\\raid_tools.zip\"; "
+        f"curl.exe -sL -o $z '{public_url}/static/tools/raid-tools.zip'; "
+        "if (!(Test-Path $z)) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
+        "Expand-Archive $z $d -Force -ErrorAction SilentlyContinue; "
+        "if (!(Test-Path \"$d\\storcli64.exe\")) { Write-Output 'EXTRACT_FAIL'; exit }; "
+        "Push-Location $d; "
+        "$out = @('========== Intel VROC =========='); "
+        "$out += & .\\IntelVROCCli.exe -V 2>&1; "
+        "$out += & .\\IntelVROCCli.exe -I 2>&1; "
+        "$out += ''; $out += '========== Intel RSTe =========='; "
+        "$out += & .\\rstcli64.exe -V 2>&1; "
+        "$out += & .\\rstcli64.exe -I 2>&1; "
+        "$out += ''; $out += '========== Broadcom / LSI (storcli) =========='; "
+        "$out += & .\\storcli64.exe /call/eall/sall show all 2>&1; "
+        "$out += ''; $out += '========== RAID Events =========='; "
+        "$out += & .\\storcli64.exe /call show events 2>&1; "
+        "Pop-Location; "
+        "$out -join \"`n\""
+    )
+    run_logger.info(f"[{room_code}] tools_raid exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 180, "cwd": ""},
+                                   f"raid_{int(time.time())}", tier=1), timeout=200)
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+    result = result or ""
+    if "DOWNLOAD_FAIL" in result:
+        return JSONResponse({"error": "工具下载失败（客户机网络异常）", "log": result[:300]}, status_code=500)
+    run_logger.info(f"[{room_code}] tools_raid done: {len(result)} chars")
+    return {"ok": True, "log": result}
+
+
+@app.post("/api/tools/winlogs")
+async def tools_winlogs(request: Request):
+    """Windows 系统日志收集（System/Application/Security .evtx）——整理到客户机本地 C:\\DiagLogs\\日期\\logs\\。
+    数据不经过云端：只返回文件清单与路径，不传输文件内容。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    cmd = (
+        "$dir = \"C:\\DiagLogs\\$(Get-Date -Format yyyyMMdd)\\logs\"; "
+        "New-Item -ItemType Directory -Force -Path $dir | Out-Null; "
+        "$n1 = 0; $total = 0; "
+        "Get-ChildItem 'C:\\Windows\\System32\\winevt\\Logs\\*.evtx' -ErrorAction SilentlyContinue | ForEach-Object { "
+        "try { Copy-Item $_.FullName \"$dir\\$($_.Name)\" -Force -ErrorAction Stop; $n1++; $total += $_.Length } catch {} }; "
+        "wevtutil epl System \"$dir\\System.evtx\" 2>$null | Out-Null; "
+        "wevtutil epl Application \"$dir\\Application.evtx\" 2>$null | Out-Null; "
+        "wevtutil epl Security \"$dir\\Security.evtx\" 2>$null | Out-Null; "
+        "$n2 = (Get-ChildItem $dir -File).Count; "
+        "Write-Output ('[OK] Collected'); "
+        "Write-Output ('Location: ' + $dir); "
+        "Write-Output ('Log files: ' + $n2 + ' (copied ' + $n1 + ' + exported 3)'); "
+        "Write-Output ('Total size: ' + [math]::Round($total/1MB, 1) + ' MB')"
+    )
+    run_logger.info(f"[{room_code}] tools_winlogs exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 120, "cwd": ""},
+                                   f"winlogs_{int(time.time())}", tier=1), timeout=150)
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+    run_logger.info(f"[{room_code}] tools_winlogs done: {len(result or '')} chars")
+    return {"ok": True, "log": result or ""}
+
+
+@app.post("/api/tools/dump")
+async def tools_dump(request: Request):
+    """Windows 蓝屏 Dump 收集（Minidump + MEMORY.DMP）——复制到客户机本地 C:\\DiagLogs\\日期\\dump\\。
+    数据不经过云端：只返回文件清单与路径，不传输文件内容。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    cmd = (
+        "$dir = \"C:\\DiagLogs\\$(Get-Date -Format yyyyMMdd)\\dump\"; "
+        "New-Item -ItemType Directory -Force -Path $dir | Out-Null; "
+        "$n = 0; $total = 0; "
+        "if (Test-Path 'C:\\Windows\\Minidump') { $files = Get-ChildItem 'C:\\Windows\\Minidump' -File -ErrorAction SilentlyContinue; "
+        "foreach ($f in $files) { Copy-Item $f.FullName $dir -Force -ErrorAction SilentlyContinue; $n++; $total += $f.Length } }; "
+        "if (Test-Path 'C:\\Windows\\MEMORY.DMP') { $m = Get-Item 'C:\\Windows\\MEMORY.DMP'; Copy-Item $m.FullName $dir -Force -ErrorAction SilentlyContinue; $n++; $total += $m.Length }; "
+        "if ($n -eq 0) { Write-Output '[WARN] No dump files found (no BSOD record or different location)' } else { "
+        "Write-Output '[OK] Collected'; "
+        "Write-Output ('Location: ' + $dir); "
+        "Write-Output ('Dump files: ' + $n); "
+        "Write-Output ('Total size: ' + [math]::Round($total/1MB, 1) + ' MB'); "
+        "Write-Output ('Oldest: ' + (Get-ChildItem $dir | Sort-Object LastWriteTime | Select-Object -First 1).LastWriteTime); "
+        "Write-Output ('Latest: ' + (Get-ChildItem $dir | Sort-Object LastWriteTime | Select-Object -Last 1).LastWriteTime) }"
+    )
+    run_logger.info(f"[{room_code}] tools_dump exec start")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 120, "cwd": ""},
+                                   f"dump_{int(time.time())}", tier=1), timeout=150)
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+    run_logger.info(f"[{room_code}] tools_dump done: {len(result or '')} chars")
+    return {"ok": True, "log": result or ""}
+
+
 @app.post("/api/tools/smart")
 async def tools_smart(request: Request):
     """硬盘健康检测（SMART）——Windows 分发 smartctl.exe；Linux 自动安装 smartmontools 后执行。
@@ -4210,8 +4601,37 @@ async def tools_sio_log(request: Request):
     result = result or ""
     if "DOWNLOAD_FAIL" in result or "EXTRACT_FAIL" in result or "RUN_FAIL" in result:
         return JSONResponse({"error": "工具执行失败（可能客户机无管理员权限或下载失败）", "log": result[:500]}, status_code=500)
+
+    # 主链路失败检测：驱动加载失败类错误 → 自动降级到备用工具包（tslog 版 HwDiagWin）
+    DRIVER_FAIL_MARKS = ["StartService Error", "CreateFile Error", "Unable to get bios driver handle",
+                         "bios driver", "driver handle", "LoadLibrary failed", "The specified driver"]
+    if platform != "linux" and any(m.lower() in result.lower() for m in DRIVER_FAIL_MARKS):
+        run_logger.info(f"[{room_code}] tools_sio_log: primary failed (driver), fallback to alt tool")
+        alt_cmd = (
+            "$d = \"$env:TEMP\\hwdiag_alt\"; $z = \"$env:TEMP\\hwdiag_alt.zip\"; "
+            f"curl.exe -sL -o $z '{public_url}/static/tools/hwdiag-alt.zip'; "
+            "if (!(Test-Path $z)) { Write-Output 'ALT_DOWNLOAD_FAIL'; exit }; "
+            "Expand-Archive $z $d -Force -ErrorAction SilentlyContinue; "
+            "if (!(Test-Path \"$d\\HwDiagWin.exe\")) { Write-Output 'ALT_EXTRACT_FAIL'; exit }; "
+            "Push-Location $d; cmd /c \"HwDiagWin.exe /DUMPLOG > sio_log_alt.txt 2>&1\"; Pop-Location; "
+            "if (Test-Path \"$d\\sio_log_alt.txt\") { Get-Content \"$d\\sio_log_alt.txt\" -Raw } else { Write-Output 'ALT_RUN_FAIL' }"
+        )
+        try:
+            result = await asyncio.wait_for(
+                execute_bridge_command(room, "RunCommand", {"command": alt_cmd, "timeout": 180, "cwd": ""},
+                                       f"sio_alt_{int(time.time())}", tier=1),
+                timeout=200,
+            )
+        except Exception as e:
+            return JSONResponse({"error": f"备用链路执行失败: {e}"}, status_code=500)
+        result = result or ""
+        if "ALT_DOWNLOAD_FAIL" in result or "ALT_EXTRACT_FAIL" in result or "ALT_RUN_FAIL" in result:
+            return JSONResponse({"error": "主/备用工具均执行失败（建议手动检查客户机驱动状态）", "log": result[:500]}, status_code=500)
+        run_logger.info(f"[{room_code}] tools_sio_log fallback done: {len(result)} chars")
+        return {"ok": True, "platform": platform, "log": result, "tool": "alt"}
+
     run_logger.info(f"[{room_code}] tools_sio_log done: {len(result)} chars")
-    return {"ok": True, "platform": platform, "log": result}
+    return {"ok": True, "platform": platform, "log": result, "tool": "primary"}
 
 
 @app.post("/api/tools/linux/logpack")
@@ -4525,7 +4945,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.3+）：
+    # 服务器主动定期发业务 ping（v0.13.4+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -4650,7 +5070,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.3 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.4 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,

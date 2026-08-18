@@ -397,6 +397,7 @@
 
   <div id="quick-actions" style="display:flex;gap:8px;padding:8px 14px 0;flex-wrap:wrap;">
     <button class="qa-btn" onclick="quickStartupScan()" title="查询并交互式关闭开机自启动项">🔌 开机自启动</button>
+    <button class="qa-btn" onclick="quickDiskSpace()" title="分析磁盘空间占用（总览/用户目录/大文件）">💾 磁盘空间分析</button>
   </div>
 
   <div id="input-area">
@@ -1170,6 +1171,13 @@ function quickStartupScan() {
   if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立，请稍候'); return; }
   addSystemMsg('正在查询本机开机自启动项...');
   ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_scan]' }));
+}
+
+function quickDiskSpace() {
+  if (!bridgeConnected) { alert('请先连接客户机（📶 连接你的电脑）后再使用此功能'); return; }
+  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立，请稍候'); return; }
+  addSystemMsg('正在分析磁盘空间（需 1-2 分钟）...');
+  ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:diskspace]' }));
 }
 
 function renderStartupPanel(items) {
