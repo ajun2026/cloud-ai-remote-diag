@@ -1031,7 +1031,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.12.0")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.0")
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1488,7 +1488,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.12.0"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.0"}
 
 
 @app.post("/api/debug_log")
@@ -1808,7 +1808,7 @@ async def room_connect(room_code: str, request: Request):
     token = generate_connect_token()
     set_room_token(room_code, token)
 
-    ps1_cmd = ('$env:BRIDGE_ROOM="' + room_code + '"; $env:BRIDGE_TOKEN="' + token + '"; iex (iwr "' + public_url + '/static/bridge.ps1").Content')
+    ps1_cmd = ('$env:BRIDGE_ROOM="' + room_code + '"; $env:BRIDGE_TOKEN="' + token + '"; iex (iwr "' + public_url + '/static/bridge.ps1" -UseBasicParsing).Content')
     bat = "@echo off\r\nbridge-win64.exe -server " + ws_url + " -room " + room_code + " -token " + token + "\r\n"
     linux_cmd = ("curl -sL \"" + public_url + "/static/install-linux.sh\" | bash -s -- " + room_code + " " + token)
 
@@ -1913,6 +1913,70 @@ async def room_close(room_code: str, request: Request):
     return {"ok": True, "status": "archived"}
 
 
+@app.get("/api/report/{room_code}")
+async def room_report(room_code: str, request: Request):
+    """生成诊断观察报告（txt）：只列真实执行记录与采集数据，不做 AI 分析推断。
+    观察级统计（零幻觉）：工具调用清单 + 输出摘要 + 计数统计。仅房间主人/管理员。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = room_code.upper()
+    try:
+        conn = _db_connect()
+        row = conn.execute(
+            "SELECT sn, ticket_no, machine_model, engineer_username, created_at, status FROM rooms WHERE room_code=?",
+            (room_code,),
+        ).fetchone()
+        msgs = conn.execute(
+            "SELECT role, tool_name, content, created_at FROM messages WHERE room_code=? ORDER BY id",
+            (room_code,),
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return JSONResponse({"error": "数据库错误"}, status_code=500)
+    if not row:
+        return JSONResponse({"error": "房间不存在"}, status_code=404)
+    if user.get("role") != "admin" and row["engineer_username"] != user["username"]:
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+
+    tool_msgs = [m for m in msgs if m["role"] == "tool" and m["tool_name"]]
+    user_msgs = [m for m in msgs if m["role"] == "user"]
+    ai_msgs = [m for m in msgs if m["role"] == "ai"]
+
+    lines = []
+    lines.append("================= 诊断观察报告 =================")
+    lines.append(f"房间: {room_code}")
+    lines.append(f"SN: {row['sn'] or '-'} | 工单: {row['ticket_no'] or '-'} | 型号: {row['machine_model'] or '-'}")
+    lines.append(f"工程师: {row['engineer_username'] or '-'} | 创建: {row['created_at'] or '-'}")
+    lines.append(f"房间状态: {row['status'] or 'active'}")
+    lines.append("-------------------------------------------------")
+    lines.append("【执行记录】（按时间，观察级）")
+    if tool_msgs:
+        for m in tool_msgs:
+            ts = (m["created_at"] or "")[11:16] if m["created_at"] else "--:--"
+            lines.append(f"[{ts}] 工具: {m['tool_name']}（输出 {len(m['content'] or '')} 字符）")
+    else:
+        lines.append("（无工具执行记录）")
+    lines.append("-------------------------------------------------")
+    lines.append("【采集数据摘要】（每项截断 500 字符）")
+    if tool_msgs:
+        for m in tool_msgs[:30]:
+            lines.append(f"--- {m['tool_name']} ---")
+            lines.append((m["content"] or "").strip()[:500])
+    else:
+        lines.append("（无）")
+    lines.append("-------------------------------------------------")
+    lines.append("【统计】")
+    lines.append(f"用户提问: {len(user_msgs)} 次")
+    lines.append(f"工具调用: {len(tool_msgs)} 次")
+    lines.append(f"AI 回复: {len(ai_msgs)} 次")
+    lines.append(f"消息总数: {len(msgs)} 条")
+    lines.append("================= 报告结束 =================")
+    txt = "\r\n".join(lines)
+    return Response(content=txt, media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="report-{room_code}.txt"'})
+
+
 @app.get("/api/history/{room_code}")
 async def get_history(request: Request, room_code: str, limit: int = 200):
     """Get chat history for a room from SQLite.（登录用户可访问）"""
@@ -2003,7 +2067,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.12.0",
+        "version": "0.13.0",
     }
 
 
@@ -2183,7 +2247,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.12.0</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.0</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -4055,7 +4119,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.12.0+）：
+    # 服务器主动定期发业务 ping（v0.13.0+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -4180,7 +4244,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.12.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,

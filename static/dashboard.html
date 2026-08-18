@@ -58,8 +58,8 @@
   .nav-item.active { background: var(--surface2); color: var(--info); border-left-color: var(--info); font-weight: 600; }
   .nav-divider { height: 1px; background: var(--border); margin: 10px 8px; }
   .sidebar-footer { padding: 8px 12px; font-size: 11px; color: var(--text2); }
-  .admin-only { display: none; }
-  .admin-only.show { display: flex; }
+  .admin-only { display: none !important; }
+  .admin-only.show { display: flex !important; }
 
   .content {
     flex: 1; min-height: 0; padding: 24px 28px; overflow-y: auto;
@@ -362,7 +362,7 @@
         <div class="nav-item" onclick="switchTab('create')"><span data-i18n="nav_create">➕ 创建房间</span></div>
         <div class="nav-item" onclick="switchTab('join')"><span data-i18n="nav_join">⇄ 加入房间</span></div>
         <div class="nav-item" id="nav-chat" onclick="switchTab('chat')"><span data-i18n="nav_chat">💬 对话</span></div>
-        <div class="nav-item" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
+        <div class="nav-item admin-only" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
         <div class="nav-divider"></div>
         <div class="nav-item" onclick="switchTab('workorders')"><span data-i18n="nav_workorders">📋 我的工单</span></div>
         <div class="nav-item" onclick="switchTab('tools-win')"><span data-i18n="nav_tools_win">🪟 Windows 工具</span></div>
@@ -373,7 +373,7 @@
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
-      <div class="sidebar-footer">v0.12.0</div>
+      <div class="sidebar-footer">v0.13.0</div>
     </aside>
 
     <main class="content">
@@ -478,7 +478,6 @@
         </div>
       </section>
 
-      <!-- 下载桥接器 -->
       <section class="page" id="page-download">
         <div class="page-title"><span data-i18n="nav_download">下载桥接器</span></div>
         <div class="page-desc" data-i18n="dl_desc">在需要诊断的电脑上运行桥接器，输入房间码完成配对</div>
@@ -572,6 +571,8 @@
           <div data-i18n="dl_facts_sec">🛡 安全机制：只读诊断自动执行；修改 / 危险操作需在对话页人工审批</div>
         </div>
       </section>
+
+      <!-- 下载桥接器 -->
 
       <!-- Windows 工具（非 AI 工具集合） -->
       <section class="page" id="page-tools-win">
