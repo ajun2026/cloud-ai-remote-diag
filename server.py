@@ -1031,7 +1031,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.5")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.6")
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1488,7 +1488,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.5"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.6"}
 
 
 @app.post("/api/debug_log")
@@ -2067,7 +2067,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.5",
+        "version": "0.13.6",
     }
 
 
@@ -2247,7 +2247,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.5</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.6</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -4927,6 +4927,10 @@ async def ws_browser(websocket: WebSocket, room_code: str):
         run_logger.info(f"Room re-created from DB (browser): {room_code}")
 
     room.browser_ws = websocket
+    # 浏览器身份（cookie 会话）——用于角色权限（field 上门工程师无对话权）
+    _ws_token = websocket.cookies.get("user_token", "")
+    _ws_sess = USER_SESSIONS.get(_ws_token)
+    ws_role = (_ws_sess or {}).get("role", "")
     # 浏览器重连：取消闲置倒计时（宽限期内回来 = 不关闭）
     if getattr(room, "idle_task", None):
         room.idle_task.cancel()
@@ -4949,6 +4953,12 @@ async def ws_browser(websocket: WebSocket, room_code: str):
             msg_data = json.loads(raw)
 
             if msg_data.get("type") == "chat":
+                # 上门工程师（field）：仅允许快捷工具指令（QUICK_ACTION），禁止对话消息
+                if ws_role == "field":
+                    user_message = msg_data["content"]
+                    if not user_message.startswith("[QUICK_ACTION:"):
+                        await websocket.send_json({"type": "error", "content": "上门工程师账号无对话权限——可使用「连接你的电脑」与快捷工具，对话诊断由远程工程师处理。"})
+                        continue
                 # 房间过期：禁止发新消息（历史可查看）
                 if room_expired_db(room_code):
                     await websocket.send_json({"type": "error", "content": "房间已过期，仅可查看历史记录。如需继续诊断请创建新房间。"})
@@ -5157,7 +5167,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.5+）：
+    # 服务器主动定期发业务 ping（v0.13.6+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5282,7 +5292,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.5 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.6 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,

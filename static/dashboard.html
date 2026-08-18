@@ -373,7 +373,7 @@
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
-      <div class="sidebar-footer">v0.13.5</div>
+      <div class="sidebar-footer">v0.13.6</div>
     </aside>
 
     <main class="content">
@@ -1689,7 +1689,8 @@ async function loadMe() {
     const data = await resp.json();
     if (data.error) { location.href = '/login'; return; }
     currentRole = data.role;
-    document.getElementById('user-name').textContent = t('user_prefix') + data.username + (data.role === 'admin' ? t('user_admin') : '');
+    const roleTag = data.role === 'admin' ? t('user_admin') : (data.role === 'field' ? '（上门工程师）' : '');
+    document.getElementById('user-name').textContent = t('user_prefix') + data.username + roleTag;
     if (data.role === 'admin') {
       document.querySelectorAll('.admin-only').forEach(el => el.classList.add('show'));
     }

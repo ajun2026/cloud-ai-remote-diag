@@ -395,6 +395,11 @@
 
   <div id="messages"></div>
 
+  <!-- 上门工程师（field）：连接功能可用，无对话权限提示条 -->
+  <div id="field-tip" style="display:none;padding:8px 14px;background:rgba(224,168,0,0.12);color:#e0a800;font-size:12px;border-bottom:1px solid var(--border);">
+    ⚠ 上门工程师账号：可使用「📶 连接你的电脑」与快捷工具；对话诊断由远程工程师处理（不可发送消息）
+  </div>
+
   <div id="quick-actions" style="display:flex;gap:8px;padding:8px 14px 0;flex-wrap:wrap;">
     <button class="qa-btn" onclick="quickStartupScan()" title="查询并交互式关闭开机自启动项">🔌 开机自启动</button>
     <button class="qa-btn" onclick="quickDumpAnalyze()" title="分析本机蓝屏记录与转储（默认 Minidump 目录）">💥 蓝屏分析</button>
@@ -778,6 +783,23 @@ function fallbackCopy(text, done) {
 let ws = null;
 let roomCode = null;
 let bridgeConnected = false;
+let myRole = '';
+let myUsername = '';
+// 加载时获取当前用户角色（用于 field 上门工程师权限控制）
+fetch('/api/auth/me').then(r => r.json()).then(d => {
+  if (d && d.role) {
+    myRole = d.role;
+    myUsername = d.username || '';
+    if (myRole === 'field') {
+      // 上门工程师：连接功能可用——仅禁用聊天输入（不可发消息）
+      const tip = document.getElementById('field-tip');
+      if (tip) { tip.style.display = 'block'; }
+      const ia = document.getElementById('input-area');
+      if (ia) ia.style.display = 'none';
+      // 快捷工具按钮保留（开机自启动/蓝屏分析=服务器直处理，不经 AI）
+    }
+  }
+}).catch(() => {});
 let pendingApprovalId = null;
 let approvalTimerInterval = null;
 let approvalDeadline = 0;
@@ -898,6 +920,10 @@ function goBackToWorkbench() {
 
 // 从 SQLite 拉取该房间历史并渲染（登录用户可访问 /api/history/{room}）
 async function loadHistory(room) {
+  if (myRole === 'field') {
+    // 上门工程师：不加载对话历史（连接功能不受影响）
+    return;
+  }
   try {
     const resp = await fetch('/api/history/' + room);
     if (resp.status === 401) { addSystemMsg('登录已过期，请重新登录后查看历史记录'); return; }
