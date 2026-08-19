@@ -1,3 +1,42 @@
+## v0.13.8 — 2026-08-19（上门工程师极简界面 + 客户机系统识别 + 语言切换移除）
+
+### 上门工程师（field/test1、test2）极简工作台
+
+- **导航精简**：只保留 创建房间 / 加入房间 / 📶 连接客户机 / Windows 工具 / Linux 工具（隐藏首页/对话/工单/密码/反馈）
+- **服务端裁剪**：field 用户 HTML 直接不含首页/工单/密码/反馈块——彻底杜绝"首帧闪现普通界面"（前端隐藏只是遮掩，服务端裁剪是根治）
+- **登录默认创建房间页**：不再提前分配/恢复房间号
+- **localStorage 按账号隔离**：field_room_<用户名>——test1/test2 房间互不串
+
+### 连接引导页（field 专属视图）
+
+- 创建/加入房间成功 → 自动进入引导页（房间码/SN/工单/有效期）
+- 「📶 连接客户机」导航入口：切走随时可回（自动恢复自己的最近房间）
+- 5 秒状态自动轮询：客户机连上页面自动变"已连接 (Linux/Windows)"（无需手动刷新）
+- 表单 autofill 修复：readonly + 加载清空（机器型号不再被浏览器自动填用户名）
+
+### 客户机系统识别（Windows/Linux 区分）
+
+- 创建房间时选择客户机系统（默认 Windows）→ 房间记录 os
+- 连接后 bridge identify 真实平台自动纠正（选错自动覆盖）
+- 连接命令按系统收敛：Linux 机器只显示 Linux bash 命令（引导页 + 对话页连接面板均隐藏 PowerShell/Windows 版）
+- 工具导航按平台动态显示：Linux 客户机只留 Linux 工具
+
+### 取消繁/英文切换
+
+- 界面固定简体中文：删除切换下拉、zh-TW/en 字典、switchLang 逻辑
+
+### Bug 修复
+
+- field 版 dashboard 响应截断（Content-Length 未重新计算）→ 页面无功能/无法退出
+- renderRooms 引用被裁剪元素（null.value 报错致 JS 中断）
+- 移除语言切换误删 I18N 闭合（dashboard + index 两处）与 langSwitcher 引用残留（共 3 个 JS 语法/引用错误）
+- 结束诊断后页面嵌套（iframe 内 location 跳转）→ 检测 iframe 顶层跳转 + sandbox 加 allow-top-navigation
+- 机器型号被浏览器自动填充（autofill）
+
+### 说明
+
+- v0.13.0~v0.13.6 已从本地快照重建为 GitHub commit + tag（可任意 checkout 部署）
+
 ## v0.13.7 — 2026-08-18（一键连接自动降级 8443 + bridge 0.6.4 + 令牌复用）
 
 ### 一键连接 443→8443 自动降级（三端）

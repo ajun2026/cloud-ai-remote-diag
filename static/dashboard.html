@@ -332,8 +332,42 @@
   }
   .toast.show { display: block; }
 </style>
+<!-- 角色首帧样式注入点（field 极简界面：登录后第一帧即正确，无普通界面闪现） -->
+<style id="role-css"></style>
 </head>
 <body>
+<script>
+// 角色首帧处理：同步读取（URL 参数优先，localStorage 兜底）——在首帧渲染前注入 CSS
+(function () {
+  var r = new URLSearchParams(location.search).get('role');
+  if (!r) r = localStorage.getItem('cab_role');
+  if (!r) return;
+  localStorage.setItem('cab_role', r);
+  if (r !== 'field') {
+    // 非上门工程师：隐藏「连接客户机」导航（field 专属）
+    var ng = document.getElementById('nav-field-guide');
+    if (ng) ng.style.display = 'none';
+    return;
+  }
+  // 注入首帧规则：隐藏首页/对话/工单/密码/反馈导航 + 默认显示创建页
+  var target = 'create';
+  document.getElementById('role-css').textContent =
+    '.page-home{display:none!important}'
+    + '#nav-home,#nav-chat,#nav-workorders,#nav-password,#nav-feedback{display:none!important}'
+    + '.page-' + target + '{display:block!important}';
+  // DOM ready 后移除注入规则（交给正常 switchTab 逻辑，避免后续冲突）
+  document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('role-css').textContent = '';
+    // 同步切默认页（field 首帧正确）：默认创建房间
+    var target = 'create';
+    document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
+    var pg = document.getElementById('page-' + target);
+    if (pg) pg.classList.add('active');
+    var nav = document.querySelector('.nav-item[onclick="switchTab(\'' + target + '\')"]');
+    if (nav) nav.classList.add('active');
+  });
+})();
+</script>
 <div class="app">
 
   <div class="header">
@@ -346,11 +380,6 @@
     </div>
     <div class="user-box">
       <span class="user-tag"><span class="dot"></span><span id="user-name">未登录</span></span>
-      <select id="lang-switcher" onchange="switchLang(this.value)" style="padding:5px 8px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:6px;cursor:pointer;">
-        <option value="zh-CN">简</option>
-        <option value="zh-TW">繁</option>
-        <option value="en">EN</option>
-      </select>
       <button class="btn-sm" data-i18n="logout" onclick="doLogout()">退出登录</button>
     </div>
   </div>
@@ -358,28 +387,62 @@
   <div class="main">
     <aside class="sidebar">
       <nav>
-        <div class="nav-item active" onclick="switchTab('home')"><span data-i18n="nav_home">🏠 首页</span></div>
+        <!-- FIELD_HIDE_START --><div class="nav-item active" id="nav-home" onclick="switchTab('home')"><span data-i18n="nav_home">🏠 首页</span></div><!-- FIELD_HIDE_END -->
         <div class="nav-item" onclick="switchTab('create')"><span data-i18n="nav_create">➕ 创建房间</span></div>
         <div class="nav-item" onclick="switchTab('join')"><span data-i18n="nav_join">⇄ 加入房间</span></div>
-        <div class="nav-item" id="nav-chat" onclick="switchTab('chat')"><span data-i18n="nav_chat">💬 对话</span></div>
+        <div class="nav-item" id="nav-field-guide" onclick="openFieldGuideFromNav()"><span>📶 连接客户机</span></div>
+        <!-- FIELD_HIDE_START --><div class="nav-item" id="nav-chat" onclick="switchTab('chat')"><span data-i18n="nav_chat">💬 对话</span></div><!-- FIELD_HIDE_END -->
         <div class="nav-item admin-only" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
         <div class="nav-divider"></div>
-        <div class="nav-item" onclick="switchTab('workorders')"><span data-i18n="nav_workorders">📋 我的工单</span></div>
-        <div class="nav-item" onclick="switchTab('tools-win')"><span data-i18n="nav_tools_win">🪟 Windows 工具</span></div>
-        <div class="nav-item" onclick="switchTab('tools-linux')"><span data-i18n="nav_tools_linux">🐧 Linux 工具</span></div>
+        <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('workorders')" id="nav-workorders"><span data-i18n="nav_workorders">📋 我的工单</span></div><!-- FIELD_HIDE_END -->
+        <div class="nav-item" onclick="switchTab('tools-win')" id="nav-tools-win"><span data-i18n="nav_tools_win">🪟 Windows 工具</span></div>
+        <div class="nav-item" onclick="switchTab('tools-linux')" id="nav-tools-linux"><span data-i18n="nav_tools_linux">🐧 Linux 工具</span></div>
         <div class="nav-divider"></div>
-        <div class="nav-item" onclick="switchTab('password')"><span data-i18n="nav_password">🔒 修改密码</span></div>
-        <div class="nav-item" onclick="switchTab('feedback')"><span data-i18n="nav_feedback">📝 反馈</span></div>
+        <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('password')" id="nav-password"><span data-i18n="nav_password">🔒 修改密码</span></div>
+        <div class="nav-item" onclick="switchTab('feedback')" id="nav-feedback"><span data-i18n="nav_feedback">📝 反馈</span></div><!-- FIELD_HIDE_END -->
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
+      <script>
+      // 角色同步裁剪（防"普通界面闪现"）：登录跳转带 ?role=，同步立即应用
+      (function () {
+        var r = new URLSearchParams(location.search).get('role');
+        if (!r) r = localStorage.getItem('cab_role');
+        if (!r) return;
+        localStorage.setItem('cab_role', r);
+        if (r !== 'field') return;
+        ['nav-home', 'nav-chat', 'nav-workorders', 'nav-password', 'nav-feedback'].forEach(function (id) {
+          var el = document.getElementById(id); if (el) el.style.display = 'none';
+        });
+        // 同步默认页（避免首页闪现）：DOM ready 后切——有记住的房间→连接引导，否则创建房间
+        document.addEventListener('DOMContentLoaded', function () {
+          // 强制清空创建表单（防浏览器 autofill 误填）
+          ['f-sn', 'f-ticket', 'f-model', 'f-join'].forEach(function (id) {
+            var el = document.getElementById(id); if (el) el.value = '';
+          });
+          // Chrome autofill 常在 load 后才填充——延迟再清一次（只清空，不干扰用户输入后的值）
+          window.addEventListener('load', function () {
+            setTimeout(function () {
+              ['f-sn', 'f-ticket', 'f-model', 'f-join'].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el && el.value && el.getAttribute('data-user-typed') !== '1') el.value = '';
+              });
+            }, 400);
+          });
+          var target = 'create';
+          document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
+          document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.remove('active'); });
+          var pg = document.getElementById('page-' + target); if (pg) pg.classList.add('active');
+        });
+      })();
+      </script>
       <div class="sidebar-footer">v0.13.7</div>
     </aside>
 
     <main class="content">
 
       <!-- 首页（默认页） -->
-      <section class="page active" id="page-home">
+      <!-- FIELD_HIDE_START --><section class="page active" id="page-home">
         <div class="home-hero">
           <div class="home-title">🤖 云端 AI 远程运维助手</div>
           <div class="home-sub" data-i18n="home_sub">云端 AI 诊断 Windows / Linux 电脑问题 · 硬件工具全覆盖</div>
@@ -394,10 +457,10 @@
             <div class="home-step"><span class="step-num">4</span><div><b data-i18n="home_step4_t">诊断与处理</b><div class="step-desc">对话式 AI 诊断，或「Windows / Linux 工具」执行硬件诊断、日志收集、刷写激活</div></div></div>
           </div>
         </div>
-      </section>
+      </section><!-- FIELD_HIDE_END -->
 
       <!-- 我的工单 -->
-      <section class="page" id="page-workorders">
+      <!-- FIELD_HIDE_START --><section class="page" id="page-workorders">
         <div class="page-title"><span data-i18n="nav_workorders">我的工单</span></div>
         <div class="page-desc" data-i18n="wo_desc">当前账号处理过的诊断房间</div>
         <div class="toolbar">
@@ -410,7 +473,7 @@
           </tr></thead>
           <tbody id="room-tbody"><tr><td colspan="9" class="empty" data-i18n="loading">加载中...</td></tr></tbody>
         </table>
-      </section>
+      </section><!-- FIELD_HIDE_END -->
 
       <!-- 对话（iframe 嵌入聊天页） -->
       <section class="page" id="page-chat">
@@ -419,7 +482,7 @@
           <span class="room-tag" id="chat-room-tag"></span>
         </div>
         <div class="chat-frame-wrap" id="chat-frame-wrap" style="display:none;">
-          <iframe id="chat-frame" src="" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"></iframe>
+          <iframe id="chat-frame" src="" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals allow-top-navigation"></iframe>
         </div>
         <div class="chat-empty" id="chat-empty">
           <div class="big">💬</div>
@@ -434,9 +497,15 @@
         <div class="page-desc" data-i18n="create_desc">需绑定电脑 SN 与报修工单号，生成 8 位房间码用于桥接器配对</div>
         <div class="panel">
           <div class="msg-box" id="create-msg"></div>
-          <div class="field"><label data-i18n="lbl_sn">SN 序列号</label><input id="f-sn" data-i18n-placeholder="ph_sn" placeholder="如 PC204XF3"></div>
-          <div class="field"><label data-i18n="lbl_ticket">报修工单号</label><input id="f-ticket" data-i18n-placeholder="ph_ticket" placeholder="如 202608063200477002"></div>
-          <div class="field"><label data-i18n="lbl_model">机器型号（选填）</label><input id="f-model" data-i18n-placeholder="ph_model" placeholder="如 ThinkPad X1 Carbon"></div>
+          <div class="field"><label data-i18n="lbl_sn">SN 序列号</label><input id="f-sn" autocomplete="off" name="no-autofill" readonly onfocus="this.removeAttribute('readonly')" data-i18n-placeholder="ph_sn" placeholder="如 PC204XF3"></div>
+          <div class="field"><label data-i18n="lbl_ticket">报修工单号</label><input id="f-ticket" autocomplete="off" name="no-autofill" readonly onfocus="this.removeAttribute('readonly')" data-i18n-placeholder="ph_ticket" placeholder="如 202608063200477002"></div>
+          <div class="field"><label data-i18n="lbl_model">机器型号（选填）</label><input id="f-model" autocomplete="off" name="no-autofill" readonly onfocus="this.removeAttribute('readonly')" data-i18n-placeholder="ph_model" placeholder="如 ThinkPad X1 Carbon"></div>
+          <div class="field"><label>客户机系统</label>
+            <select id="f-os">
+              <option value="windows">Windows</option>
+              <option value="linux">Linux</option>
+            </select>
+          </div>
           <div class="field"><label>有效期</label><select id="f-validity" style="width:100%;padding:9px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;"><option value="30" selected>30 天</option><option value="15">15 天</option><option value="7">7 天</option><option value="0">永久</option></select><div style="font-size:12px;color:var(--text2);margin-top:4px;">过期后房间只读（历史保留），管理员可见全部记录</div></div>
           <button class="btn-main" id="create-btn" data-i18n="btn_create" onclick="createRoom()">创建房间</button>
           <div class="room-result" id="room-result">
@@ -455,7 +524,7 @@
         <div class="page-title"><span data-i18n="nav_join">加入房间</span></div>
         <div class="page-desc" data-i18n="join_desc">输入 8 位房间码，进入已有诊断会话</div>
         <div class="panel">
-          <div class="field"><label data-i18n="lbl_room_code">房间码</label><input id="f-join" maxlength="8" data-i18n-placeholder="ph_room_code" placeholder="如 AB12CDEF" style="text-transform:uppercase;letter-spacing:3px;font-size:18px;"></div>
+          <div class="field"><label data-i18n="lbl_room_code">房间码</label><input id="f-join" autocomplete="off" name="no-autofill" readonly onfocus="this.removeAttribute('readonly')" maxlength="8" data-i18n-placeholder="ph_room_code" placeholder="如 AB12CDEF" style="text-transform:uppercase;letter-spacing:3px;font-size:18px;"></div>
           <button class="btn-main btn-green" data-i18n="btn_join" onclick="joinRoom()">进入对话</button>
         </div>
       </section>
@@ -555,6 +624,42 @@
       </section>
 
       <!-- 下载桥接器 -->
+
+      <!-- 上门工程师连接引导（field 专属） -->
+      <section class="page" id="page-field-guide">
+        <div class="page-title">📶 连接客户机</div>
+        <div class="page-desc">创建或加入房间后，在此引导客户机连接服务器；客户机上线后按系统平台使用对应工具</div>
+        <div class="field-card" style="margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;">
+          <div class="field" style="margin-bottom:10px;">
+            <label>当前房间</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="field-guide-room" value="" readonly style="flex:1;font-weight:600;font-size:16px;">
+              <button class="btn-ghost" onclick="openFieldGuide(document.getElementById('field-guide-room').value)">刷新</button>
+            </div>
+          </div>
+          <div id="field-guide-info" class="tip" style="margin:6px 0 12px;"></div>
+          <div class="field" style="margin-bottom:10px;">
+            <label>客户机系统（已连接自动识别，可手动切换）</label>
+            <select id="field-guide-os" onchange="fieldGuideOsChange()">
+              <option value="windows">Windows</option>
+              <option value="linux">Linux</option>
+            </select>
+          </div>
+          <div id="field-guide-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn-main" id="field-guide-copy" onclick="fieldGuideCopy()">📋 复制一键命令</button>
+            <button class="btn-main" id="field-guide-bat" onclick="fieldGuideBat()">⬇ 下载连接包</button>
+          </div>
+          <div id="field-guide-os-tip" style="margin-top:8px;font-size:12px;color:var(--text2);">复制的是 <b id="field-guide-os-label">Windows PowerShell</b> 命令——粘贴到客户机终端运行即可连接</div>
+          <div id="field-guide-status" style="margin-top:14px;padding:10px 12px;border-radius:8px;background:rgba(0,0,0,0.15);font-size:13px;line-height:1.8;">
+            客户机状态: <b id="field-guide-bridge">--</b>
+          </div>
+          <div id="field-guide-tools" style="margin-top:10px;display:none;padding-top:10px;border-top:1px solid var(--border);">
+            <div style="font-size:13px;margin-bottom:8px;">客户机已上线——使用工具：</div>
+            <button class="btn-main" id="field-guide-tool-btn" onclick="">🛠 打开工具</button>
+          </div>
+        </div>
+        <div class="tip" style="margin-top:10px;">💡 提示：连接引导会记住当前房间，刷新页面自动恢复；连接包含 443→8443 自动降级，网络被拦截也能连。</div>
+      </section>
 
       <!-- Windows 工具（非 AI 工具集合） -->
       <section class="page" id="page-tools-win">
@@ -961,7 +1066,7 @@
       </section>
 
       <!-- 修改密码 -->
-      <section class="page" id="page-password">
+      <!-- FIELD_HIDE_START --><section class="page" id="page-password">
         <div class="page-title"><span data-i18n="nav_password">修改密码</span></div>
         <div class="page-desc" data-i18n="pwd_desc">定期修改密码保护账号安全</div>
         <div class="panel">
@@ -971,7 +1076,7 @@
           <div class="field"><label data-i18n="lbl_confirm">确认新密码</label><input id="p-new2" type="password"></div>
           <button class="btn-main" data-i18n="btn_change" onclick="changePwd()">确认修改</button>
         </div>
-      </section>
+      </section><!-- FIELD_HIDE_END -->
 
       <!-- 账号管理（仅管理员） -->
       <section class="page" id="page-users">
@@ -1003,7 +1108,7 @@
       </section>
 
       <!-- 反馈 -->
-      <section class="page" id="page-feedback">
+      <!-- FIELD_HIDE_START --><section class="page" id="page-feedback">
         <div class="page-title"><span data-i18n="nav_feedback">反馈</span></div>
         <div class="page-desc" data-i18n="fb_desc">把测试中发现的问题或建议告诉我们</div>
         <div class="panel">
@@ -1015,7 +1120,7 @@
           <div style="font-weight:600;margin-bottom:10px;" data-i18n="fb_history">我的反馈记录</div>
           <div id="fb-history" style="font-size:13px;color:var(--text2);"></div>
         </div>
-      </section>
+      </section><!-- FIELD_HIDE_END -->
 
     </main>
   </div>
@@ -1274,358 +1379,14 @@ const I18N = {
     net_err: '网络错误',
     user_guest: '未登录', user_admin: ' (管理员)', user_prefix: '工号: ',
   },
-  'zh-TW': {
-    nav_workorders: '📋 我的工單', nav_chat: '💬 對話', nav_create: '➕ 創建房間', nav_join: '⇄ 加入房間',
-    nav_download: '📦 下載橋接器', nav_password: '🔒 修改密碼', nav_users: '👥 帳號管理', nav_admin: '🛠 管理後台', nav_feedback: '📝 回饋',
-    fb_desc: '把測試中發現的問題或建議告訴我們', fb_placeholder: '請描述您遇到的問題或建議（如：診斷結果不準確、頁面報錯、希望增加的功能…）', fb_submit: '提交回饋', fb_success: '回饋已提交，感謝您的建議！', fb_need: '請填寫回饋內容', fb_empty: '暫無回饋記錄', fb_history: '我的回饋記錄',
-    nav_home: '🏠 首頁',
-    home_sub: '雲端 AI 診斷 Windows / Linux 電腦問題 · 硬件工具全覆蓋',
-    home_howto: '快速上手',
-    home_step1_t: '創建房間', home_step1_d: '填寫電腦 SN 與報修工單號，生成 8 位房間碼',
-    home_step2_t: '客戶運行橋接器', home_step2_d: '在需診斷的電腦上運行橋接器並輸入房間碼，完成連接',
-    home_step3_t: '客戶機連接', home_step3_d: '粘貼命令運行 / 雙擊連接包，自動連接當前房間',
-    home_step4_t: '診斷與處理', home_step4_d: '對話式 AI 診斷，或工具頁執行硬件診斷、日誌收集、刷寫激活',
-    tools_desc: '無需 AI 對話的本地工具集合，通過橋接器遠程推送到客戶機執行',
-    btn_open_tool: '打開工具', btn_close_tool: '收起',
-    nav_tools_win: '🪟 Windows 工具', nav_tools_linux: '🐧 Linux 工具',
-    tools_win_desc: 'Windows 客戶機專用工具集合，通過橋接器遠程推送到客戶機執行',
-    tools_linux_desc: 'Linux 客戶機專用工具集合（Ubuntu / UOS / KOS / 麒麟 / 龍芯等），通過橋接器遠程推送到客戶機執行',
-    lbl_tool_room_linux: '目標房間（需 Linux 橋接器在線）',
-    btn_linux_logpack: '📦 打包日誌到桌面',
-    linux_logpack_desc: '將 /var/log 日誌打包為 tar.gz 保存到客戶機桌面，檔名以機器 SN + 日期命名（如 SN_20260809_logs.tar.gz）——故障排查時快速收集日誌',
-    linux_logpack_running: '正在打包 /var/log 日誌（視日誌大小可能需要 1-3 分鐘）...',
-    linux_logpack_done: '日誌打包完成',
-    linux_logpack_file: '壓縮包路徑: ',
-    linux_logpack_empty: '未獲取到打包結果',
-    linux_logpack_tip: '💡 壓縮包已保存到客戶機桌面，可直接拷貝/發送；如需伺服器下載請告知',
-    tools_write: '寫入類 · 需審批',
-    snmtm_desc: 'ThinkStation 工作站更換主板後，將正確的序號(SN)與機型型號(MTM)寫入 BIOS DMI 區',
-    lbl_tool_room: '目標房間（需橋接器在線）', lbl_tool_model: '機型型號',
-    lbl_tool_sn: '序號 SN', lbl_tool_mtm: '機型型號 MTM',
-    ph_tool_sn: '如 PC22XGDR', ph_tool_mtm: '如 30E1S5NV00',
-    snmtm_warn: '⚠ 寫入後無法撤銷，請仔細核對 SN / MTM 再點擊刷寫',
-    btn_snmtm_flash: '✍️ 刷寫 SN/MTM',
-    sntm_no_room: '暫無可用的在線房間。請先在「我的工單」/「創建房間」讓客戶機橋接器上線',
-    need_model: '請選擇機型型號',
-    snmtm_running: '刷寫執行中，請稍候（推送工具 → 寫入 SN/MTM → 回讀校驗）...',
-    snmtm_verify_label: '回讀校驗:',
-    snmtm_ok: '刷寫成功，WMI 回讀一致。建議重啟後進入 BIOS 二次確認',
-    snmtm_warn_verify: '寫入命令已執行，但回讀校驗未完全匹配',
-    tools_read: '只讀 + 寫入',
-    oa3_desc: '讀取主板內置 OA3 系統啟動金鑰（SoftwareLicensingService），並可導入金鑰啟動當前系統——換主板後重裝/啟動用',
-    lbl_tool_room2: '目標房間（需橋接器在線）',
-    btn_oa3_read: '🔍 讀取 OA3 金鑰',
-    oa3_key: '主板 OA3 金鑰:',
-    oa3_marker: 'OA2 主板標記',
-    oa3_lic: '啟動狀態',
-    oa3_marker_yes: '是', oa3_marker_no: '否',
-    oa3_lic_activated: '已啟動(永久)', oa3_lic_oob: 'OOB 寬限期', oa3_lic_oot: 'OOT 寬限期', oa3_lic_none: '未啟動',
-    oa3_reading: '讀取中...', oa3_read_ok: 'OA3 金鑰讀取成功', oa3_read_empty: '未讀取到 OA3 金鑰（該主板可能無 OA3 標記）',
-    oa3_no_key: '暫無金鑰', oa3_confirm: '確認導入以下金鑰並啟動系統？',
-    oa3_activate_warn: '⚠ 啟動系統會導入金鑰並嘗試線上啟動，請確認金鑰與當前系統版本匹配',
-    btn_oa3_activate: '⚡ 導入金鑰並啟動系統',
-    oa3_activating: '啟動中（導入金鑰 → 線上啟動 → 狀態驗證）...',
-    oa3_act_ok: '啟動完成，系統處於已啟動/寬限期狀態',
-    oa3_act_warn: '啟動命令已執行，但系統狀態未確認',
-    tools_readonly: '只讀',
-    bios_desc: '通過聯想 WMI 接口（Lenovo_BiosSetting）讀取當前機器 BIOS 全量配置——不重啟、不改設置，純採集',
-    lbl_tool_room3: '目標房間（需橋接器在線）',
-    btn_bios_read: '🖥 讀取 BIOS 配置',
-    bios_reading: '讀取中（採集 BIOS 全量設置項）...',
-    bios_read_ok: 'BIOS 配置讀取成功',
-    bios_empty: '未讀取到 BIOS 設置項（該機型可能不支持 Lenovo WMI 接口）',
-    bios_search_ph: '搜索設置項（如 WakeOnLAN）',
-    bios_th_item: '設置項', bios_th_value: '當前值',
-    bios_no_match: '無匹配的設置項',
-    bios_elevate_title: '🔒 需管理員權限：bridge 當前為普通權限執行，無法讀取完整 BIOS 設置',
-    bios_elevate_hint: '請在客戶機上重啟 bridge（雙擊會自動請求管理員權限，UAC 彈窗點「是」即可）',
-    bios_view_all: '查看全部設置',
-    bios_modal_title: 'BIOS 設置項（全量）',
-    bios_download: '下載 .txt',
-    bios_downloaded: 'BIOS 配置已下載',
-    sleep_desc: '用 powercfg /sleepstudy 生成最近 28 天的睡眠品質報告（HTML）——排查睡眠喚醒異常、耗電、休眠失敗等問題',
-    lbl_tool_room4: '目標房間（需橋接器在線）',
-    btn_sleep_run: '😴 生成睡眠報告（28天）',
-    sleep_admin_hint: '🔒 需要管理員權限：請確認客戶機 bridge 以管理員運行（雙擊自動請求 UAC）',
-    sleep_download: '📥 下載睡眠報告 (.html)',
-    sleep_running: '正在生成睡眠報告（讀取最近 28 天睡眠歷史）...',
-    sleep_done: '睡眠報告已生成',
-    sleep_empty: '未生成報告（系統可能無睡眠歷史或元件缺失）',
-    energy_desc: '用 powercfg /energy 採集 60 秒生成系統能源效率與電源設定診斷報告（HTML）——發現潛在的耗電問題',
-    lbl_tool_room5: '目標房間（需橋接器在線）',
-    btn_energy_run: '⚡ 生成能源報告（60秒）',
-    energy_admin_hint: '🔒 需要管理員權限：請確認客戶機 bridge 以管理員運行（雙擊自動請求 UAC）',
-    energy_download: '📥 下載能源報告 (.html)',
-    energy_running: '正在採集 60 秒能耗數據並生成報告（約需 1-2 分鐘）...',
-    energy_done: '能源報告已生成',
-    energy_empty: '未生成報告（採樣失敗或系統元件缺失）',
-    drivers_desc: '讀取系統已安裝驅動的 DeviceName / Manufacturer / DriverVersion——核對驅動版本、排查驅動過期或不匹配',
-    lbl_tool_room6: '目標房間（需橋接器在線）',
-    btn_drivers_list: '🖱 讀取驅動版本',
-    drivers_reading: '正在讀取驅動版本資訊...',
-    drivers_done: '驅動版本讀取成功',
-    drivers_empty: '未讀取到驅動資訊',
-    drivers_view_all: '查看全部驅動',
-    drivers_modal_title: '驅動版本資訊（全量）',
-    drivers_search_ph: '搜尋驅動（如 GPU / 網卡）',
-    drivers_th_name: '設備名', drivers_th_manu: '廠商', drivers_th_ver: '驅動版本',
-    drivers_summary: '共 ', drivers_summary_suffix: ' 個驅動，點擊下方按鈕查看全部',
-    logout: '退出登錄',
-    wo_desc: '當前帳號處理過的診斷房間',
-    search_ph: '按 SN / 工單號 / 型號 / 房間碼搜索',
-    th_room: '房間碼', th_model: '型號', th_ticket: '工單號', th_created: '創建時間', th_last: '最後活動', th_status: '狀態', th_action: '操作',
-    status_on: '連接中', status_off: '已斷開',
-    enter_chat: '進入對話',
-    view_history: '查看記錄', export_record: '導出',
-    history_title: '歷史對話記錄', empty_history: '暫無對話記錄',
-    close: '關閉',
-    export_title: '診斷對話記錄', export_time: '導出時間', export_ok: '已導出',
-    msg_user: '用戶', msg_ai: 'AI', msg_system: '系統', msg_error: '錯誤', msg_tool: '工具',
-    loading: '加載中...',
-    count_prefix: '共 ', count_suffix: ' 條',
-    empty_rooms: '暫無工單記錄，左側點「創建房間」開始',
-    load_fail: '加載失敗',
-    create_desc: '需綁定電腦 SN 與報修工單號，生成 8 位房間碼用於橋接器配對',
-    lbl_sn: 'SN 序號', lbl_ticket: '報修工單號', lbl_model: '機器型號（選填）',
-    ph_sn: '如 PC204XF3', ph_ticket: '如 202608063200477002', ph_model: '如 ThinkPad X1 Carbon',
-    btn_create: '創建房間', creating: '創建中...',
-    need_sn: '請填寫 SN 序號', need_ticket: '請填寫報修工單號',
-    room_ok_tip: '房間創建成功，請讓客戶電腦運行橋接器並輸入房間碼',
-    copy_room: '複製房間碼', copied_room: '房間碼已複製',
-    join_desc: '輸入 8 位房間碼，進入已有診斷會話',
-    lbl_room_code: '房間碼', ph_room_code: '如 AB12CDEF',
-    btn_join: '進入對話',
-    need_code: '請輸入 8 位房間碼',
-    room_not_found: '房間不存在，請確認房間碼或先創建房間',
-    check_fail: '校驗失敗',
-    dl_desc: '在需要診斷的電腦上運行橋接器，輸入房間碼完成配對',
-    dl_win: '⬇ Windows 橋接器 (bridge-win64.exe, 4.8MB)', dl_linux: '⬇ Linux x86_64 橋接器',
-    copy: '複製', copied_cmd: '命令已複製',
-    dl_note: 'Linux 其他架構（ARM64 / 龍芯）請從管理後台獲取。<br>運行後按提示輸入服務器地址與 8 位房間碼即可連接。',
-    dl_ps_title: '⚡ 命令版（免安裝 · Windows PowerShell）',
-    dl_ps_desc: '不想下載 .exe？在客戶機的「系統管理員 PowerShell」視窗貼上一行命令即可連接——不下載檔案、不落盤，適合 .exe 被防毒軟體攔截的場景。',
-    dl_ps_step1_t: '開啟系統管理員 PowerShell',
-    dl_ps_step1_d: '在客戶機上按右鍵「開始」功能表 → 選擇「Windows PowerShell (系統管理員)」',
-    dl_ps_step2_t: '貼上一行命令',
-    dl_ps_step2_d: '按下 Enter 後依提示輸入 8 位房間碼：',
-    dl_ps_step2_note: '也可以預先寫入房間碼，免互動直接連（把 ABC12345 換成你的房間碼）：',
-    dl_ps_step3_t: '完成配對',
-    dl_ps_step3_d: '看到綠色 Connected 即連線成功，保持視窗開啟，回到本工作台進入對話即可遠端診斷',
-    dl_ps_foot: '命令版與 .exe 版完全相容（連線 / 遠端命令 / 檔案傳輸）。如提示指令碼被系統攔截，可改為下載後執行：powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345',
-    dl_ps_foot2: '如提示指令碼被系統攔截，可改為下載後執行：',
-    dl_linux_more: '查看安裝說明',
-    dl_linux_way1_t: '方式一：一鍵安裝（推薦）', dl_linux_way1_d: '在客戶機終端貼上上面命令按 Enter——自動偵測架構、下載對應版本、安裝到 /usr/local/bin/bridge，然後依提示輸入 8 位房間碼啟動。需要 root 權限（自動用 sudo）。',
-    dl_linux_way2_t: '方式二：手動安裝（已下載二進位檔）', dl_linux_way2_d: '① 賦予執行權限：', dl_linux_way2_d2: '② 放入系統目錄（任意目錄也可，這裡以 /usr/local/bin 為例）：', dl_linux_way2_d3: '③ 啟動（把 ABC12345 換成你的房間碼）：',
-    dl_linux_way3_t: '完成配對', dl_linux_way3_d: '看到 Connected 即連線成功，保持終端開啟即可遠端診斷。重啟電腦後需重新啟動橋接器（一次性使用，不駐留背景）。',
-    dl_step1: '安裝橋接器', dl_step2: '輸入房間碼', dl_step3: '對話診斷',
-    dl_recommend: '推薦',
-    dl_card_win_t: 'Windows 用戶端 (.exe)', dl_card_win_desc: '下載後雙擊執行，輸入 8 位房間碼即連線。主力方案，最省心。', dl_card_win_btn: '⬇ 下載 bridge-win64.exe (4.8MB)', dl_card_win_note: '雙擊自動請求系統管理員權限（UAC 彈窗按「是」即可）',
-    dl_card_ps_t: 'Windows 命令版（免安裝）', dl_card_ps_desc: '系統管理員 PowerShell 貼上一行命令即連線。不下載檔案、不落盤，防毒軟體友善。', dl_more_steps: '查看詳細步驟',
-    dl_card_linux_t: 'Linux 用戶端', dl_card_linux_desc: 'Ubuntu / UOS / KOS / 麒麟 / 龍芯等發行版通用，一條命令安裝。', dl_card_linux_btn: '⬇ 下載 x86_64 橋接器', dl_card_linux_note: '僅支援 x86_64 架構；ARM64 / 龍芯版本製作中',
-    dl_facts_cap: '🔧 橋接器能力：AI 遠端診斷（系統資訊 / 事件記錄 / 驅動 / BIOS）· 遠端命令 · 檔案傳輸 · 斷線自動重連',
-    dl_facts_sec: '🛡 安全機制：唯讀診斷自動執行；修改 / 危險操作需在對話頁人工審批',
-    pwd_desc: '定期修改密碼保護帳號安全',
-    lbl_old: '舊密碼', lbl_new: '新密碼（至少 4 位）', lbl_confirm: '確認新密碼',
-    btn_change: '確認修改',
-    pwd_mismatch: '兩次輸入的新密碼不一致', pwd_short: '新密碼至少 4 位', pwd_ok: '密碼修改成功', pwd_fail: '修改失敗',
-    users_desc: '創建工程師帳號、停用/啟用、重置密碼',
-    btn_new_user: '+ 新建帳號',
-    lbl_username: '工號', lbl_name: '姓名', lbl_role: '角色', lbl_init_pwd: '初始密碼',
-    ph_username: '如 E10086', ph_name: '如 張三', ph_init_pwd: '至少 4 位',
-    role_engineer: '工程師', role_admin: '管理員',
-    btn_create_user: '創建帳號', btn_cancel: '取消',
-    th_id: 'ID', th_username: '工號',
-    need_username: '工號必填', user_created: '創建成功', no_perm: '無權限',
-    empty_users: '暫無帳號',
-    status_enabled: '啟用', status_disabled: '停用',
-    btn_disable: '停用', btn_enable: '啟用', btn_reset: '重置密碼',
-    reset_ok: '密碼已重置', op_fail: '操作失敗',
-    chat_empty1: '尚未選擇房間', chat_empty2: '在「我的工單」裡點「進入對話」，或創建/加入房間後自動打開',
-    room_prefix: '房間: ',
-    net_err: '網路錯誤',
-    user_guest: '未登錄', user_admin: ' (管理員)', user_prefix: '工號: ',
-  },
-  'en': {
-    nav_workorders: '📋 Work Orders', nav_chat: '💬 Chat', nav_create: '➕ Create Room', nav_join: '⇄ Join Room',
-    nav_download: '📦 Download Bridge', nav_password: '🔒 Change Password', nav_users: '👥 Accounts', nav_admin: '🛠 Admin Console', nav_feedback: '📝 Feedback',
-    fb_desc: 'Tell us issues or suggestions found during testing', fb_placeholder: 'Describe the issue or suggestion (e.g. inaccurate diagnosis, page error, feature request...)', fb_submit: 'Submit', fb_success: 'Feedback submitted. Thank you!', fb_need: 'Please enter feedback content', fb_empty: 'No feedback yet', fb_history: 'My Feedback',
-    nav_home: '🏠 Home',
-    home_sub: 'Cloud AI diagnostics for Windows / Linux PCs · Full hardware tool coverage',
-    home_howto: 'Quick Start',
-    home_step1_t: 'Create Room', home_step1_d: 'Enter the PC SN and repair ticket no. to generate an 8-digit room code',
-    home_step2_t: 'Run Bridge on Client', home_step2_d: 'Run the bridge on the PC to diagnose and enter the room code to connect',
-    home_step3_t: 'Chat to Diagnose', home_step3_d: 'Describe the issue in natural language; AI runs diagnostic commands remotely',
-    home_step4_t: 'Diagnose & Fix', home_step4_d: 'Chat-based AI diagnosis, or use tool pages for hardware diagnostics, logs, flashing',
-    tools_desc: 'Local tool collection without AI chat — pushed to the client PC via the bridge',
-    btn_open_tool: 'Open Tool', btn_close_tool: 'Collapse',
-    nav_tools_win: '🪟 Windows Tools', nav_tools_linux: '🐧 Linux Tools',
-    tools_win_desc: 'Windows client tools — pushed to the client PC via the bridge',
-    tools_linux_desc: 'Linux client tools (Ubuntu / UOS / KOS / Kylin / LoongArch etc.) — pushed to the client PC via the bridge',
-    lbl_tool_room_linux: 'Target Room (Linux bridge online required)',
-    btn_linux_logpack: '📦 Pack Logs to Desktop',
-    linux_logpack_desc: 'Pack /var/log into a tar.gz on the client desktop, named with machine SN + date (e.g. SN_20260809_logs.tar.gz) — collect logs quickly for troubleshooting',
-    linux_logpack_running: 'Packing /var/log (1-3 min depending on log size)...',
-    linux_logpack_done: 'Logs packed',
-    linux_logpack_file: 'Package path: ',
-    linux_logpack_empty: 'No pack result',
-    linux_logpack_tip: '💡 Package saved to the client desktop — copy/send directly; ask if you want it downloaded to the server',
-    tools_write: 'Write · Approval',
-    snmtm_desc: 'For ThinkStation workstations after motherboard replacement: write the correct Serial Number (SN) and Machine Type Model (MTM) into the BIOS DMI area',
-    lbl_tool_room: 'Target Room (bridge online required)', lbl_tool_model: 'Machine Model',
-    lbl_tool_sn: 'Serial Number (SN)', lbl_tool_mtm: 'Machine Type Model (MTM)',
-    ph_tool_sn: 'e.g. PC22XGDR', ph_tool_mtm: 'e.g. 30E1S5NV00',
-    snmtm_warn: '⚠ This cannot be undone. Double-check SN / MTM before flashing',
-    btn_snmtm_flash: '✍️ Flash SN/MTM',
-    sntm_no_room: 'No online rooms available. Start the bridge on the client PC from "Work Orders" / "Create Room" first',
-    need_model: 'Please select a machine model',
-    snmtm_running: 'Flashing in progress (push tools → write SN/MTM → verify)...',
-    snmtm_verify_label: 'Verify:',
-    snmtm_ok: 'Flash succeeded, WMI read-back matches. Reboot and confirm in BIOS',
-    snmtm_warn_verify: 'Write executed but read-back did not fully match',
-    tools_read: 'Read + Write',
-    oa3_desc: 'Read the OA3 activation key built into the motherboard (SoftwareLicensingService), and optionally import it to activate the current system — for after motherboard replacement',
-    lbl_tool_room2: 'Target Room (bridge online required)',
-    btn_oa3_read: '🔍 Read OA3 Key',
-    oa3_key: 'OA3 Key:',
-    oa3_marker: 'OA2 BIOS Marker',
-    oa3_lic: 'Activation Status',
-    oa3_marker_yes: 'Yes', oa3_marker_no: 'No',
-    oa3_lic_activated: 'Activated (permanent)', oa3_lic_oob: 'OOB Grace', oa3_lic_oot: 'OOT Grace', oa3_lic_none: 'Not activated',
-    oa3_reading: 'Reading...', oa3_read_ok: 'OA3 key read successfully', oa3_read_empty: 'No OA3 key found (motherboard may not have OA3 marker)',
-    oa3_no_key: 'No key', oa3_confirm: 'Import the following key and activate the system?',
-    oa3_activate_warn: '⚠ Activation imports the key and tries online activation. Confirm the key matches the current Windows edition',
-    btn_oa3_activate: '⚡ Import Key & Activate',
-    oa3_activating: 'Activating (import key → online activation → verify)...',
-    oa3_act_ok: 'Activation done, system is activated / in grace period',
-    oa3_act_warn: 'Activation command executed but status not confirmed',
-    tools_readonly: 'Read-only',
-    bios_desc: 'Read the full BIOS configuration of the target PC via the Lenovo WMI interface (Lenovo_BiosSetting) — no reboot, no changes, pure collection',
-    lbl_tool_room3: 'Target Room (bridge online required)',
-    btn_bios_read: '🖥 Read BIOS Config',
-    bios_reading: 'Reading (collecting all BIOS settings)...',
-    bios_read_ok: 'BIOS config read successfully',
-    bios_empty: 'No BIOS settings found (this model may not support the Lenovo WMI interface)',
-    bios_search_ph: 'Search settings (e.g. WakeOnLAN)',
-    bios_th_item: 'Setting', bios_th_value: 'Current Value',
-    bios_no_match: 'No matching settings',
-    bios_elevate_title: '🔒 Admin required: bridge is running without elevation, full BIOS settings unavailable',
-    bios_elevate_hint: 'Restart bridge on the client (double-click auto-requests admin, click "Yes" on the UAC prompt)',
-    bios_view_all: 'View All Settings',
-    bios_modal_title: 'BIOS Settings (full)',
-    bios_download: 'Download .txt',
-    bios_downloaded: 'BIOS config downloaded',
-    sleep_desc: 'Generate a 28-day sleep quality report (HTML) via powercfg /sleepstudy — troubleshoot wake anomalies, power drain, hibernate failures',
-    lbl_tool_room4: 'Target Room (bridge online required)',
-    btn_sleep_run: '😴 Generate Sleep Report (28d)',
-    sleep_admin_hint: '🔒 Admin required: make sure the client bridge runs as Administrator (double-click auto-requests UAC)',
-    sleep_download: '📥 Download Sleep Report (.html)',
-    sleep_running: 'Generating sleep report (reading 28-day sleep history)...',
-    sleep_done: 'Sleep report generated',
-    sleep_empty: 'No report generated (no sleep history or missing components)',
-    energy_desc: 'Capture 60s via powercfg /energy to generate an energy-efficiency & power-settings diagnostic report (HTML) — find potential power drain issues',
-    lbl_tool_room5: 'Target Room (bridge online required)',
-    btn_energy_run: '⚡ Generate Energy Report (60s)',
-    energy_admin_hint: '🔒 Admin required: make sure the client bridge runs as Administrator (double-click auto-requests UAC)',
-    energy_download: '📥 Download Energy Report (.html)',
-    energy_running: 'Capturing 60s of power data and generating report (1-2 min)...',
-    energy_done: 'Energy report generated',
-    energy_empty: 'No report generated (sampling failed or missing components)',
-    drivers_desc: 'List installed drivers (DeviceName / Manufacturer / DriverVersion) — check driver versions, outdated or mismatched drivers',
-    lbl_tool_room6: 'Target Room (bridge online required)',
-    btn_drivers_list: '🖱 List Driver Versions',
-    drivers_reading: 'Reading driver versions...',
-    drivers_done: 'Driver versions loaded',
-    drivers_empty: 'No driver info found',
-    drivers_view_all: 'View All Drivers',
-    drivers_modal_title: 'Driver Versions (all)',
-    drivers_search_ph: 'Search drivers (e.g. GPU / NIC)',
-    drivers_th_name: 'Device Name', drivers_th_manu: 'Manufacturer', drivers_th_ver: 'Driver Version',
-    drivers_summary: '', drivers_summary_suffix: ' drivers total. Click below to view all.',
-    logout: 'Logout',
-    wo_desc: 'Diagnosis rooms handled by this account',
-    search_ph: 'Search by SN / ticket / model / room code',
-    th_room: 'Room', th_model: 'Model', th_ticket: 'Ticket', th_created: 'Created', th_last: 'Last Active', th_status: 'Status', th_action: 'Action',
-    status_on: 'Connected', status_off: 'Disconnected',
-    enter_chat: 'Open Chat',
-    view_history: 'History', export_record: 'Export',
-    history_title: 'Chat History', empty_history: 'No messages yet',
-    close: 'Close',
-    export_title: 'Diagnostic Chat Record', export_time: 'Exported', export_ok: 'Exported',
-    msg_user: 'User', msg_ai: 'AI', msg_system: 'System', msg_error: 'Error', msg_tool: 'Tool',
-    loading: 'Loading...',
-    count_prefix: '', count_suffix: ' total',
-    empty_rooms: 'No work orders yet. Create a room from the left menu',
-    load_fail: 'Load failed',
-    create_desc: 'Bind PC SN and repair ticket no. to generate an 8-digit room code',
-    lbl_sn: 'SN', lbl_ticket: 'Ticket No.', lbl_model: 'Machine Model (optional)',
-    ph_sn: 'e.g. PC204XF3', ph_ticket: 'e.g. 202608063200477002', ph_model: 'e.g. ThinkPad X1 Carbon',
-    btn_create: 'Create Room', creating: 'Creating...',
-    need_sn: 'Please enter SN', need_ticket: 'Please enter ticket no.',
-    room_ok_tip: 'Room created. Run the bridge on the customer PC and enter the room code',
-    copy_room: 'Copy Code', copied_room: 'Room code copied',
-    join_desc: 'Enter an 8-digit room code to open an existing session',
-    lbl_room_code: 'Room Code', ph_room_code: 'e.g. AB12CDEF',
-    btn_join: 'Join',
-    need_code: 'Please enter the 8-digit room code',
-    room_not_found: 'Room not found. Check the code or create a room first',
-    check_fail: 'Verification failed',
-    dl_desc: 'Run the bridge on the PC to diagnose and enter the room code',
-    dl_win: '⬇ Windows Bridge (bridge-win64.exe, 4.8MB)', dl_linux: '⬇ Linux x86_64 Bridge',
-    copy: 'Copy', copied_cmd: 'Command copied',
-    dl_note: 'Other Linux architectures (ARM64 / LoongArch) available from the admin console.<br>Run it and enter the server address and 8-digit room code.',
-    dl_ps_title: '⚡ Command edition (no install · Windows PowerShell)',
-    dl_ps_desc: 'No .exe to download? Paste one line into an Administrator PowerShell window on the target PC - nothing is downloaded or written to disk. Ideal when antivirus blocks the .exe.',
-    dl_ps_step1_t: 'Open Administrator PowerShell',
-    dl_ps_step1_d: 'Right-click the Start menu on the target PC -> "Windows PowerShell (Admin)"',
-    dl_ps_step2_t: 'Paste one line',
-    dl_ps_step2_d: 'Press Enter, then type the 8-digit room code when prompted:',
-    dl_ps_step2_note: 'Or pre-set the room code to skip the prompt (replace ABC12345 with your room code):',
-    dl_ps_step3_t: 'Pairing done',
-    dl_ps_step3_d: 'A green "Connected" means success. Keep the window open, return to this dashboard and start remote diagnostics',
-    dl_ps_foot: 'The command edition is fully compatible with the .exe edition (connect / remote commands / file transfer). If the script is blocked, download and run it instead: powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345',
-    dl_ps_foot2: 'If the script is blocked, download and run it instead:',
-    dl_linux_more: 'View install instructions',
-    dl_linux_way1_t: 'Option 1: One-line install (recommended)', dl_linux_way1_d: 'Paste the command above into the target terminal and press Enter - it auto-detects the CPU architecture, downloads the matching build, installs to /usr/local/bin/bridge, then prompts for the 8-digit room code. Needs root (sudo is used automatically).',
-    dl_linux_way2_t: 'Option 2: Manual install (binary already downloaded)', dl_linux_way2_d: '1) Make it executable:', dl_linux_way2_d2: '2) Move it into a system directory (any dir works; /usr/local/bin used here):', dl_linux_way2_d3: '3) Start it (replace ABC12345 with your room code):',
-    dl_linux_way3_t: 'Pairing done', dl_linux_way3_d: 'A green "Connected" means success. Keep the terminal open to diagnose. The bridge is one-shot - restart it manually after a reboot (no background service).',
-    dl_step1: 'Install bridge', dl_step2: 'Enter room code', dl_step3: 'Diagnose by chat',
-    dl_recommend: 'Recommended',
-    dl_card_win_t: 'Windows Client (.exe)', dl_card_win_desc: 'Download, double-click, enter the 8-digit room code. The primary option - simplest.', dl_card_win_btn: '⬇ Download bridge-win64.exe (4.8MB)', dl_card_win_note: 'Auto-requests admin rights on launch (click Yes on the UAC prompt)',
-    dl_card_ps_t: 'Windows Command Edition (no install)', dl_card_ps_desc: 'Paste one line into an Administrator PowerShell. Nothing is downloaded or written to disk - antivirus friendly.', dl_more_steps: 'View detailed steps',
-    dl_card_linux_t: 'Linux Client', dl_card_linux_desc: 'Works on Ubuntu / UOS / KOS / Kylin / LoongArch etc. One-line install.', dl_card_linux_btn: '⬇ Download x86_64 Bridge', dl_card_linux_note: 'x86_64 only for now; ARM64 / LoongArch builds in progress',
-    dl_facts_cap: '🔧 Bridge capabilities: AI remote diagnostics (system info / event logs / drivers / BIOS) · remote commands · file transfer · auto-reconnect',
-    dl_facts_sec: '🛡 Security: read-only diagnostics run automatically; modifying / dangerous operations require manual approval in the chat',
-    pwd_desc: 'Change your password regularly to keep your account safe',
-    lbl_old: 'Current Password', lbl_new: 'New Password (min 4)', lbl_confirm: 'Confirm New Password',
-    btn_change: 'Change Password',
-    pwd_mismatch: 'Passwords do not match', pwd_short: 'Password must be at least 4 characters', pwd_ok: 'Password changed', pwd_fail: 'Change failed',
-    users_desc: 'Create engineer accounts, disable/enable, reset passwords',
-    btn_new_user: '+ New Account',
-    lbl_username: 'Username', lbl_name: 'Name', lbl_role: 'Role', lbl_init_pwd: 'Initial Password',
-    ph_username: 'e.g. E10086', ph_name: 'e.g. Zhang San', ph_init_pwd: 'min 4 chars',
-    role_engineer: 'Engineer', role_admin: 'Admin',
-    btn_create_user: 'Create', btn_cancel: 'Cancel',
-    th_id: 'ID', th_username: 'Username',
-    need_username: 'Username required', user_created: 'created', no_perm: 'No permission',
-    empty_users: 'No accounts',
-    status_enabled: 'Enabled', status_disabled: 'Disabled',
-    btn_disable: 'Disable', btn_enable: 'Enable', btn_reset: 'Reset Password',
-    reset_ok: 'Password reset', op_fail: 'Operation failed',
-    chat_empty1: 'No room selected', chat_empty2: 'Click "Open Chat" in Work Orders, or create/join a room to open it',
-    room_prefix: 'Room: ',
-    net_err: 'Network error',
-    user_guest: 'Not logged in', user_admin: ' (Admin)', user_prefix: 'ID: ',
-  },
 };
 
-let currentLang = localStorage.getItem('bridge_ui_lang') || 'zh-CN';
+
+let currentLang = 'zh-CN';
 function t(key) { return I18N[currentLang]?.[key] || I18N['zh-CN'][key] || key; }
 
 function applyLang(lang) {
   currentLang = lang;
-  localStorage.setItem('bridge_ui_lang', lang);
-  const switcher = document.getElementById('lang-switcher');
-  if (switcher) switcher.value = lang;
   document.documentElement.lang = lang;
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
@@ -1639,7 +1400,6 @@ function applyLang(lang) {
   }
 }
 
-function switchLang(lang) { applyLang(lang); }
 
 let allRooms = [];
 let currentRole = 'engineer';
@@ -1660,6 +1420,11 @@ function switchTab(name) {
   // 工具模式依赖桥接器在线状态：每次进入都重新拉取房间列表，避免用页面加载时的旧快照
   if (name === 'tools-win') loadRooms().then(() => initTools());
   if (name === 'tools-linux') loadRooms().then(() => initLinuxTools());
+  // 连接引导页：切回时刷新状态（field 用——防止切走再回来后状态过期）
+  if (name === 'field-guide' && currentRole === 'field') {
+    const room = document.getElementById('field-guide-room').value;
+    if (room) loadFieldGuide();
+  }
 }
 
 // 打开对话（iframe 加载 /chat?room=XXX，不跳页）
@@ -1682,6 +1447,143 @@ function switchToWorkorders() {
   switchTab('workorders');
 }
 
+// ===== 上门工程师连接引导（field 专属）=====
+let fieldGuideConn = null;
+let fieldGuideOs = 'windows';  // 客户机系统选择（自动识别 + 手动兜底）
+let currentUsername = '';      // 当前登录账号（localStorage 房间按账号隔离）
+
+function fieldRoomKey() { return 'field_room_' + (currentUsername || ''); }
+
+function fieldGuideOsChange() {
+  fieldGuideOs = document.getElementById('field-guide-os').value;
+  const isWin = fieldGuideOs === 'windows';
+  const lbl = document.getElementById('field-guide-os-label');
+  if (lbl) lbl.textContent = isWin ? 'Windows PowerShell' : 'Linux bash';
+  const batBtn = document.getElementById('field-guide-bat');
+  batBtn.textContent = isWin ? '⬇ 下载连接包' : '⬇ 下载连接包（仅 Windows）';
+  batBtn.disabled = !isWin;
+}
+
+function openFieldGuide(room) {
+  room = (room || '').toUpperCase();
+  if (!room) return;
+  try { localStorage.setItem(fieldRoomKey(), room); } catch (e) {}
+  document.getElementById('field-guide-room').value = room;
+  document.getElementById('field-guide-bridge').textContent = '--';
+  document.getElementById('field-guide-tools').style.display = 'none';
+  switchTab('field-guide');
+  loadFieldGuide();
+  startFieldGuidePolling();
+}
+
+// 连接状态自动刷新：引导页可见时每 5 秒轮询（客户机连上后无需手动切回）
+let fieldGuideTimer = null;
+function startFieldGuidePolling() {
+  if (fieldGuideTimer) clearInterval(fieldGuideTimer);
+  fieldGuideTimer = setInterval(() => {
+    const active = document.querySelector('.page.active');
+    if (active && active.id === 'page-field-guide') {
+      refreshFieldStatus();
+    }
+  }, 5000);
+}
+
+// 左侧「📶 连接客户机」导航：记住的房间直接回引导页，没有则提示先创建/加入
+function openFieldGuideFromNav() {
+  const lastRoom = localStorage.getItem(fieldRoomKey());
+  if (lastRoom) {
+    openFieldGuide(lastRoom);
+  } else {
+    switchTab('field-guide');
+    document.getElementById('field-guide-room').value = '';
+    document.getElementById('field-guide-info').textContent = '还没有连接中的房间——请先「➕ 创建房间」或「⇄ 加入房间」';
+    document.getElementById('field-guide-bridge').textContent = '--';
+  }
+}
+
+async function loadFieldGuide() {
+  const room = document.getElementById('field-guide-room').value;
+  if (!room) return;
+  try {
+    const resp = await fetch('/api/room_connect/' + room);
+    const data = await resp.json();
+    if (!resp.ok) { document.getElementById('field-guide-info').textContent = data.error || '无法获取连接信息'; return; }
+    fieldGuideConn = data;
+    document.getElementById('field-guide-info').textContent = 'SN: ' + (data.sn || '-') + ' ｜ 工单: ' + (data.ticket_no || '-') + ' ｜ 有效期: 剩 ' + (data.days_left != null ? data.days_left : '-') + ' 天';
+    // 创建时已选客户机系统（os 记录）→ 直接应用（连接后 identify 会再纠正）
+    if (data.os === 'linux') {
+      document.getElementById('field-guide-os').value = 'linux';
+      fieldGuideOsChange();
+    } else if (data.os === 'windows') {
+      document.getElementById('field-guide-os').value = 'windows';
+      fieldGuideOsChange();
+    }
+  } catch (e) {}
+  await refreshFieldStatus();
+}
+
+// 刷新客户机连接状态（轮询用——只拉状态，不重新拉命令）
+async function refreshFieldStatus() {
+  const room = document.getElementById('field-guide-room').value;
+  if (!room) return;
+  try {
+    const r2 = await fetch('/api/my_rooms');
+    const rd = await r2.json();
+    const roomInfo = (rd.rooms || []).find(r => r.room_code === room);
+    if (roomInfo) {
+      const on = roomInfo.bridge_online;
+      const plat = (roomInfo.platform || '').toLowerCase();
+      document.getElementById('field-guide-bridge').textContent = on ? ('已连接 (' + (plat === 'linux' ? 'Linux' : 'Windows') + ')') : '未连接';
+      // 自动识别客户机系统（连接后）——可手动切换兜底
+      if (plat === 'linux') {
+        document.getElementById('field-guide-os').value = 'linux';
+        fieldGuideOsChange();
+      } else if (plat === 'windows') {
+        document.getElementById('field-guide-os').value = 'windows';
+        fieldGuideOsChange();
+      }
+      // 工具导航按平台动态显示：os 已记录（连接过）→ 只留对应平台工具；os 未知 → 两个都显示
+      const winNav = document.getElementById('nav-tools-win');
+      const linuxNav = document.getElementById('nav-tools-linux');
+      if (plat) {
+        if (winNav) winNav.style.display = plat === 'linux' ? 'none' : '';
+        if (linuxNav) linuxNav.style.display = plat === 'linux' ? '' : 'none';
+      } else {
+        if (winNav) winNav.style.display = '';
+        if (linuxNav) linuxNav.style.display = '';
+      }
+      const toolsDiv = document.getElementById('field-guide-tools');
+      if (on) {
+        toolsDiv.style.display = 'block';
+        const btn = document.getElementById('field-guide-tool-btn');
+        btn.textContent = plat === 'linux' ? '🐧 打开 Linux 工具' : '🪟 打开 Windows 工具';
+        btn.onclick = function () { switchTab(plat === 'linux' ? 'tools-linux' : 'tools-win'); };
+      } else {
+        toolsDiv.style.display = 'none';
+      }
+    }
+  } catch (e) {}
+}
+
+function fieldGuideCopy() {
+  if (!fieldGuideConn || !fieldGuideConn.connect) { loadFieldGuide(); setTimeout(fieldGuideCopy, 800); return; }
+  fieldGuideOs = document.getElementById('field-guide-os').value;
+  const cmd = fieldGuideOs === 'linux' ? fieldGuideConn.connect.linux : fieldGuideConn.connect.powershell;
+  const hint = fieldGuideOs === 'linux'
+    ? 'Linux 命令已复制——粘贴到客户机终端（bash）运行即可连接'
+    : '一键命令已复制——粘贴到客户机 PowerShell 运行即可连接';
+  navigator.clipboard.writeText(cmd).then(() => alert(hint))
+    .catch(() => { prompt(hint + '：', cmd); });
+}
+
+function fieldGuideBat() {
+  const room = document.getElementById('field-guide-room').value;
+  if (!room) return;
+  fieldGuideOs = document.getElementById('field-guide-os').value;
+  if (fieldGuideOs !== 'windows') { alert('Linux 客户机使用复制命令方式连接（无需下载包）'); return; }
+  window.open('/api/room_bat/' + room, '_blank');
+}
+
 // ===== 用户信息 =====
 async function loadMe() {
   try {
@@ -1693,6 +1595,19 @@ async function loadMe() {
     document.getElementById('user-name').textContent = t('user_prefix') + data.username + roleTag;
     if (data.role === 'admin') {
       document.querySelectorAll('.admin-only').forEach(el => el.classList.add('show'));
+    } else if (data.role === 'field') {
+      // 上门工程师极简界面：只保留 创建/加入 + 工具（隐藏对话/工单/密码/反馈/首页）
+      ['nav-chat', 'nav-workorders', 'nav-password', 'nav-feedback', 'nav-home'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      currentUsername = data.username || '';
+      // 默认进入创建房间（不自动分配/恢复房间——创建或加入后才进引导页）
+      switchTab('create');
+    } else {
+      // 普通工程师：隐藏「连接客户机」导航（field 专属）
+      const ng = document.getElementById('nav-field-guide');
+      if (ng) ng.style.display = 'none';
     }
   } catch (e) { location.href = '/login'; }
 }
@@ -1707,6 +1622,7 @@ async function createRoom() {
   const ticket = document.getElementById('f-ticket').value.trim();
   const model = document.getElementById('f-model').value.trim();
   const validity = parseInt(document.getElementById('f-validity').value || '30', 10);
+  const osChoice = document.getElementById('f-os').value;
   const msg = document.getElementById('create-msg');
   msg.className = 'msg-box';
   if (!sn) { msg.textContent = t('need_sn'); msg.className = 'msg-box err'; return; }
@@ -1717,10 +1633,17 @@ async function createRoom() {
     const resp = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sn, ticket_no: ticket, machine_model: model, validity_days: validity }),
+      body: JSON.stringify({ sn, ticket_no: ticket, machine_model: model, validity_days: validity, os: osChoice }),
     });
     const data = await resp.json();
     if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; btn.disabled = false; btn.textContent = t('btn_create'); return; }
+    if (currentRole === 'field') {
+      // 上门工程师：创建成功直接进连接引导
+      openFieldGuide(data.room_code);
+      msg.className = 'msg-box';
+      btn.disabled = false; btn.textContent = t('btn_create');
+      return;
+    }
     document.getElementById('room-code').textContent = data.room_code;
     document.getElementById('room-enter').onclick = function (e) { e.preventDefault(); openChat(data.room_code); };
     document.getElementById('room-result').style.display = 'block';
@@ -1746,6 +1669,11 @@ async function joinRoom() {
     const data = await resp.json();
     if (!resp.ok) { showToast(data.error || t('check_fail')); return; }
     if (!data.exists) { showToast(t('room_not_found')); return; }
+    if (currentRole === 'field') {
+      // 上门工程师：加入房间 → 连接引导
+      openFieldGuide(code);
+      return;
+    }
     openChat(code);
   } catch (e) { showToast(t('net_err') + ': ' + e.message); }
 }
@@ -1763,7 +1691,10 @@ async function loadRooms() {
 }
 
 function renderRooms() {
-  const kw = document.getElementById('search-input').value.trim().toLowerCase();
+  // 工单页被服务端裁剪（field 角色）时元素不存在——跳过渲染
+  if (!document.getElementById('room-tbody')) return;
+  const si = document.getElementById('search-input');
+  const kw = si ? si.value.trim().toLowerCase() : '';
   const list = allRooms.filter(r => !kw
     || r.sn.toLowerCase().includes(kw)
     || r.ticket_no.toLowerCase().includes(kw)
@@ -2085,7 +2016,7 @@ async function initTools() {
 
 function fillSntmRoom() {
   const roomSel = document.getElementById('sntm-room');
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms('windows');
   if (!online.length) {
     roomSel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
@@ -2175,7 +2106,7 @@ let oa3Key = '';
 
 function fillOa3Room() {
   const sel = document.getElementById('oa3-room');
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms('windows');
   if (!online.length) {
     sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
@@ -2279,7 +2210,7 @@ let biosPwdState = '';
 
 function fillBiosRoom() {
   const sel = document.getElementById('bios-room');
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms('windows');
   if (!online.length) {
     sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
@@ -2388,7 +2319,7 @@ function copyBiosItems() {
 // ===== 工具：睡眠报告 =====
 function fillSleepRoom() {
   const sel = document.getElementById('sleep-room');
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms('windows');
   if (!online.length) {
     sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
@@ -2443,7 +2374,7 @@ async function sleepStudyRun() {
 // ===== 工具：能源效率报告 =====
 function fillEnergyRoom() {
   const sel = document.getElementById('energy-room');
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms('windows');
   if (!online.length) {
     sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
@@ -2498,7 +2429,7 @@ async function energyRun() {
 // ===== 工具：驱动版本信息 =====
 function fillDriversRoom() {
   const sel = document.getElementById('drivers-room');
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms('windows');
   if (!online.length) {
     sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
@@ -2666,9 +2597,18 @@ function initLinuxTools() {
 // ===== 蓝屏 / Dump 分析 =====
 let dumpAnalyzeReport = '';
 
+
+// 工具页房间过滤：普通工程师=全部在线房间；上门工程师(field)=按平台过滤
+function toolOnlineRooms(platform) {
+  if (currentRole === 'field') {
+    return allRooms.filter(r => r.bridge_online && (r.platform || '').toLowerCase() === platform);
+  }
+  return allRooms.filter(r => r.bridge_online);
+}
+
 function fillDumpAnalyzeRoom() {
   const sel = document.getElementById('dumpanalyze-room');
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms('windows');
   sel.innerHTML = online.length
     ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
     : '<option value="">暂无在线房间</option>';
@@ -2713,7 +2653,7 @@ let raidLogText = '';
 
 function fillRaidRoom() {
   const sel = document.getElementById('raid-room');
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms('windows');
   sel.innerHTML = online.length
     ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
     : '<option value="">暂无在线房间</option>';
@@ -2753,7 +2693,7 @@ async function raidFetch() {
 // ===== Windows 系统日志收集 =====
 function fillWinlogsRoom() {
   const sel = document.getElementById('winlogs-room');
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms('windows');
   sel.innerHTML = online.length
     ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
     : '<option value="">暂无在线房间</option>';
@@ -2788,7 +2728,7 @@ async function winlogsFetch() {
 // ===== Dump / Minidump 收集 =====
 function fillDumpRoom() {
   const sel = document.getElementById('dump-room');
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms('windows');
   sel.innerHTML = online.length
     ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
     : '<option value="">暂无在线房间</option>';
@@ -2825,7 +2765,7 @@ let smartLogText = { win: '', linux: '' };
 
 function fillSmartRoom(platform) {
   const roomSel = document.getElementById('smart-room-' + platform);
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms(platform === 'win' ? 'windows' : 'linux');
   if (!online.length) {
     roomSel.innerHTML = '<option value="">暂无在线房间</option>';
   } else {
@@ -2870,7 +2810,7 @@ let sioLogText = { win: '', linux: '' };
 
 function fillSioRoom(platform) {
   const roomSel = document.getElementById('sio-room-' + platform);
-  const online = allRooms.filter(r => r.bridge_online);
+  const online = toolOnlineRooms(platform === 'win' ? 'windows' : 'linux');
   if (!online.length) {
     roomSel.innerHTML = '<option value="">暂无在线房间</option>';
   } else {

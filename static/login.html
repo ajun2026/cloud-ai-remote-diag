@@ -86,7 +86,7 @@ async function doLogin() {
     });
     const data = await resp.json();
     if (!resp.ok) { showError(data.error || '登录失败'); loginBtn.disabled = false; loginBtn.textContent = '登 录'; return; }
-    location.href = '/dashboard';
+    location.href = '/dashboard?role=' + (data.role || '');
   } catch (e) {
     showError('网络错误: ' + e.message);
     loginBtn.disabled = false;
@@ -100,7 +100,7 @@ passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogi
 
 // 已登录直接进工作台
 fetch('/api/auth/me').then(r => r.json()).then(d => {
-  if (!d.error) location.href = '/dashboard';
+  if (!d.error) location.href = '/dashboard?role=' + (d.role || '');
 }).catch(() => {});
 </script>
 </body>

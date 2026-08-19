@@ -1032,7 +1032,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.7")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.8")
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1475,9 +1475,19 @@ async def login_page(request: Request):
 
 @app.get("/dashboard")
 async def dashboard_page(request: Request):
-    if not _require_user(request):
+    user = _require_user(request)
+    if not user:
         return RedirectResponse(url="/login")
-    return _html_file("dashboard.html", request)
+    resp = _html_file("dashboard.html", request)
+    # 上门工程师（field）：服务端裁剪掉不需要的块（首页/工单/密码/反馈/多余导航）
+    # ——HTML 里根本没有这些内容，杜绝"首帧闪现普通界面"
+    if user.get("role") == "field":
+        import re as _re
+        content = resp.body.decode("utf-8")
+        content = _re.sub(r"<!-- FIELD_HIDE_START -->.*?<!-- FIELD_HIDE_END -->", "", content, flags=_re.S)
+        # 注意：不能复用 resp.headers（Content-Length 是裁剪前的长度——会导致响应截断）
+        return HTMLResponse(content, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+    return resp
 
 
 @app.get("/chat")
@@ -1489,7 +1499,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.7"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.8"}
 
 
 @app.post("/api/debug_log")
@@ -1513,6 +1523,10 @@ async def create_room(request: Request):
     sn = (body.get("sn") or "").strip()
     ticket_no = (body.get("ticket_no") or "").strip()
     machine_model = (body.get("machine_model") or "").strip()
+    # 客户机系统（创建时选择——连接后 identify 自动纠正）：windows / linux
+    os_choice = (body.get("os") or "windows").strip().lower()
+    if os_choice not in ("windows", "linux"):
+        os_choice = "windows"
     # 有效期：7 / 15 / 30 天，0=永久；默认 30 天（注意 0 是合法值，不能用 or 兜底）
     vd_raw = body.get("validity_days")
     if vd_raw is None or vd_raw == "":
@@ -1542,8 +1556,8 @@ async def create_room(request: Request):
     try:
         conn = _db_connect()
         conn.execute(
-            "INSERT INTO rooms (room_code, sn, ticket_no, machine_model, engineer_username, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (code, sn, ticket_no, machine_model, user["username"], expires_at),
+            "INSERT INTO rooms (room_code, sn, ticket_no, machine_model, engineer_username, expires_at, os) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (code, sn, ticket_no, machine_model, user["username"], expires_at, os_choice),
         )
         conn.commit()
         conn.close()
@@ -1551,9 +1565,9 @@ async def create_room(request: Request):
         rooms.pop(code, None)
         run_logger.error(f"Room create DB error: {e}")
         return JSONResponse({"error": f"创建失败: {e}"}, status_code=500)
-    run_logger.info(f"Room created: {code} by {user['username']} (SN={sn}, ticket={ticket_no}, days={validity_days})")
+    run_logger.info(f"Room created: {code} by {user['username']} (SN={sn}, ticket={ticket_no}, days={validity_days}, os={os_choice})")
     return {"room_code": code, "sn": sn, "ticket_no": ticket_no, "machine_model": machine_model,
-            "expires_at": expires_at, "days_left": room_days_left(expires_at)}
+            "expires_at": expires_at, "days_left": room_days_left(expires_at), "os": os_choice}
 
 
 def room_record_exists(room_code: str) -> bool:
@@ -1780,7 +1794,7 @@ async def my_rooms(request: Request):
             "days_left": room_days_left(d.get("expires_at")),
             "status": d.get("status") or "active",
             "browser_online": browser_online,
-            "platform": (room.machine or {}).get("platform", "") if room else "",
+            "platform": (room.machine or {}).get("platform", "") if room else (d.get("os") or ""),
             "status": "连接中" if bridge_online else "已断开",
         })
     return {"rooms": result}
@@ -1870,6 +1884,7 @@ async def room_connect(room_code: str, request: Request):
         "sn": row["sn"] or "",
         "ticket_no": row["ticket_no"] or "",
         "machine_model": row["machine_model"] or "",
+        "os": row["os"] if "os" in row.keys() else "",
         "engineer_username": row["engineer_username"] or "",
         "created_at": row["created_at"] or "",
         "expires_at": row["expires_at"] if "expires_at" in row.keys() else None,
@@ -2132,7 +2147,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.7",
+        "version": "0.13.8",
     }
 
 
@@ -2312,7 +2327,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.7</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.8</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -5232,7 +5247,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.7+）：
+    # 服务器主动定期发业务 ping（v0.13.8+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5321,6 +5336,14 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                 run_logger.info(f"[bridge] {room_code} identify: hostname={info.get('hostname')}, "
                                 f"os={info.get('os')}, platform={room.platform}, mode={room.bridge_mode}, "
                                 f"ip={info.get('local_ip')}, user={info.get('username')}")
+                # 平台落库（防服务器重启后内存丢失）
+                try:
+                    conn = _db_connect()
+                    conn.execute("UPDATE rooms SET os=? WHERE room_code=?", (room.platform, room_code))
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
 
             elif msg_data.get("type") == "heartbeat":
                 # 必须回复，否则客户端 75s 读超时会断开重连（导致状态反复切换）
@@ -5357,7 +5380,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.7 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.8 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,
