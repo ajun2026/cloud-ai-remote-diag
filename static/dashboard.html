@@ -812,6 +812,27 @@
             </div>
           </div>
 
+          <div class="tool-card" id="card-tslog">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">📦</div>
+              <div class="tool-card-title">ThinkStation 日志采集</div>
+              <span class="badge badge-read">采集 · 数据留本地</span>
+            </div>
+            <div class="tool-card-desc">一键采集 ThinkStation 全套日志（软件/BIOS/systeminfo/系统日志/dump/进程/硬件/RAID/SMART/显卡/DirectX 共 20+ 项）——7z 打包到客户机本地，服务器只返回包路径与大小（数据不上云）</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-tslog')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="tslog-msg"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="tslog-room" onchange="tslogClear()"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="tslog-btn" onclick="tslogFetch()">📦 开始采集（约 3-5 分钟）</button>
+              </div>
+              <div id="tslog-result" style="display:none;"></div>
+            </div>
+          </div>
+
           <div class="tool-card" id="card-sntm">
             <div class="tool-card-head">
               <div class="tool-card-icon">💾</div>
@@ -1418,8 +1439,8 @@ function switchTab(name) {
   if (name === 'users') loadUsers();
   if (name === 'feedback') loadMyFeedbacks();
   // 工具模式依赖桥接器在线状态：每次进入都重新拉取房间列表，避免用页面加载时的旧快照
-  if (name === 'tools-win') loadRooms().then(() => initTools());
-  if (name === 'tools-linux') loadRooms().then(() => initLinuxTools());
+  if (name === 'tools-win') loadRooms(true, true).then(() => { initTools(); preselectChatRoom(); });
+  if (name === 'tools-linux') loadRooms(true, true).then(() => { initLinuxTools(); preselectChatRoom(); });
   // 连接引导页：切回时刷新状态（field 用——防止切走再回来后状态过期）
   if (name === 'field-guide' && currentRole === 'field') {
     const room = document.getElementById('field-guide-room').value;
@@ -1430,6 +1451,12 @@ function switchTab(name) {
 // 打开对话（iframe 加载 /chat?room=XXX，不跳页）
 function openChat(room) {
   currentChatRoom = room;
+  // 记录加入（账号隔离）
+  fetch('/api/rooms/join', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ room_code: room }),
+  }).catch(() => {});
   document.getElementById('chat-frame-wrap').style.display = 'block';
   document.getElementById('chat-empty').style.display = 'none';
   document.getElementById('chat-room-tag').textContent = t('room_prefix') + room;
@@ -1669,6 +1696,12 @@ async function joinRoom() {
     const data = await resp.json();
     if (!resp.ok) { showToast(data.error || t('check_fail')); return; }
     if (!data.exists) { showToast(t('room_not_found')); return; }
+    // 记录加入（账号隔离：工具/工单只显示"我创建 + 我加入"的房间）
+    fetch('/api/rooms/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: code }),
+    }).catch(() => {});
     if (currentRole === 'field') {
       // 上门工程师：加入房间 → 连接引导
       openFieldGuide(code);
@@ -1679,15 +1712,29 @@ async function joinRoom() {
 }
 
 // ===== 工单列表 =====
-async function loadRooms() {
+async function loadRooms(all, skipRender) {
   try {
-    const resp = await fetch('/api/my_rooms');
+    const resp = await fetch('/api/my_rooms' + (all ? '?all=1' : ''));
     const data = await resp.json();
     allRooms = data.rooms || [];
-    renderRooms();
+    if (!skipRender) renderRooms();
   } catch (e) {
-    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="9" class="empty">' + t('load_fail') + ': ' + e.message + '</td></tr>';
+    if (!skipRender) {
+      document.getElementById('room-tbody').innerHTML = '<tr><td colspan="9" class="empty">' + t('load_fail') + ': ' + e.message + '</td></tr>';
+    }
   }
+}
+
+// 工具页：把正在对话的房间自动选中（工具下拉可见 + 预选）
+function preselectChatRoom() {
+  if (!currentChatRoom) return;
+  document.querySelectorAll('.page-tools select[id$="-room"], .page-tools select[class*="room"]').forEach(sel => {
+    const opts = Array.from(sel.options || []);
+    if (opts.some(o => o.value === currentChatRoom)) {
+      sel.value = currentChatRoom;
+      sel.dispatchEvent(new Event('change'));
+    }
+  });
 }
 
 function renderRooms() {
@@ -2012,6 +2059,66 @@ async function initTools() {
   fillDumpRoom();
   fillRaidRoom();
   fillDumpAnalyzeRoom();
+  fillTslogRoom();
+  ensureRoomPlaceholders();
+}
+
+// 所有工具房间下拉：加"请选择房间"占位并清空默认（不自动选中第一个房间）
+// 只有 preselectChatRoom（用户确实在对话中）才会自动选中对话房间
+function ensureRoomPlaceholders() {
+  document.querySelectorAll('section[id^="page-tools"] select[id$="-room"], section[id^="page-tools"] select[id$="-room-win"], section[id^="page-tools"] select[id$="-room-linux"]').forEach(sel => {
+    if (!Array.from(sel.options).some(o => o.value === '')) {
+      const ph = document.createElement('option');
+      ph.value = '';
+      ph.textContent = '-- 请选择房间 --';
+      sel.insertBefore(ph, sel.options[0]);
+    }
+    sel.value = '';
+  });
+}
+
+function fillTslogRoom() {
+  const sel = document.getElementById('tslog-room');
+  const online = toolOnlineRooms('windows');
+  sel.innerHTML = '';
+  if (!online.length) { sel.innerHTML = '<option value="">（无在线 Windows 房间）</option>'; return; }
+  online.forEach(r => {
+    const o = document.createElement('option');
+    o.value = r.room_code;
+    o.textContent = r.room_code + ' (' + (r.platform || '') + ')';
+    sel.appendChild(o);
+  });
+}
+
+function tslogClear() { document.getElementById('tslog-result').style.display = 'none'; }
+
+async function tslogFetch() {
+  const room = document.getElementById('tslog-room').value;
+  const msg = document.getElementById('tslog-msg');
+  const btn = document.getElementById('tslog-btn');
+  if (!room) { msg.textContent = '请选择在线房间'; msg.className = 'msg-box err'; return; }
+  msg.textContent = '采集进行中（约 3-5 分钟）——请耐心等待，完成后自动显示结果...';
+  msg.className = 'msg-box';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/tools/tslog', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || '采集失败'; msg.className = 'msg-box err'; btn.disabled = false; return; }
+    msg.textContent = '✅ 采集完成';
+    msg.className = 'msg-box';
+    const box = document.getElementById('tslog-result');
+    box.style.display = 'block';
+    box.innerHTML = '<pre style="white-space:pre-wrap;background:#0b1220;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;color:#cbd5e1;margin-top:10px;">' + (data.output || '').replace(/</g, '&lt;') + '</pre>';
+    btn.disabled = false;
+  } catch (e) {
+    msg.textContent = '网络错误: ' + e.message;
+    msg.className = 'msg-box err';
+    btn.disabled = false;
+  }
 }
 
 function fillSntmRoom() {
@@ -2592,6 +2699,7 @@ function initLinuxTools() {
   fillLinuxLogPackRoom();
   fillSioRoom('linux');
   fillSmartRoom('linux');
+  ensureRoomPlaceholders();
 }
 
 // ===== 蓝屏 / Dump 分析 =====

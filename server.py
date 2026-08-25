@@ -154,6 +154,15 @@ def init_db():
             idle_at TEXT DEFAULT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS room_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_code TEXT NOT NULL,
+            username TEXT NOT NULL,
+            joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(room_code, username)
+        )
+    """)
     _ensure_column(conn, "rooms", "expires_at", "expires_at TEXT DEFAULT NULL")
     _ensure_column(conn, "rooms", "connect_token_hash", "connect_token_hash TEXT DEFAULT NULL")
     _ensure_column(conn, "rooms", "token_expires_at", "token_expires_at TEXT DEFAULT NULL")
@@ -1032,7 +1041,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.8")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.9")
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1144,11 +1153,37 @@ def _set_user_cookie(resp, username: str, role: str):
     resp.set_cookie("user_token", token, max_age=USER_SESSION_TTL, httponly=True, samesite="lax")
 
 
+CAPTCHAS = {}  # 登录验证码：captcha_id -> {code, exp}
+
+
+@app.get("/api/captcha")
+async def get_captcha():
+    """生成 4 位验证码（存内存 10 分钟）——登录防暴力"""
+    import random as _random
+    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # 去易混 O/0/I/1
+    code = "".join(_random.choice(chars) for _ in range(4))
+    cid = _random.randint(100000, 999999)
+    CAPTCHAS[str(cid)] = {"code": code, "exp": time.time() + 600}
+    # 清理过期
+    for k in [k for k, v in CAPTCHAS.items() if v["exp"] < time.time()]:
+        CAPTCHAS.pop(k, None)
+    return {"captcha_id": str(cid), "text": code}
+
+
 @app.post("/api/auth/login")
 async def user_login(request: Request):
     body = await request.json()
     username = (body.get("username") or "").strip()
     password = body.get("password") or ""
+    # 验证码校验（前端带 captcha_id 则必须有效；不带则跳过——内部脚本兼容）
+    cap_id = str(body.get("captcha_id") or "")
+    cap_code = (body.get("captcha_code") or "").strip().upper()
+    if cap_id:
+        if cap_id not in CAPTCHAS:
+            return JSONResponse({"error": "验证码错误或已过期"}, status_code=400)
+        c = CAPTCHAS.pop(cap_id)  # 一次性
+        if c["code"] != cap_code or c["exp"] < time.time():
+            return JSONResponse({"error": "验证码错误或已过期"}, status_code=400)
     user = get_user(username)
     if not user or not verify_password(password, user["password_hash"]):
         return JSONResponse({"error": "用户名或密码错误"}, status_code=401)
@@ -1499,7 +1534,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.8"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.9"}
 
 
 @app.post("/api/debug_log")
@@ -1757,16 +1792,25 @@ async def mark_idle_after(room_code: str, room) -> None:
 
 @app.get("/api/my_rooms")
 async def my_rooms(request: Request):
-    """当前登录工程师的房间列表（含连接状态）。"""
+    """当前登录工程师的房间列表（含连接状态）。
+    只返回"我创建 + 我加入（room_members）"的房间——账号隔离，互不可见他人房间。
+    ?all=1：admin 返回所有房间（管理需要）；普通账号与默认一致（仅自己的）。"""
     user = _require_user(request)
     if not user:
         return JSONResponse({"error": "未登录"}, status_code=401)
     try:
         conn = _db_connect()
-        rows = conn.execute(
-            "SELECT * FROM rooms WHERE engineer_username = ? ORDER BY created_at DESC LIMIT 100",
-            (user["username"],),
-        ).fetchall()
+        if request.query_params.get("all") == "1" and user["role"] == "admin":
+            rows = conn.execute(
+                "SELECT * FROM rooms ORDER BY created_at DESC LIMIT 200",
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM rooms WHERE engineer_username = ? "
+                "OR room_code IN (SELECT room_code FROM room_members WHERE username = ?) "
+                "ORDER BY created_at DESC LIMIT 100",
+                (user["username"], user["username"]),
+            ).fetchall()
         conn.close()
     except Exception as e:
         run_logger.error(f"my_rooms query error: {e}")
@@ -1808,6 +1852,33 @@ async def check_room(request: Request, room_code: str):
     code = room_code.strip().upper()
     exists = room_record_exists(code)
     return {"room_code": code, "exists": exists}
+
+
+@app.post("/api/rooms/join")
+async def join_room(request: Request):
+    """记录账号加入房间（room_members）——工具页/工单页只显示"我创建 + 我加入"的房间。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    code = str(body.get("room_code", "")).strip().upper()
+    if not code or not room_record_exists(code):
+        return JSONResponse({"error": "房间不存在"}, status_code=404)
+    try:
+        conn = _db_connect()
+        conn.execute(
+            "INSERT OR IGNORE INTO room_members (room_code, username) VALUES (?, ?)",
+            (code, user["username"]),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"join_room error: {e}")
+        return JSONResponse({"error": "记录失败"}, status_code=500)
+    return {"ok": True, "room_code": code}
 
 
 # ============================================================
@@ -2147,7 +2218,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.8",
+        "version": "0.13.9",
     }
 
 
@@ -2327,7 +2398,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.8</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.9</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -4838,6 +4909,61 @@ async def tools_smart(request: Request):
     return {"ok": True, "platform": platform, "log": result}
 
 
+@app.post("/api/tools/tslog")
+async def tools_tslog(request: Request):
+    """ThinkStation 日志采集（tslog.bat 全套 20+ 项）：
+    下载工具集→解压→运行 tslog.bat→7z 打包到客户机本地→返回路径+大小（数据不上云）。
+    仅 Windows。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    platform = (room.machine or {}).get("platform", room.platform)
+    if platform != "windows":
+        return JSONResponse({"error": "ThinkStation 日志采集仅支持 Windows 客户机"}, status_code=400)
+
+    public_url = get_public_url(request)
+    cmd = (
+        '$d = "$env:TEMP\\tslog"; $z = "$env:TEMP\\tslog.zip"; '
+        f'curl.exe -sL -o $z "{public_url}/static/tools/tslog.zip"; '
+        'if (!(Test-Path $z)) { Write-Output "DOWNLOAD_FAIL"; exit }; '
+        'Expand-Archive $z $d -Force -ErrorAction SilentlyContinue; '
+        'if (!(Test-Path "$d\\tslog.bat")) { Write-Output "EXTRACT_FAIL"; exit }; '
+        'Push-Location $d; cmd /c "tslog.bat"; Pop-Location; '
+        'New-Item -ItemType Directory -Force -Path "C:\\DiagLogs\\tslog" | Out-Null; '
+        '$pk = Get-ChildItem "$d\\*.7z" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1; '
+        'if ($pk) { $dest = "C:\\DiagLogs\\tslog\\" + $pk.Name; Move-Item $pk.FullName $dest -Force; Write-Output ("TSLOG_DONE " + $dest + " (" + [math]::Round($pk.Length/1MB,2) + " MB)") } else { Write-Output "TSLOG_NO_PACKAGE" }'
+    )
+
+    run_logger.info(f"[{room_code}] tools_tslog: exec start (ThinkStation log collection)")
+    try:
+        result = await asyncio.wait_for(
+            execute_bridge_command(room, "Shell", {"command": cmd, "timeout": 600, "cwd": ""}, f"tslog_{int(time.time())}", tier=1),
+            timeout=650,
+        )
+    except asyncio.TimeoutError:
+        run_logger.error(f"[{room_code}] tools_tslog timed out (10 min)")
+        return JSONResponse({"error": "采集超时（10 分钟）——请确认客户机网络与磁盘空间"}, status_code=504)
+    except Exception as e:
+        run_logger.error(f"[{room_code}] tools_tslog error: {e}")
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+
+    run_logger.info(f"[{room_code}] tools_tslog done")
+    return {"status": "ok", "output": result}
+
+
 @app.post("/api/tools/sio_log")
 async def tools_sio_log(request: Request):
     """抓取 SIO 硬件诊断日志（HWDiag /DUMPLOG）——自动下载工具到客户机并执行，返回日志文本。
@@ -5247,7 +5373,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.8+）：
+    # 服务器主动定期发业务 ping（v0.13.9+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5380,7 +5506,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.8 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.9 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,

@@ -632,6 +632,7 @@ let approvalDeadline = 0;
 let autoApproveT2 = localStorage.getItem('auto_approve_t2') === 'true';
 let reconnectAttempts = 0;
 let reconnectTimer = null;
+let heartbeatTimer = null;  // ws 心跳保活定时器（25s 一个 ping）
 
 const messagesEl = document.getElementById('messages');
 const inputBox = document.getElementById('input-box');
@@ -710,6 +711,13 @@ function connect(room) {
     loadHistory(roomCode);  // 断线重连/刷新后恢复历史对话
     // Sync auto-approve state with server
     ws.send(JSON.stringify({ type: 'auto_approve_toggle', enabled: autoApproveT2 }));
+    // 心跳保活：每 25s 发一个 ping——防止中间设备（NAT/防火墙 60s 无数据）静默切断长连接
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: 'ping' })); } catch (e) {}
+      }
+    }, 25000);
   };
 
   ws.onmessage = (event) => {
@@ -989,13 +997,13 @@ async function forceLogout() {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) resetIdleTimer(); });
 resetIdleTimer();
 
-// 自动重连：指数退避，最多 5 次
+// 自动重连：无限重试（指数退避，封顶 30s——网络抖动自动恢复，无需手动刷新）
 function scheduleReconnect() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-  if (reconnectAttempts >= 5 || !roomCode || !ws || ws.readyState !== WebSocket.CLOSED) return;
-  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 15000);
+  if (!roomCode || !ws || ws.readyState !== WebSocket.CLOSED) return;
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
   reconnectAttempts++;
-  addSystemMsg('[' + reconnectAttempts + '/5] ' + (currentLang === 'en' ? 'Auto-reconnecting in ' : '自动重连中，') + (delay / 1000) + 's');
+  addSystemMsg('[' + reconnectAttempts + '] 自动重连中，' + (delay / 1000) + 's');
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     if (!roomCode) return;
