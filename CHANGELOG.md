@@ -1,3 +1,22 @@
+## v0.13.12 — 2026-08-27（部署适配修复：Cookie Secure 可配置 + rooms 表 os 列）
+
+### 修复（社区部署反馈——任何新环境部署都会踩）
+
+- **Cookie Secure 可配置**：新增 `COOKIE_SECURE` 环境变量（默认 true——线上 HTTPS 行为不变）
+  - 纯 HTTP 本地/内网部署设 `COOKIE_SECURE=false`——否则浏览器不发送 Secure cookie → 登录后全部接口 401
+  - 兼容值：1/true/yes/on
+- **rooms 表补 os 列**（建房间必 500 修复）：
+  - CREATE TABLE 加 `os TEXT DEFAULT ''`（新库直接有）
+  - `_ensure_column` 补 os（老库启动自动 ALTER——无需人工重建/手改）
+  - 修复前：INSERT 语句写 os 字段但表无此列 → `table rooms has no column named os` → 500
+
+### 验证
+
+- 新库模拟：建房间（Windows/Linux）✅
+- 老库模拟：_ensure_column 自动补列 + 建房间 ✅
+
+---
+
 ## v0.13.11 — 2026-08-26（安全加固 P0-P3 + 房间重连恢复）
 
 ### 安全加固

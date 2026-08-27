@@ -145,6 +145,7 @@ def init_db():
             sn TEXT NOT NULL,
             ticket_no TEXT NOT NULL,
             machine_model TEXT DEFAULT '',
+            os TEXT DEFAULT '',
             engineer_username TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             expires_at TEXT DEFAULT NULL,
@@ -168,6 +169,7 @@ def init_db():
     _ensure_column(conn, "rooms", "token_expires_at", "token_expires_at TEXT DEFAULT NULL")
     _ensure_column(conn, "rooms", "status", "status TEXT DEFAULT 'active'")
     _ensure_column(conn, "rooms", "idle_at", "idle_at TEXT DEFAULT NULL")
+    _ensure_column(conn, "rooms", "os", "os TEXT DEFAULT ''")  # 部署适配：老库自动补列（2026-08-27 社区反馈）
     conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_engineer ON rooms(engineer_username, created_at)")
     # 用户反馈表（测试反馈收集）
     conn.execute("""
@@ -1041,7 +1043,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.11", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.12", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1089,6 +1091,9 @@ ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
 ADMIN_SESSIONS: dict[str, float] = {}   # token -> expiry ts
 ADMIN_SESSION_TTL = 4 * 3600            # 4 hours（安全加固：原 12h 缩短）
+# Cookie Secure 标志：HTTPS 部署保持 true（默认）；纯 HTTP 本地/内网部署设 COOKIE_SECURE=false，
+# 否则浏览器不发送 Secure cookie → 会话失效（401）——部署适配（2026-08-27 社区反馈）
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", secrets.token_hex(16))
 
 
@@ -1123,7 +1128,7 @@ async def admin_login(request: Request):
     token = secrets.token_hex(24)
     ADMIN_SESSIONS[token] = time.time() + ADMIN_SESSION_TTL
     resp = JSONResponse({"ok": True, "token": token})
-    resp.set_cookie("admin_token", token, max_age=ADMIN_SESSION_TTL, httponly=True, samesite="lax", secure=True)
+    resp.set_cookie("admin_token", token, max_age=ADMIN_SESSION_TTL, httponly=True, samesite="lax", secure=COOKIE_SECURE)
     return resp
 
 
@@ -1157,7 +1162,7 @@ def _require_user(request: Request) -> Optional[dict]:
 def _set_user_cookie(resp, username: str, role: str):
     token = secrets.token_hex(24)
     USER_SESSIONS[token] = {"username": username, "role": role, "exp": time.time() + USER_SESSION_TTL}
-    resp.set_cookie("user_token", token, max_age=USER_SESSION_TTL, httponly=True, samesite="lax", secure=True)
+    resp.set_cookie("user_token", token, max_age=USER_SESSION_TTL, httponly=True, samesite="lax", secure=COOKIE_SECURE)
 
 
 CAPTCHAS = {}  # 登录验证码：captcha_id -> {code, exp}
@@ -1583,7 +1588,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.11"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.12"}
 
 
 @app.post("/api/debug_log")
@@ -2272,7 +2277,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.11",
+        "version": "0.13.12",
     }
 
 
@@ -2452,7 +2457,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.11</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.12</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -5445,7 +5450,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.11+）：
+    # 服务器主动定期发业务 ping（v0.13.12+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5600,7 +5605,7 @@ async def _startup_reaper():
 
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.11 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.12 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info("房间内存已清空——bridge/browser 重连时自动从 DB 恢复房间（无需重新创建）")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
