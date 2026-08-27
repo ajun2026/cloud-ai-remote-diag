@@ -1043,7 +1043,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.13", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.14", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1611,7 +1611,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.13"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.14"}
 
 
 @app.post("/api/debug_log")
@@ -1984,12 +1984,25 @@ async def room_connect(room_code: str, request: Request):
     ws_url = get_ws_url(request)
     _domain = urllib.parse.urlparse(public_url).netloc.split(":")[0]
 
+    # 部署地址动态化（2026-08-27 社区反馈 Bug 5）：
+    # HTTPS+443 部署：保留 8443 降级（线上行为不变）
+    # HTTP / 非标端口部署：直接用部署地址（不再硬编码 https://域:443/8443）
+    _parsed = urllib.parse.urlparse(public_url)
+    _primary = public_url.rstrip("/")
+    if _parsed.scheme == "https" and (_parsed.port or 443) == 443:
+        _fallback = f"https://{_domain}:8443"
+        _ws_fallback = f"wss://{_domain}:8443"
+    else:
+        _fallback = _primary
+        _ws_fallback = _primary.replace("http", "ws", 1)
+    _ws_primary = _primary.replace("http", "ws", 1)
+
     # 连接令牌：有效期内复用（多次获取不互相顶掉）
     token = get_or_create_room_token(room_code)
 
     ps1_cmd = (
-        '$u="https://' + _domain + '"; '
-        + 'if (!(curl.exe -sk --max-time 5 "$u/api/health" -o NUL 2>$null)) { $u="https://' + _domain + ':8443" }; '
+        '$u="' + _primary + '"; '
+        + 'if (!(curl.exe -sk --max-time 5 "$u/api/health" -o NUL 2>$null)) { $u="' + _fallback + '" }; '
         + '$env:BRIDGE_SERVER=($u -replace "^http","ws"); $env:BRIDGE_ROOM="' + room_code + '"; $env:BRIDGE_TOKEN="' + token + '"; '
         + 'iex (iwr "$u/static/bridge.ps1" -UseBasicParsing).Content'
     )
@@ -1999,14 +2012,14 @@ async def room_connect(room_code: str, request: Request):
         "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
         "cd /d \"%~dp0\"\r\n"
         "echo [1/3] Checking network...\r\n"
-        "curl -sk --max-time 5 -o NUL \"https://" + _domain + "/api/health\"\r\n"
+        "curl -sk --max-time 5 -o NUL \"" + _primary + "/api/health\"\r\n"
         "if errorlevel 1 (\r\n"
-        "    echo [1/3] Port 443 blocked, using 8443 fallback...\r\n"
-        "    set \"SRV=https://" + _domain + ":8443\"\r\n"
-        "    set \"WSRV=wss://" + _domain + ":8443\"\r\n"
+        "    echo [1/3] Primary failed, using fallback...\r\n"
+        "    set \"SRV=" + _fallback + "\"\r\n"
+        "    set \"WSRV=" + _ws_fallback + "\"\r\n"
         ") else (\r\n"
-        "    set \"SRV=https://" + _domain + "\"\r\n"
-        "    set \"WSRV=wss://" + _domain + "\"\r\n"
+        "    set \"SRV=" + _primary + "\"\r\n"
+        "    set \"WSRV=" + _ws_primary + "\"\r\n"
         ")\r\n"
         "echo [2/3] Downloading latest bridge...\r\n"
         "curl -sL -o \"bridge-win64.exe\" \"%SRV%/static/bridge-win64.exe\"\r\n"
@@ -2022,8 +2035,8 @@ async def room_connect(room_code: str, request: Request):
         "pause\r\n"
     )
     linux_cmd = (
-        "U=\"https://" + _domain + "\"; "
-        "curl -sf --max-time 5 \"$U/api/health\" >/dev/null 2>&1 || U=\"https://" + _domain + ":8443\"; "
+        "U=\"" + _primary + "\"; "
+        "curl -sf --max-time 5 \"$U/api/health\" >/dev/null 2>&1 || U=\"" + _fallback + "\"; "
         "curl -sL \"$U/static/install-linux.sh\" | bash -s -- " + room_code + " " + token
     )
 
@@ -2082,14 +2095,14 @@ async def room_bat(room_code: str, request: Request):
         "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
         "cd /d \"%~dp0\"\r\n"
         "echo [1/3] Checking network...\r\n"
-        "curl -sk --max-time 5 -o NUL \"https://" + _domain + "/api/health\"\r\n"
+        "curl -sk --max-time 5 -o NUL \"" + _primary + "/api/health\"\r\n"
         "if errorlevel 1 (\r\n"
-        "    echo [1/3] Port 443 blocked, using 8443 fallback...\r\n"
-        "    set \"SRV=https://" + _domain + ":8443\"\r\n"
-        "    set \"WSRV=wss://" + _domain + ":8443\"\r\n"
+        "    echo [1/3] Primary failed, using fallback...\r\n"
+        "    set \"SRV=" + _fallback + "\"\r\n"
+        "    set \"WSRV=" + _ws_fallback + "\"\r\n"
         ") else (\r\n"
-        "    set \"SRV=https://" + _domain + "\"\r\n"
-        "    set \"WSRV=wss://" + _domain + "\"\r\n"
+        "    set \"SRV=" + _primary + "\"\r\n"
+        "    set \"WSRV=" + _ws_primary + "\"\r\n"
         ")\r\n"
         "echo [2/3] Downloading latest bridge...\r\n"
         "curl -sL -o \"bridge-win64.exe\" \"%SRV%/static/bridge-win64.exe\"\r\n"
@@ -2300,7 +2313,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.13",
+        "version": "0.13.14",
     }
 
 
@@ -2480,7 +2493,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.13</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.14</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -5473,7 +5486,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.13+）：
+    # 服务器主动定期发业务 ping（v0.13.14+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5628,7 +5641,7 @@ async def _startup_reaper():
 
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.13 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.14 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info("房间内存已清空——bridge/browser 重连时自动从 DB 恢复房间（无需重新创建）")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
