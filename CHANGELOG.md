@@ -1,3 +1,28 @@
+## v0.13.13 — 2026-08-27（Hermes 桥指令 f-string 修复 + IDG 内置反向代理 + 部署文档补全）
+
+### Bug 修复（社区部署反馈）
+
+- **Hermes 桥指令 f-string 花括号未转义**（AGENT_BRAIN=hermes 对话必崩）：
+  - 根因：build_hermes_bridge_guide() f-string 内 3 处裸 JSON 花括号（STARTUP_LIST / startup_close 示例 / STARTUP_CLOSED）被 Python 当格式化占位符 → `ValueError: Invalid format specifier`
+  - 修复：3 处转义为 `{{ }}`（注入内容不变）——实测函数正常返回，示例 JSON 格式正确
+  - 影响范围：仅 Hermes 大脑通道（DeepSeek 通道不调此函数——不受影响）
+- **IDG 日志分析内置反向代理**：
+  - server.py 新增 `/log-analyzer/*` 反向代理路由（httpx 转发——支持上传/下载/长任务 600s）
+  - 部署者无需另配 Caddy 路由（默认上游 http://127.0.0.1:8002——.env 可改 LOG_ANALYZER_UPSTREAM）
+  - 子应用未启动时返回 502 + 明确提示
+
+### 文档
+
+- **部署指南补"IDG 日志分析部署"章节**：独立仓库地址、部署步骤、BASE_DIR 硬编码提示（/opt/log-analyzer）、上游配置、账号隔离说明
+
+### 验证
+
+- build_hermes_bridge_guide() 正常返回（3934 字符——单花括号输出正确）
+- /log-analyzer/ 经内置代理 200（页面 + API）
+- 服务全链路正常
+
+---
+
 ## v0.13.12 — 2026-08-27（部署适配修复：Cookie Secure 可配置 + rooms 表 os 列）
 
 ### 修复（社区部署反馈——任何新环境部署都会踩）

@@ -1043,7 +1043,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.12", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.13", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1198,6 +1198,29 @@ def _login_check_blocked(request: Request, username: str):
     if _login_locked(ip) or _login_locked("u:" + username):
         return "尝试过于频繁，请 15 分钟后再试"
     return None
+
+
+# ─── IDG 日志分析内置反向代理（独立子应用 file-analyzer-web——部署者无需另配 Caddy 路由）───
+LOG_ANALYZER_UPSTREAM = os.getenv("LOG_ANALYZER_UPSTREAM", "http://127.0.0.1:8002")
+
+@app.api_route("/log-analyzer/{path:path}",
+               methods=["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"],
+               include_in_schema=False)
+async def log_analyzer_proxy(path: str, request: Request):
+    """转发到 IDG 日志分析子应用（支持上传/下载/长任务 600s）。"""
+    url = f"{LOG_ANALYZER_UPSTREAM}/{path}"
+    if request.query_params:
+        url += "?" + str(request.query_params)
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", "transfer-encoding")}
+    headers["X-Forwarded-For"] = _client_ip(request)
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=600) as client:
+            r = await client.request(request.method, url, headers=headers, content=body if body else None, follow_redirects=False)
+        resp_headers = {k: v for k, v in r.headers.items() if k.lower() not in ("content-length", "transfer-encoding", "connection")}
+        return Response(content=r.content, status_code=r.status_code, headers=resp_headers)
+    except Exception as e:
+        return JSONResponse({"detail": f"IDG 日志分析服务未启动（{LOG_ANALYZER_UPSTREAM}）：{e}"}, status_code=502)
 
 
 @app.get("/api/captcha")
@@ -1588,7 +1611,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.12"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.13"}
 
 
 @app.post("/api/debug_log")
@@ -2277,7 +2300,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.12",
+        "version": "0.13.13",
     }
 
 
@@ -2457,7 +2480,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.12</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.13</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -3108,12 +3131,12 @@ Body: {{"room_code": "{room.code}", "tool": "<工具名>", "args": {{...}}}}
 
 ### 快捷功能指令（用户点击对话页快捷按钮时你会收到，必须按格式返回）
 1. 收到 `[QUICK_ACTION:startup_scan]`：查询本机开机自启动项（注册表 Run：HKCU/HKLM/WOW6432Node + RunOnce：HKCU/HKLM + 启动文件夹：用户/公用 + 开机触发的计划任务），整理成 JSON 后**在回复末尾**用标记包裹（不要省略、不要改格式）：
-[[STARTUP_LIST]]{"items":[{"name":"BaiduYunDetect","display":"百度网盘","command":"C:\\Users\\x\\AppData\\Roaming\\baidu\\BaiduNetdisk\\YunDetectService.exe","location":"HKCU\\Run","category":"advisory","recommend":true}]}[[/STARTUP_LIST]]
+[[STARTUP_LIST]]{{"items":[{{"name":"BaiduYunDetect","display":"百度网盘","command":"C:\\Users\\x\\AppData\\Roaming\\baidu\\BaiduNetdisk\\YunDetectService.exe","location":"HKCU\\Run","category":"advisory","recommend":true}}]}}[[/STARTUP_LIST]]
 - category 取值：necessary(系统必需,如 ctfmon)/common(常用软件)/advisory(建议关闭)/suspicious(可疑)
 - recommend=true 仅对 advisory 项（前端预勾选）；necessary 项必填 false
 - 标记之外的部分写简短说明（查到 N 项等），不要重复罗列全部项目
-2. 收到 `[QUICK_ACTION:startup_close]` 后跟 JSON（如 {"names":["BaiduYunDetect"]}）：用户已通过面板勾选确认。执行关闭流程：①备份（reg export 到桌面 run-backup-日期.reg）②删除对应注册表值/启动文件/禁用计划任务 ③验证消失。完成后在回复末尾附：
-[[STARTUP_CLOSED]]{"closed":["BaiduYunDetect"],"failed":[],"backup":"C:\\Users\\x\\Desktop\\run-backup-20260817.reg"}[[/STARTUP_CLOSED]]
+2. 收到 `[QUICK_ACTION:startup_close]` 后跟 JSON（如 {{"names":["BaiduYunDetect"]}}）：用户已通过面板勾选确认。执行关闭流程：①备份（reg export 到桌面 run-backup-日期.reg）②删除对应注册表值/启动文件/禁用计划任务 ③验证消失。完成后在回复末尾附：
+[[STARTUP_CLOSED]]{{"closed":["BaiduYunDetect"],"failed":[],"backup":"C:\\Users\\x\\Desktop\\run-backup-20260817.reg"}}[[/STARTUP_CLOSED]]
 - 只关闭用户点名的项；🟢系统必需项绝不删除；标记之外写简要执行结果说明
 
 ### 工作流程
@@ -5450,7 +5473,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.12+）：
+    # 服务器主动定期发业务 ping（v0.13.13+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5605,7 +5628,7 @@ async def _startup_reaper():
 
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.12 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.13 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info("房间内存已清空——bridge/browser 重连时自动从 DB 恢复房间（无需重新创建）")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
