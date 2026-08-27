@@ -396,6 +396,7 @@
         <div class="nav-divider"></div>
         <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('workorders')" id="nav-workorders"><span data-i18n="nav_workorders">📋 我的工单</span></div><!-- FIELD_HIDE_END -->
         <div class="nav-item" onclick="switchTab('tools-win')" id="nav-tools-win"><span data-i18n="nav_tools_win">🪟 Windows 工具</span></div>
+        <div class="nav-item" onclick="switchTab('idg')" id="nav-idg"><span>📊 IDG 日志分析</span></div>
         <div class="nav-item" onclick="switchTab('tools-linux')" id="nav-tools-linux"><span data-i18n="nav_tools_linux">🐧 Linux 工具</span></div>
         <div class="nav-divider"></div>
         <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('password')" id="nav-password"><span data-i18n="nav_password">🔒 修改密码</span></div>
@@ -411,7 +412,7 @@
         if (!r) return;
         localStorage.setItem('cab_role', r);
         if (r !== 'field') return;
-        ['nav-home', 'nav-chat', 'nav-workorders', 'nav-password', 'nav-feedback'].forEach(function (id) {
+        ['nav-home', 'nav-chat', 'nav-workorders', 'nav-password', 'nav-feedback', 'nav-idg'].forEach(function (id) {
           var el = document.getElementById(id); if (el) el.style.display = 'none';
         });
         // 同步默认页（避免首页闪现）：DOM ready 后切——有记住的房间→连接引导，否则创建房间
@@ -662,6 +663,14 @@
       </section>
 
       <!-- Windows 工具（非 AI 工具集合） -->
+      <section class="page" id="page-idg">
+        <div class="page-title">📊 IDG 日志分析</div>
+        <div class="page-desc">日志诊断分析平台——上传 Windows / Linux / BMC 日志包，自动识别并结构化分析（蓝屏 Dump / SIO / 系统事件 / AI 辅助诊断）</div>
+        <div style="margin-top:14px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--surface);height:calc(100vh - 210px);min-height:520px;">
+          <iframe src="/log-analyzer/" style="width:100%;height:100%;border:none;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
+        </div>
+      </section>
+
       <section class="page" id="page-tools-win">
         <div class="page-title"><span data-i18n="nav_tools_win">Windows 工具</span></div>
         <div class="page-desc" data-i18n="tools_win_desc">Windows 客户机专用工具集合，通过桥接器远程推送到客户机执行</div>

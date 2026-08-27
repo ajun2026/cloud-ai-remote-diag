@@ -223,6 +223,12 @@
    "desc": "VIDEO_SCHEDULER_INTERNAL_ERROR bug 检查的值为 0x00000119。 此 bug 检查指示视频计划程序检测到严重冲突。",
    "cause": "这是内部 OS 状态错误，通常是由内存损坏或硬件损坏引起的。",
    "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0xA0": {
+   "name": "INTERNAL_POWER_ERROR",
+   "desc": "Windows 内部电源错误——电源管理状态机或 ACPI 电源接口异常。常见诱因：显卡驱动缺失/异常（设备管理器显示 Microsoft 基本显示适配器）、BIOS/ACPI 固件电源管理缺陷、快速启动/睡眠唤醒路径问题。",
+   "cause": "软件/固件层面问题（电源管理驱动、ACPI、BIOS 固件、显卡驱动）——非 CPU/内存物理故障（除非伴随 WHEA 或内存错误事件）。",
+   "advice": "排查顺序：1) 安装/更新显卡驱动（本机 GPU 若显示 Microsoft 基本显示适配器=驱动未装，高度嫌疑） 2) 更新 BIOS 到最新（联想官网） 3) 关闭快速启动（powercfg /h off） 4) 检查电源计划与睡眠设置 5) 更新 ACPI/芯片组驱动。"
   }
  }
 }

@@ -1041,7 +1041,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.9")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.10")
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1534,7 +1534,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.9"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.10"}
 
 
 @app.post("/api/debug_log")
@@ -2218,7 +2218,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.9",
+        "version": "0.13.10",
     }
 
 
@@ -2398,7 +2398,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.9</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.10</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -4371,6 +4371,13 @@ ACTION_KB = {
         "检查硬盘健康（SMART——坏道/即将故障）",
         "备份数据，考虑更换硬盘"],
         "params": {"1": "源文件与行号", "2": "NTFS 状态"}},
+    "0xA0": {"actions": [
+        "安装/更新显卡驱动（设备管理器 GPU 若显示 Microsoft 基本显示适配器=驱动未装——高度嫌疑）",
+        "更新 BIOS 到最新（联想官网对应机型）",
+        "关闭快速启动：powercfg /h off",
+        "检查电源计划与睡眠/唤醒设置",
+        "更新 ACPI/芯片组驱动（联想官网）"],
+        "params": {"1": "内部电源错误参数（0x600-0x6FF 段与 ACPI 电源状态相关）"}},
     "0x77": {"actions": [
         "检查硬盘健康（SMART）——内核栈页错误多与磁盘故障相关",
         "更换 SATA 数据线 / 接口测试",
@@ -4400,6 +4407,7 @@ ACTION_KB = {
 
 def build_dump_report(room_code: str, raw: str) -> str:
     """解析 dump_analyze.ps1 输出 → 匹配知识库 → 生成中文分析报告。"""
+    gpu_known = True  # 默认假设驱动正常——具体在 sysinfo 处细化
     kb = load_bugcheck_kb()
     bd = load_bad_drivers()
     lines = []
@@ -4482,6 +4490,7 @@ def build_dump_report(room_code: str, raw: str) -> str:
     # 系统信息
     if sysinfo.get("MODEL"):
         gpu_str = "；".join(g.split("|")[0] for g in sysinfo.get("GPUS", []))
+        gpu_known = bool(gpu_str) and "microsoft" not in gpu_str.lower()  # 基本显示适配器=驱动未装
         lines.append(f"💻 {sysinfo.get('MANUFACTURER', '')} {sysinfo.get('MODEL', '')}｜{sysinfo.get('OS', '')}")
         info_bits = []
         if sysinfo.get("CPU"): info_bits.append(f"CPU: {sysinfo['CPU'][:60]}")
@@ -4610,8 +4619,17 @@ def build_dump_report(room_code: str, raw: str) -> str:
             lines.append("  蓝屏与内存相关——内存故障或驱动内存操作错误，需内存检测确认")
         elif code_n in ("0x24", "0x77"):
             lines.append("  蓝屏与存储相关——硬盘/文件系统故障概率高，需 SMART 检测确认")
+        elif code_n == "0xA0":
+            lines.append("  蓝屏为 INTERNAL_POWER_ERROR（内部电源错误）——电源管理/ACPI 固件/显卡驱动层面问题（软件/固件故障，非 CPU/内存物理损坏）")
+            lines.append(f"  停止码含义：{kb.get(code_n, {}).get('desc', '')[:120]}")
+            if disp4101 == 0 and not gpu_known:
+                lines.append("  ⚠ 显卡驱动未正常安装（Microsoft 基本显示适配器）——电源管理状态机崩溃的高度嫌疑")
         else:
-            lines.append(f"  蓝屏停止码 {code_n}——见上方知识库说明与排查行动")
+            kbinfo = kb.get(code_n)
+            if kbinfo:
+                lines.append(f"  蓝屏停止码 {code_n}（{kbinfo.get('name', '')}）——{kbinfo.get('desc', '')[:150]}")
+            else:
+                lines.append(f"  蓝屏停止码 {code_n}——知识库未收录该代码，需查阅微软官方 BugCheck 文档确认含义")
         # 优先级建议
         if act and act.get("actions"):
             lines.append("")
@@ -5373,7 +5391,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.9+）：
+    # 服务器主动定期发业务 ping（v0.13.10+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5506,7 +5524,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.9 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.10 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,
