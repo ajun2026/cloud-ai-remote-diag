@@ -1041,7 +1041,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.10")
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.11", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1088,7 +1088,7 @@ async def enforce_domain_host(request: Request, call_next):
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
 ADMIN_SESSIONS: dict[str, float] = {}   # token -> expiry ts
-ADMIN_SESSION_TTL = 12 * 3600            # 12 hours
+ADMIN_SESSION_TTL = 4 * 3600            # 4 hours（安全加固：原 12h 缩短）
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", secrets.token_hex(16))
 
 
@@ -1111,12 +1111,19 @@ def _require_admin(request: Request):
 @app.post("/api/admin/login")
 async def admin_login(request: Request):
     body = await request.json()
+    ip = _client_ip(request)
+    if _login_locked(ip) or _login_locked("u:admin"):
+        return JSONResponse({"error": "尝试过于频繁，请 15 分钟后再试"}, status_code=429)
     if body.get("username") != ADMIN_USERNAME or body.get("password") != ADMIN_PASSWORD:
+        _login_fail(ip)
+        _login_fail("u:admin")
         return JSONResponse({"error": "用户名或密码错误"}, status_code=401)
+    _login_clear(ip)
+    _login_clear("u:admin")
     token = secrets.token_hex(24)
     ADMIN_SESSIONS[token] = time.time() + ADMIN_SESSION_TTL
     resp = JSONResponse({"ok": True, "token": token})
-    resp.set_cookie("admin_token", token, max_age=ADMIN_SESSION_TTL, httponly=True, samesite="lax")
+    resp.set_cookie("admin_token", token, max_age=ADMIN_SESSION_TTL, httponly=True, samesite="lax", secure=True)
     return resp
 
 
@@ -1150,10 +1157,42 @@ def _require_user(request: Request) -> Optional[dict]:
 def _set_user_cookie(resp, username: str, role: str):
     token = secrets.token_hex(24)
     USER_SESSIONS[token] = {"username": username, "role": role, "exp": time.time() + USER_SESSION_TTL}
-    resp.set_cookie("user_token", token, max_age=USER_SESSION_TTL, httponly=True, samesite="lax")
+    resp.set_cookie("user_token", token, max_age=USER_SESSION_TTL, httponly=True, samesite="lax", secure=True)
 
 
 CAPTCHAS = {}  # 登录验证码：captcha_id -> {code, exp}
+
+# ─── 登录失败限流（防爆破：5 次失败锁 15 分钟）────────────────
+LOGIN_FAILS: dict[str, dict] = {}  # key -> {"count": int, "lock_until": float}
+
+def _client_ip(request: Request) -> str:
+    """取客户端 IP（Caddy 反代后读 X-Forwarded-For）。"""
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+def _login_locked(key: str) -> bool:
+    rec = LOGIN_FAILS.get(key)
+    return bool(rec and rec["lock_until"] > time.time())
+
+def _login_fail(key: str):
+    rec = LOGIN_FAILS.get(key, {"count": 0, "lock_until": 0})
+    rec["count"] += 1
+    if rec["count"] >= 5:
+        rec["lock_until"] = time.time() + 900  # 锁定 15 分钟
+        rec["count"] = 0
+    LOGIN_FAILS[key] = rec
+
+def _login_clear(key: str):
+    LOGIN_FAILS.pop(key, None)
+
+def _login_check_blocked(request: Request, username: str):
+    """返回 None=放行；字符串=拒绝原因（按 IP + 账号双 key）。"""
+    ip = _client_ip(request)
+    if _login_locked(ip) or _login_locked("u:" + username):
+        return "尝试过于频繁，请 15 分钟后再试"
+    return None
 
 
 @app.get("/api/captcha")
@@ -1175,6 +1214,10 @@ async def user_login(request: Request):
     body = await request.json()
     username = (body.get("username") or "").strip()
     password = body.get("password") or ""
+    ip = _client_ip(request)
+    blocked = _login_check_blocked(request, username)
+    if blocked:
+        return JSONResponse({"error": blocked}, status_code=429)
     # 验证码校验（前端带 captcha_id 则必须有效；不带则跳过——内部脚本兼容）
     cap_id = str(body.get("captcha_id") or "")
     cap_code = (body.get("captcha_code") or "").strip().upper()
@@ -1186,9 +1229,15 @@ async def user_login(request: Request):
             return JSONResponse({"error": "验证码错误或已过期"}, status_code=400)
     user = get_user(username)
     if not user or not verify_password(password, user["password_hash"]):
+        _login_fail(ip)
+        if username:
+            _login_fail("u:" + username)
         return JSONResponse({"error": "用户名或密码错误"}, status_code=401)
     if not user.get("enabled", 1):
         return JSONResponse({"error": "账号已停用，请联系管理员"}, status_code=403)
+    _login_clear(ip)
+    if username:
+        _login_clear("u:" + username)
     resp = JSONResponse({"ok": True, "username": user["username"], "name": user["name"], "role": user["role"]})
     _set_user_cookie(resp, user["username"], user["role"])
     run_logger.info(f"[auth] {username} 登录成功")
@@ -1534,7 +1583,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.10"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.11"}
 
 
 @app.post("/api/debug_log")
@@ -2156,8 +2205,13 @@ async def diag_room(room_code: str):
     """
     room = rooms.get(room_code.upper())
     if not room:
-        return JSONResponse({"room_code": room_code.upper(), "exists": False,
-                             "error": "房间不存在或已过期（服务器重启后房间内存清空，需重新创建）"}, status_code=404)
+        if room_record_exists(room_code.upper()):
+            # 房间在库但内存无——服务器重启后 bridge 尚未重连（自动恢复中）
+            return JSONResponse({"room_code": room_code.upper(), "exists": False, "db_exists": True,
+                                 "status": "waiting_reconnect",
+                                 "error": "房间在库——bridge 尚未重连（服务器重启后自动恢复，通常 30 秒内；请确认客户机 bridge 在线）"}, status_code=200)
+        return JSONResponse({"room_code": room_code.upper(), "exists": False, "db_exists": False,
+                             "error": "房间不存在"}, status_code=404)
 
     now = datetime.now(timezone.utc)
     hb_age = None
@@ -2218,7 +2272,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.10",
+        "version": "0.13.11",
     }
 
 
@@ -2398,7 +2452,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.10</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.11</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -5391,7 +5445,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.10+）：
+    # 服务器主动定期发业务 ping（v0.13.11+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5493,7 +5547,6 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                 # 必须回复，否则客户端 75s 读超时会断开重连（导致状态反复切换）
                 room.last_heartbeat = datetime.now(timezone.utc)
                 await websocket.send_json({"type": "pong"})
-
             elif msg_data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
 
@@ -5522,9 +5575,33 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 # ============================================================
 # Entry point
 # ============================================================
+async def _dead_conn_reaper():
+    """半死连接清理：bridge 心跳超时（120s）→ 主动断开（触发 finally 清理 + bridge 自动重连恢复）。
+    覆盖场景：客户机断网/休眠——TCP 半开——ws 未触发断开——房间挂死。"""
+    while True:
+        await asyncio.sleep(60)
+        now = datetime.now(timezone.utc)
+        for code, room in list(rooms.items()):
+            if room.bridge_ws:
+                hb = room.last_heartbeat
+                if hb and (now - hb).total_seconds() > 120:
+                    run_logger.info(f"[reaper] bridge 心跳超时，断开半死连接: {code}（等待自动重连）")
+                    try:
+                        await room.bridge_ws.close(code=1001)
+                    except Exception:
+                        pass
+                    room.bridge_ws = None
+
+
+@app.on_event("startup")
+async def _startup_reaper():
+    asyncio.create_task(_dead_conn_reaper())
+
+
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.10 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.11 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info("房间内存已清空——bridge/browser 重连时自动从 DB 恢复房间（无需重新创建）")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,
