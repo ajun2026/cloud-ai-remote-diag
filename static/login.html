@@ -33,13 +33,11 @@
   .field label { display:block; font-size:13px; color:#93a9c7; margin-bottom:6px; }
   .field input { width:100%; padding:12px 14px; background:#0b1a2e; border:1px solid #243b57; border-radius:8px; color:#fff; font-size:14px; outline:none; }
   .field input:focus { border-color:#38bdf8; }
-  .cap-row { display:flex; gap:10px; }
-  .cap-row input { flex:1; }
-  .cap-img { width:120px; height:42px; background:#0b1a2e; border:1px solid #243b57; border-radius:8px; display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none; overflow:hidden; }
-  .cap-img canvas { display:block; }
   .btn-login { width:100%; padding:13px; background:linear-gradient(135deg,#38bdf8,#2563eb); border:none; border-radius:8px; color:#fff; font-size:15px; font-weight:600; cursor:pointer; margin-top:8px; }
   .btn-login:hover { opacity:.9; }
   .btn-login:disabled { opacity:.5; cursor:not-allowed; }
+  .btn-guest { width:100%; padding:11px; margin-top:8px; background:transparent; border:1px solid #243b57; border-radius:8px; color:#93a9c7; font-size:13px; cursor:pointer; }
+  .btn-guest:hover { border-color:#38bdf8; color:#38bdf8; }
   .links { display:flex; justify-content:space-between; margin-top:16px; font-size:13px; }
   .links a { color:#7d94b3; text-decoration:none; cursor:pointer; }
   .links a:hover { color:#38bdf8; }
@@ -89,13 +87,8 @@
     <div class="field"><label>密码</label>
       <input id="password" type="password" placeholder="请输入密码" autocomplete="current-password">
     </div>
-    <div class="field"><label>验证码</label>
-      <div class="cap-row">
-        <input id="captcha" type="text" placeholder="输入验证码" autocomplete="off" maxlength="4">
-        <div class="cap-img" id="cap-img" onclick="loadCaptcha()" title="点击刷新"><canvas id="cap-canvas" width="118" height="40"></canvas></div>
-      </div>
-    </div>
     <button class="btn-login" id="login-btn" onclick="doLogin()">Login</button>
+    <button class="btn-guest" onclick="guestLogin()" title="免密进入——仅可使用 IDG 日志分析（1 小时会话）">👤 游客进入</button>
     <div class="links"><a onclick="alert('请联系管理员重置密码')">Forgot password</a><a onclick="alert('请联系管理员开通账号')">Activate account</a></div>
 
     <div class="foot">如需账号，请联系管理员开通</div>
@@ -104,7 +97,6 @@
 </div>
 
 <script>
-let captchaId = '';
 let slideIdx = 0;
 let slideTimer = null;
 
@@ -129,46 +121,10 @@ function showError(msg) {
 }
 function hideError() { document.getElementById('error-box').style.display = 'none'; }
 
-// 获取验证码并绘制到 canvas
-async function loadCaptcha() {
-  try {
-    const resp = await fetch('/api/captcha');
-    const d = await resp.json();
-    captchaId = d.captcha_id;
-    drawCaptcha(d.text);
-  } catch (e) { console.error('captcha load failed', e); }
-}
-
-function drawCaptcha(text) {
-  const cv = document.getElementById('cap-canvas');
-  const ctx = cv.getContext('2d');
-  ctx.clearRect(0, 0, 118, 40);
-  ctx.fillStyle = '#0b1a2e';
-  ctx.fillRect(0, 0, 118, 40);
-  for (let i = 0; i < 4; i++) {
-    ctx.strokeStyle = 'rgba(56,189,248,' + (0.2 + Math.random() * 0.3) + ')';
-    ctx.beginPath();
-    ctx.moveTo(Math.random() * 118, Math.random() * 40);
-    ctx.lineTo(Math.random() * 118, Math.random() * 40);
-    ctx.stroke();
-  }
-  for (let i = 0; i < text.length; i++) {
-    ctx.save();
-    ctx.translate(18 + i * 26, 26 + (Math.random() * 6 - 3));
-    ctx.rotate((Math.random() * 0.5 - 0.25));
-    ctx.font = 'bold 22px monospace';
-    ctx.fillStyle = ['#38bdf8', '#93c5fd', '#7dd3fc'][i % 3];
-    ctx.fillText(text[i], 0, 0);
-    ctx.restore();
-  }
-}
-
 async function doLogin() {
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value;
-  const capCode = document.getElementById('captcha').value.trim();
   if (!username || !password) { showError('请输入工号和密码'); return; }
-  if (!capCode) { showError('请输入验证码'); return; }
   const btn = document.getElementById('login-btn');
   btn.disabled = true; btn.textContent = '登录中...';
   hideError();
@@ -176,28 +132,32 @@ async function doLogin() {
     const resp = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, captcha_id: captchaId, captcha_code: capCode }),
+      body: JSON.stringify({ username, password }),
     });
     const data = await resp.json();
     if (!resp.ok) {
       showError(data.error || '登录失败');
-      loadCaptcha(); document.getElementById('captcha').value = '';
       btn.disabled = false; btn.textContent = 'Login';
       return;
     }
     location.href = '/dashboard?role=' + (data.role || '');
   } catch (e) {
     showError('网络错误: ' + e.message);
-    loadCaptcha();
     btn.disabled = false; btn.textContent = 'Login';
   }
 }
 
+async function guestLogin() {
+  try {
+    const resp = await fetch('/api/auth/guest', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) { showError(data.error || '游客入口暂不可用'); return; }
+    location.href = '/dashboard?role=guest';
+  } catch (e) { showError('网络错误: ' + e.message); }
+}
+
 document.getElementById('username').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('password').focus(); });
 document.getElementById('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
-document.getElementById('captcha').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
-
-loadCaptcha();
 
 // 已登录直接进工作台
 fetch('/api/auth/me').then(r => r.json()).then(d => {

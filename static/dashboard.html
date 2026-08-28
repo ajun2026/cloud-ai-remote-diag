@@ -48,12 +48,25 @@
     width: 200px; flex-shrink: 0; background: var(--surface);
     border-right: 1px solid var(--border); padding: 14px 10px;
     display: flex; flex-direction: column; justify-content: space-between;
+    position: relative; transition: margin-left .2s ease;
   }
+  .sidebar.collapsed { width: 56px; min-width: 56px; }
+  .sidebar.collapsed .nav-item { justify-content: center; padding: 11px 0; }
+  .sidebar.collapsed .nav-item span { display: none; }
+  .sidebar.collapsed .sidebar-footer { display: none; }
+  .sidebar-toggle {
+    position: absolute; top: 12px; right: -14px; width: 14px; height: 40px;
+    background: var(--border); color: var(--info); border-radius: 0 6px 6px 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 9px; z-index: 20;
+  }
+  /* 游客模式首帧置灰（无闪烁）：非 IDG 导航全部禁用 */
+  html.guest-mode .nav-item:not(#nav-idg) { opacity: .4; cursor: not-allowed; pointer-events: none; }
   .nav-item {
     display: flex; align-items: center; gap: 10px; padding: 11px 12px; margin-bottom: 4px;
     font-size: 14px; color: var(--text2); border-radius: 8px; cursor: pointer; user-select: none;
     border-left: 3px solid transparent;
   }
+  .nav-item.guest-disabled { opacity: .35; cursor: not-allowed; pointer-events: none; }
   .nav-item:hover { background: var(--surface2); color: var(--text); }
   .nav-item.active { background: var(--surface2); color: var(--info); border-left-color: var(--info); font-weight: 600; }
   .nav-divider { height: 1px; background: var(--border); margin: 10px 8px; }
@@ -337,6 +350,13 @@
 </head>
 <body>
 <script>
+  // 首帧同步：游客模式置灰（防闪烁——本地存储 role 预判）
+  (function () {
+    var r = localStorage.getItem('cab_role');
+    if (r === 'guest') document.documentElement.classList.add('guest-mode');
+  })();
+</script>
+<script>
 // 角色首帧处理：同步读取（URL 参数优先，localStorage 兜底）——在首帧渲染前注入 CSS
 (function () {
   var r = new URLSearchParams(location.search).get('role');
@@ -385,14 +405,15 @@
   </div>
 
   <div class="main">
-    <aside class="sidebar">
-      <nav>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="折叠/展开侧边栏">◀</div>
+      <nav id="sidebar-nav">
         <!-- FIELD_HIDE_START --><div class="nav-item active" id="nav-home" onclick="switchTab('home')"><span data-i18n="nav_home">🏠 首页</span></div><!-- FIELD_HIDE_END -->
-        <div class="nav-item" onclick="switchTab('create')"><span data-i18n="nav_create">➕ 创建房间</span></div>
-        <div class="nav-item" onclick="switchTab('join')"><span data-i18n="nav_join">⇄ 加入房间</span></div>
+        <div class="nav-item" id="nav-create" onclick="switchTab('create')"><span data-i18n="nav_create">➕ 创建房间</span></div>
+        <div class="nav-item" id="nav-join" onclick="switchTab('join')"><span data-i18n="nav_join">⇄ 加入房间</span></div>
         <div class="nav-item" id="nav-field-guide" onclick="openFieldGuideFromNav()"><span>📶 连接客户机</span></div>
         <!-- FIELD_HIDE_START --><div class="nav-item" id="nav-chat" onclick="switchTab('chat')"><span data-i18n="nav_chat">💬 对话</span></div><!-- FIELD_HIDE_END -->
-        <div class="nav-item admin-only" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
+        <div class="nav-item admin-only" id="nav-download" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
         <div class="nav-divider"></div>
         <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('workorders')" id="nav-workorders"><span data-i18n="nav_workorders">📋 我的工单</span></div><!-- FIELD_HIDE_END -->
         <div class="nav-item" onclick="switchTab('tools-win')" id="nav-tools-win"><span data-i18n="nav_tools_win">🪟 Windows 工具</span></div>
@@ -405,12 +426,37 @@
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
       <script>
+      // 侧边栏折叠（记忆状态——2026-08-28）
+      function toggleSidebar() {
+        var sb = document.getElementById('sidebar');
+        var collapsed = sb.classList.toggle('collapsed');
+        localStorage.setItem('cab_sidebar', collapsed ? '1' : '0');
+        document.getElementById('sidebar-toggle').textContent = collapsed ? '▶' : '◀';
+      }
+      (function () {
+        if (localStorage.getItem('cab_sidebar') === '1') {
+          document.getElementById('sidebar').classList.add('collapsed');
+          document.getElementById('sidebar-toggle').textContent = '▶';
+        }
+      })();
+      // 页面描述默认隐藏（宁简勿繁——hover 显示）
+      document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.page-desc').forEach(function (el) {
+          el.title = el.textContent;   // 悬停可看
+          el.style.display = 'none';
+        });
+      });
       // 角色同步裁剪（防"普通界面闪现"）：登录跳转带 ?role=，同步立即应用
       (function () {
         var r = new URLSearchParams(location.search).get('role');
         if (!r) r = localStorage.getItem('cab_role');
         if (!r) return;
         localStorage.setItem('cab_role', r);
+        // 游客（guest）：仅 IDG 可用——其余 CSS 置灰（html.guest-mode——首帧无闪烁）
+        if (r === 'guest') {
+          document.documentElement.classList.add('guest-mode');
+          return;
+        }
         if (r !== 'field') return;
         ['nav-home', 'nav-chat', 'nav-workorders', 'nav-password', 'nav-feedback', 'nav-idg'].forEach(function (id) {
           var el = document.getElementById(id); if (el) el.style.display = 'none';

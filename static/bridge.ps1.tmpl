@@ -335,6 +335,12 @@ function Execute-CommandSpec {
             $err = "command timed out after ${timeoutSec}s"
         }
         $output = $outTask.GetAwaiter().GetResult()
+        # 输出过大截断（2026-08-28：修复 WebSocket 1009 断开——命令输出 >16MB 导致 ws 超限）
+        if ($output.Length -gt 8MB) {
+            $truncatedLen = $output.Length
+            $output = $output.Substring(0, 8MB) + "`n...[TRUNCATED: output too large ($truncatedLen chars)]"
+            Write-Audit "output truncated: $truncatedLen -> 8MB (id=$($Spec.id))"
+        }
         $errText = $errTask.GetAwaiter().GetResult()
         if ($errText) { $err = ($err + $errText).Trim() }
         $exitCode = $p.ExitCode

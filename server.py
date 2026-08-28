@@ -1043,7 +1043,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.14", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.15", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1056,6 +1056,11 @@ if _pub_url:
     if _pub_host:
         ALLOWED_HOSTS.add(_pub_host)
         ALLOWED_HOSTS.add("www." + _pub_host)
+# 环境变量追加白名单（多入口部署：局域网 IP + 公网域名——2026-08-28 合并社区方案）
+for _h in os.getenv("ALLOWED_HOSTS", "").split(","):
+    _h = _h.strip().lower()
+    if _h:
+        ALLOWED_HOSTS.add(_h)
 
 MIGRATE_PAGE = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1159,13 +1164,11 @@ def _require_user(request: Request) -> Optional[dict]:
     return {"username": sess["username"], "role": sess["role"]}
 
 
-def _set_user_cookie(resp, username: str, role: str):
+def _set_user_cookie(resp, username: str, role: str, ttl: int = None):
     token = secrets.token_hex(24)
-    USER_SESSIONS[token] = {"username": username, "role": role, "exp": time.time() + USER_SESSION_TTL}
-    resp.set_cookie("user_token", token, max_age=USER_SESSION_TTL, httponly=True, samesite="lax", secure=COOKIE_SECURE)
+    USER_SESSIONS[token] = {"username": username, "role": role, "exp": time.time() + (ttl or USER_SESSION_TTL)}
+    resp.set_cookie("user_token", token, max_age=(ttl or USER_SESSION_TTL), httponly=True, samesite="lax", secure=COOKIE_SECURE)
 
-
-CAPTCHAS = {}  # 登录验证码：captcha_id -> {code, exp}
 
 # ─── 登录失败限流（防爆破：5 次失败锁 15 分钟）────────────────
 LOGIN_FAILS: dict[str, dict] = {}  # key -> {"count": int, "lock_until": float}
@@ -1208,11 +1211,20 @@ LOG_ANALYZER_UPSTREAM = os.getenv("LOG_ANALYZER_UPSTREAM", "http://127.0.0.1:800
                include_in_schema=False)
 async def log_analyzer_proxy(path: str, request: Request):
     """转发到 IDG 日志分析子应用（支持上传/下载/长任务 600s）。"""
+    # IDG 登录保护（2026-08-28）：未登录拦截——页面 302 跳登录，API 401
+    user = _require_user(request)
+    if not user:
+        accept = request.headers.get("accept", "")
+        if not path or "text/html" in accept:
+            return RedirectResponse(url="/login", status_code=302)
+        return JSONResponse({"detail": "未登录——请从系统工作台进入"}, status_code=401)
     url = f"{LOG_ANALYZER_UPSTREAM}/{path}"
     if request.query_params:
         url += "?" + str(request.query_params)
     headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length", "transfer-encoding")}
     headers["X-Forwarded-For"] = _client_ip(request)
+    headers["X-Log-Analyzer-User"] = user["username"]
+    headers["X-Log-Analyzer-Role"] = user["role"]
     try:
         body = await request.body()
         async with httpx.AsyncClient(timeout=600) as client:
@@ -1225,16 +1237,8 @@ async def log_analyzer_proxy(path: str, request: Request):
 
 @app.get("/api/captcha")
 async def get_captcha():
-    """生成 4 位验证码（存内存 10 分钟）——登录防暴力"""
-    import random as _random
-    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # 去易混 O/0/I/1
-    code = "".join(_random.choice(chars) for _ in range(4))
-    cid = _random.randint(100000, 999999)
-    CAPTCHAS[str(cid)] = {"code": code, "exp": time.time() + 600}
-    # 清理过期
-    for k in [k for k, v in CAPTCHAS.items() if v["exp"] < time.time()]:
-        CAPTCHAS.pop(k, None)
-    return {"captcha_id": str(cid), "text": code}
+    """（已停用——登录不再需要验证码）"""
+    return {"captcha_id": "", "text": ""}
 
 
 @app.post("/api/auth/login")
@@ -1246,15 +1250,6 @@ async def user_login(request: Request):
     blocked = _login_check_blocked(request, username)
     if blocked:
         return JSONResponse({"error": blocked}, status_code=429)
-    # 验证码校验（前端带 captcha_id 则必须有效；不带则跳过——内部脚本兼容）
-    cap_id = str(body.get("captcha_id") or "")
-    cap_code = (body.get("captcha_code") or "").strip().upper()
-    if cap_id:
-        if cap_id not in CAPTCHAS:
-            return JSONResponse({"error": "验证码错误或已过期"}, status_code=400)
-        c = CAPTCHAS.pop(cap_id)  # 一次性
-        if c["code"] != cap_code or c["exp"] < time.time():
-            return JSONResponse({"error": "验证码错误或已过期"}, status_code=400)
     user = get_user(username)
     if not user or not verify_password(password, user["password_hash"]):
         _login_fail(ip)
@@ -1269,6 +1264,16 @@ async def user_login(request: Request):
     resp = JSONResponse({"ok": True, "username": user["username"], "name": user["name"], "role": user["role"]})
     _set_user_cookie(resp, user["username"], user["role"])
     run_logger.info(f"[auth] {username} 登录成功")
+    return resp
+
+
+@app.post("/api/auth/guest")
+async def guest_login(request: Request):
+    """游客免密登录：role=guest——会话 1 小时（仅 IDG 常规分析）。"""
+    _login_clear(_client_ip(request))
+    resp = JSONResponse({"ok": True, "username": "guest", "name": "游客", "role": "guest"})
+    _set_user_cookie(resp, "guest", "guest", ttl=3600)
+    run_logger.info("[auth] guest 游客登录")
     return resp
 
 
@@ -1611,7 +1616,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.14"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.15"}
 
 
 @app.post("/api/debug_log")
@@ -1631,6 +1636,8 @@ async def create_room(request: Request):
     user = _require_user(request)
     if not user:
         return JSONResponse({"error": "未登录"}, status_code=401)
+    if user.get("role") == "guest":
+        return JSONResponse({"error": "游客无此权限——仅可使用 IDG 日志分析"}, status_code=403)
     body = await request.json()
     sn = (body.get("sn") or "").strip()
     ticket_no = (body.get("ticket_no") or "").strip()
@@ -1968,6 +1975,8 @@ async def room_connect(room_code: str, request: Request):
     user = _require_user(request)
     if not user:
         return JSONResponse({"error": "未登录"}, status_code=401)
+    if user.get("role") == "guest":
+        return JSONResponse({"error": "游客无此权限——仅可使用 IDG 日志分析"}, status_code=403)
     room_code = room_code.upper()
     try:
         conn = _db_connect()
@@ -2313,7 +2322,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.14",
+        "version": "0.13.15",
     }
 
 
@@ -2493,7 +2502,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.14</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.15</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -5272,8 +5281,8 @@ async def ws_browser(websocket: WebSocket, room_code: str):
             msg_data = json.loads(raw)
 
             if msg_data.get("type") == "chat":
-                # 上门工程师（field）：仅允许快捷工具指令（QUICK_ACTION），禁止对话消息
-                if ws_role == "field":
+                # 上门工程师（field）/游客（guest）：仅允许快捷工具指令（QUICK_ACTION），禁止对话消息
+                if ws_role in ("field", "guest"):
                     user_message = msg_data["content"]
                     if not user_message.startswith("[QUICK_ACTION:"):
                         await websocket.send_json({"type": "error", "content": "上门工程师账号无对话权限——可使用「连接你的电脑」与快捷工具，对话诊断由远程工程师处理。"})
@@ -5486,7 +5495,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.14+）：
+    # 服务器主动定期发业务 ping（v0.13.15+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5641,9 +5650,10 @@ async def _startup_reaper():
 
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.14 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.15 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info("房间内存已清空——bridge/browser 重连时自动从 DB 恢复房间（无需重新创建）")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
                 ws_ping_interval=0, ws_ping_timeout=0,
+                ws_max_size=32 * 1024 * 1024,  # 32MB（2026-08-28：配合 bridge 8MB 截断——防 1009 断开）
                 proxy_headers=True, forwarded_allow_ips="127.0.0.1")

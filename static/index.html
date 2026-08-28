@@ -392,8 +392,10 @@
 
   <div id="quick-actions" style="display:flex;gap:8px;padding:8px 14px 0;flex-wrap:wrap;">
     <button class="qa-btn" onclick="quickStartupScan()" title="查询并交互式关闭开机自启动项">🔌 开机自启动</button>
-    <button class="qa-btn" onclick="quickDumpAnalyze()" title="分析本机蓝屏记录与转储（默认 Minidump 目录）">💥 蓝屏分析</button>
   </div>
+
+  <!-- 快捷诊断选项卡（11 类——按平台显隐——点击自动发送预设诊断指令） -->
+  <div id="quick-bar" style="display:none;padding:8px 12px;border-top:1px solid var(--border);flex-wrap:wrap;gap:6px;background:var(--surface);"></div>
 
   <div id="input-area">
     <textarea id="input-box" data-i18n-placeholder="input_placeholder" placeholder="描述你的电脑问题，例如：帮我检查系统有没有异常" rows="1"></textarea>
@@ -786,6 +788,7 @@ async function loadRoomConnect(room) {
     if (!resp.ok) return;
     const d = await resp.json();
     roomConnectData = d;
+    renderQuickBar();
     bar.style.display = 'flex';
     document.getElementById('ri-code').textContent = d.room_code;
     document.getElementById('ri-sn').textContent = d.sn || '-';
@@ -1061,13 +1064,6 @@ function quickStartupScan() {
   if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立，请稍候'); return; }
   addSystemMsg('正在查询本机开机自启动项...');
   ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_scan]' }));
-}
-
-function quickDumpAnalyze() {
-  if (!bridgeConnected) { alert('请先连接客户机（📶 连接你的电脑）后再使用此功能'); return; }
-  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立，请稍候'); return; }
-  addSystemMsg('正在分析本机蓝屏记录与转储（约 1-2 分钟）...');
-  ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:dump_analyze]' }));
 }
 
 function renderStartupPanel(items) {
@@ -1397,6 +1393,68 @@ function escapeHtml(str) {
 // ============================================================
 // User actions
 // ============================================================
+// ============================================================
+// 快捷诊断选项卡（11 类——V1：预设指令引导 AI 按流程诊断）
+// platform: all=通用 / win=Windows 专用 / linux=Linux 专用
+// ============================================================
+const QUICK_DIAGNOSES = [
+  { key: 'disk',    icon: '🔧', title: '硬盘健康',    platform: 'all',
+    prompt: '请对这台电脑执行【硬盘健康调查】：1) 用 SMART 工具读取全量健康度（重映射扇区/通电时长/温度/健康状态）2) 检查坏道与固件版本 3) 输出观察结果：各项指标数值与发现的异常项（如有），只陈述事实。' },
+  { key: 'network', icon: '🌐', title: '网络诊断',    platform: 'all',
+    prompt: '请对这台电脑执行【网络调查】：1) 测试连通性（ping 网关与外网）2) 丢包与延迟 3) 网卡设备与驱动状态 4) IP/DNS 配置 5) 输出观察结果：各测试数据与异常项，只陈述事实。' },
+  { key: 'bsod',    icon: '💥', title: '蓝屏分析',    platform: 'win',
+    prompt: '请对这台电脑执行【蓝屏/死机/重启调查】：1) 读取 90 天内蓝屏记录（BugCheck 事件）2) 解析 Minidump（停止码+参数）3) 检查 WHEA 硬件错误与 Kernel-Power 41 4) 输出观察结果：蓝屏时间线、停止码、相关事件记录，只陈述事实。' },
+  { key: 'battery', icon: '🔋', title: '电池健康',    platform: 'win',
+    prompt: '请对这台电脑执行【电池状态调查】：1) 生成电池报告（设计容量/满充容量/循环次数/健康度）2) 检查当前充电状态 3) 输出观察结果：各项数值与状态，只陈述事实。' },
+  { key: 'slow',    icon: '🐢', title: '性能卡顿',    platform: 'all',
+    prompt: '请对这台电脑执行【性能调查】：1) 列出开机自启动项 2) 查看进程 CPU/内存占用 Top 3) 磁盘占用情况 4) 事件日志错误 5) 输出观察结果：启动项清单、占用数据、异常记录，只陈述事实。' },
+  { key: 'thermal', icon: '🌡', title: '温度散热',    platform: 'all',
+    prompt: '请对这台电脑执行【温度调查】：1) 先识别机器型号，判断是否为 ThinkStation 中高端工作站（决定是否可用 SIO 硬件日志）2) 用通用方式读取温度（WMI 热区温度）与风扇状态 3) 如为 ThinkStation 中高端机型且支持，追加 SIO 日志事件分析 4) 输出观察结果：温度数值、风扇状态、相关事件，只陈述事实。' },
+  { key: 'system',  icon: '🖥', title: '系统问题',    platform: 'all',
+    prompt: '请对这台电脑执行【系统状态调查】：1) 系统版本与激活状态 2) 系统日志关键错误 3) TPM/安全状态 4) 驱动冲突检查 5) 输出观察结果：各项状态与异常项，只陈述事实。' },
+  { key: 'keyboard',icon: '⌨', title: '键盘触控板',  platform: 'win',
+    prompt: '请对这台电脑执行【键盘/触控板调查】：1) 检查设备管理器中键盘与触控板状态（是否有异常/禁用）2) 驱动版本 3) 排除外接设备干扰 4) 输出观察结果：设备状态、驱动信息、异常项，只陈述事实。' },
+  { key: 'display', icon: '🎨', title: '花屏显示',    platform: 'win',
+    prompt: '请对这台电脑执行【显示调查】：1) 显卡设备与驱动状态 2) 分辨率/刷新率设置 3) 外接显示器测试建议 4) 显示相关事件日志 5) 输出观察结果：驱动状态、设置、事件记录中的异常项，只陈述事实。' },
+  { key: 'usb',     icon: '🔌', title: 'USB 接口',    platform: 'win',
+    prompt: '请对这台电脑执行【USB 调查】：1) USB 设备枚举状态 2) 驱动与电源管理设置 3) USB 相关事件日志 4) 输出观察结果：设备状态、驱动信息、异常事件，只陈述事实。' },
+  { key: 'audio',   icon: '🎵', title: '音频设备',    platform: 'win',
+    prompt: '请对这台电脑执行【音频调查】：1) 音频设备状态（是否有禁用/异常）2) 驱动版本 3) 音频服务状态 4) 输出观察结果：设备状态、驱动信息、异常项，只陈述事实。' },
+];
+
+let quickBarShown = false;
+
+function renderQuickBar() {
+  const bar = document.getElementById('quick-bar');
+  if (!bar) return;
+  const os = (roomConnectData && roomConnectData.os || '').toLowerCase();
+  const items = QUICK_DIAGNOSES.filter(d => {
+    if (d.platform === 'all') return true;
+    if (os === 'linux') return d.platform === 'linux';
+    if (os === 'windows' || os === 'win') return d.platform === 'win';
+    return true; // os 未知：全显示
+  });
+  bar.innerHTML = items.map(d =>
+    `<button class="qa-btn" onclick="quickDiagnose('${d.key}')" title="点击自动发送诊断指令：${d.title}">${d.icon} ${d.title}</button>`
+  ).join('');
+  bar.style.display = 'flex';
+  quickBarShown = true;
+}
+
+function quickDiagnose(key) {
+  const item = QUICK_DIAGNOSES.find(d => d.key === key);
+  if (!item) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN || !bridgeConnected) {
+    alert('请先连接客户机（桥接器在线）后再使用快捷诊断');
+    return;
+  }
+  inputBox.value = item.prompt;
+  sendMessage();
+}
+
+// 页面加载即渲染（os 未知时全显示；连接后 loadRoomConnect 按 os 收敛）
+renderQuickBar();
+
 function sendMessage() {
   const text = inputBox.value.trim();
   if (!text || !ws || ws.readyState !== WebSocket.OPEN || !bridgeConnected) return;
