@@ -350,9 +350,9 @@
 </head>
 <body>
 <script>
-  // 首帧同步：游客模式置灰（防闪烁——本地存储 role 预判）
+  // 首帧同步：游客模式置灰（防闪烁）——仅信 URL 参数（防 localStorage 残留误置灰——Bug 7）
   (function () {
-    var r = localStorage.getItem('cab_role');
+    var r = new URLSearchParams(location.search).get('role');
     if (r === 'guest') document.documentElement.classList.add('guest-mode');
   })();
 </script>
@@ -423,6 +423,7 @@
         <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('password')" id="nav-password"><span data-i18n="nav_password">🔒 修改密码</span></div>
         <div class="nav-item" onclick="switchTab('feedback')" id="nav-feedback"><span data-i18n="nav_feedback">📝 反馈</span></div><!-- FIELD_HIDE_END -->
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
+        <div class="nav-item admin-only" id="nav-ai" onclick="switchTab('ai')"><span>🤖 AI 模型配置</span></div>
         <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
       <script>
@@ -715,6 +716,16 @@
         <div style="margin-top:14px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--surface);height:calc(100vh - 210px);min-height:520px;">
           <iframe src="/log-analyzer/" style="width:100%;height:100%;border:none;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
         </div>
+      </section>
+
+      <section class="page" id="page-ai">
+        <div class="page-title">🤖 AI 模型配置</div>
+        <div class="page-desc" data-i18n="ai_desc">多套 AI 供应商配置管理——切换生效自动写 IDG 配置并重启（原主通道自动降为备用）</div>
+        <div style="margin-bottom:14px;"><button class="btn" onclick="openAiForm()">➕ 新增模型配置</button></div>
+        <table class="tbl" style="width:100%;border-collapse:collapse;">
+          <thead><tr><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">名称</th><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">调用链接</th><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">模型</th><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">API Key</th><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">状态</th><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">操作</th></tr></thead>
+          <tbody id="ai-providers-body"><tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text2);">加载中...</td></tr></tbody>
+        </table>
       </section>
 
       <section class="page" id="page-tools-win">
@@ -1459,7 +1470,7 @@ const I18N = {
 
 
 let currentLang = 'zh-CN';
-function t(key) { return I18N[currentLang]?.[key] || I18N['zh-CN'][key] || key; }
+function t(key) { return (I18N[currentLang] || {})[key] || I18N['zh-CN'][key] || key; }
 
 function applyLang(lang) {
   currentLang = lang;
@@ -1482,6 +1493,101 @@ let currentRole = 'engineer';
 
 // ===== Tab 切换 =====
 let currentChatRoom = null;
+
+// ═══════════════ AI 模型配置（① 管理员可视化）═══════════════
+async function loadAiProviders() {
+  const body = document.getElementById('ai-providers-body');
+  if (!body) return;
+  try {
+    const r = await fetch('/api/admin/ai/providers');
+    if (r.status === 403) { body.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;">需要管理员权限</td></tr>'; return; }
+    const d = await r.json();
+    const active = d.active || '';
+    const list = d.providers || [];
+    if (!list.length) { body.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text2);">暂无配置——点击「➕ 新增模型配置」</td></tr>'; return; }
+    body.innerHTML = list.map(p => {
+      const st = p.id === active ? '<span style="color:#3fb950;">● 生效中</span>' : '<span style="color:var(--text2);">○ 未启用</span>';
+      return '<tr><td style="padding:8px;border-bottom:1px solid var(--border);">' + esc(p.name)
+        + '</td><td style="padding:8px;border-bottom:1px solid var(--border);font-size:12px;">' + esc(p.base_url)
+        + '</td><td style="padding:8px;border-bottom:1px solid var(--border);">' + esc(p.model)
+        + '</td><td style="padding:8px;border-bottom:1px solid var(--border);font-family:monospace;">' + esc(p.api_key)
+        + '</td><td style="padding:8px;border-bottom:1px solid var(--border);">' + st
+        + '</td><td style="padding:8px;border-bottom:1px solid var(--border);">'
+        + (p.id !== active ? '<button class="qa-btn" onclick="aiActivate(\'' + p.id + '\')">切换生效</button> ' : '')
+        + '<button class="qa-btn" onclick="aiTest(\'' + p.id + '\')">测试</button> '
+        + '<button class="qa-btn" onclick="aiEdit(\'' + p.id + '\')">编辑</button> '
+        + (p.id !== active ? '<button class="qa-btn" onclick="aiDelete(\'' + p.id + '\')">删除</button>' : '')
+        + '</td></tr>';
+    }).join('');
+  } catch (e) { body.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;color:#f85149;">加载失败: ' + esc(e.message) + '</td></tr>'; }
+}
+
+let aiEditingId = null;
+function openAiForm(p) {
+  aiEditingId = p ? p.id : null;
+  const name = p ? p.name : '';
+  const url = p ? p.base_url : '';
+  const model = p ? p.model : '';
+  const key = p ? '' : '';  // 编辑时 key 留空 = 保持不变
+  const html = '<div style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99;display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this)this.remove()">'
+    + '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:22px;width:440px;">'
+    + '<h3 style="margin:0 0 16px;">' + (aiEditingId ? '编辑模型配置' : '新增模型配置') + '</h3>'
+    + '<div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--text2);">名称</label><input id="ai-f-name" style="width:100%;padding:9px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:#fff;" value="' + esc(name) + '"></div>'
+    + '<div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--text2);">调用链接（Base URL，含 /v1）</label><input id="ai-f-url" style="width:100%;padding:9px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:#fff;" value="' + esc(url) + '"></div>'
+    + '<div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--text2);">模型名</label><input id="ai-f-model" style="width:100%;padding:9px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:#fff;" value="' + esc(model) + '"></div>'
+    + '<div style="margin-bottom:16px;"><label style="font-size:13px;color:var(--text2);">API Key' + (aiEditingId ? '（留空 = 保持不变）' : '') + '</label><input id="ai-f-key" type="password" style="width:100%;padding:9px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:#fff;" value="' + esc(key) + '"></div>'
+    + '<div style="display:flex;gap:10px;justify-content:flex-end;"><button class="qa-btn" onclick="this.closest(\'div\').remove()">取消</button>'
+    + '<button class="qa-btn" style="background:var(--accent);color:#fff;border:none;font-weight:600;" onclick="aiSave()">保存</button></div>'
+    + '</div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+function aiEdit(id) {
+  fetch('/api/admin/ai/providers').then(r => r.json()).then(d => {
+    const p = (d.providers || []).find(x => x.id === id);
+    if (p) openAiForm(p);
+  });
+}
+async function aiSave() {
+  const name = document.getElementById('ai-f-name').value.trim();
+  const url = document.getElementById('ai-f-url').value.trim();
+  const model = document.getElementById('ai-f-model').value.trim();
+  const key = document.getElementById('ai-f-key').value.trim();
+  if (!name || !url || !model) { alert('名称/调用链接/模型 必填'); return; }
+  const body = { name: name, base_url: url, model: model };
+  if (key) body.api_key = key;
+  const r = await fetch(aiEditingId ? '/api/admin/ai/providers/' + aiEditingId : '/api/admin/ai/providers', {
+    method: aiEditingId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  if (!r.ok) { alert(d.error || '保存失败'); return; }
+  const overlay = document.querySelector('div[style*="position:fixed"]'); if (overlay) overlay.remove();
+  loadAiProviders();
+}
+async function aiActivate(id) {
+  if (!confirm('切换生效将写 IDG 配置并重启（原主通道自动降为备用）——确定？')) return;
+  const r = await fetch('/api/admin/ai/providers/' + id + '/activate', { method: 'POST' });
+  const d = await r.json();
+  alert(d.ok ? '切换成功 ' + (d.hint || '') : (d.error || '切换失败'));
+  loadAiProviders();
+}
+async function aiTest(id) {
+  const r = await fetch('/api/admin/ai/providers/' + id + '/test', { method: 'POST' });
+  const d = await r.json();
+  alert(d.ok ? '✅ 连通正常：' + (d.reply || '') : '❌ ' + (d.error || '测试失败'));
+}
+async function aiDelete(id) {
+  if (!confirm('确定删除该配置？')) return;
+  const r = await fetch('/api/admin/ai/providers/' + id, { method: 'DELETE' });
+  const d = await r.json();
+  if (!r.ok) { alert(d.error || '删除失败'); return; }
+  loadAiProviders();
+}
+// switchTab('ai') 时加载
+const _origSwitchTab = window.switchTab;
+window.switchTab = function (tab) {
+  if (typeof _origSwitchTab === 'function') _origSwitchTab(tab);
+  if (tab === 'ai') loadAiProviders();
+};
 
 function switchTab(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -1695,6 +1801,7 @@ async function loadMe() {
 }
 
 function doLogout() {
+  localStorage.removeItem('cab_role');  // 清除角色标记（防残留误置灰——Bug 7）
   fetch('/api/auth/logout', { method: 'POST' }).finally(() => { location.href = '/login'; });
 }
 

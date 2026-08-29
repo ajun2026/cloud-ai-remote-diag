@@ -1,3 +1,26 @@
+## v0.13.16 — 2026-08-28（Bug 修复 3 项 + AI 模型配置管理 + 合并社区方案）
+
+### Bug 修复（合并上游后发现的）
+
+- **dashboard `?.` ES2020 兼容**：`I18N[currentLang]?.[key]` → 传统写法（老浏览器/兼容模式页面不再"点不动"）
+- **游客 localStorage 残留 → 工程师误置灰**：首帧置灰仅信 URL 参数；doLogout 清除 cab_role
+- **登录页不写角色标记**：doLogin/guestLogin 成功写 cab_role（防残留）
+
+### 新功能
+
+- **AI 模型配置管理（管理员可视化）**：
+  - dashboard「🤖 AI 模型配置」菜单（admin-only）+ 表格（名称/链接/模型/Key 脱敏/状态徽章）
+  - API：GET/POST/PUT/DELETE `/api/admin/ai/providers` + `/{id}/test` + `/{id}/activate`
+  - 切换生效：写 IDG .env（主 = 目标，原主自动降为备用——双通道容灾）+ 尝试重启 file-analyzer
+  - 存储 ai_providers.json（600 权限）；LOG_ANALYZER_DIR 环境变量可配 IDG 目录
+
+### 合并（社区技术方案）
+
+- ALLOWED_HOSTS 环境变量（多入口 Host 白名单）
+- IDG 登录保护 302（页面跳登录）
+
+---
+
 ## v0.13.15 — 2026-08-28（11 快捷诊断选项卡 + 游客模式 + 安全加固 + 体验优化）
 
 ### 新功能

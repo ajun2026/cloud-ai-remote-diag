@@ -140,6 +140,7 @@ async function doLogin() {
       btn.disabled = false; btn.textContent = 'Login';
       return;
     }
+    localStorage.setItem('cab_role', data.role || '');  // 写角色标记（防残留——Bug 8）
     location.href = '/dashboard?role=' + (data.role || '');
   } catch (e) {
     showError('网络错误: ' + e.message);
@@ -152,6 +153,7 @@ async function guestLogin() {
     const resp = await fetch('/api/auth/guest', { method: 'POST' });
     const data = await resp.json();
     if (!resp.ok) { showError(data.error || '游客入口暂不可用'); return; }
+    localStorage.setItem('cab_role', 'guest');
     location.href = '/dashboard?role=guest';
   } catch (e) { showError('网络错误: ' + e.message); }
 }

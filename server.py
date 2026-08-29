@@ -1043,7 +1043,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.15", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.16", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1099,6 +1099,8 @@ ADMIN_SESSION_TTL = 4 * 3600            # 4 hours（安全加固：原 12h 缩�
 # Cookie Secure 标志：HTTPS 部署保持 true（默认）；纯 HTTP 本地/内网部署设 COOKIE_SECURE=false，
 # 否则浏览器不发送 Secure cookie → 会话失效（401）——部署适配（2026-08-27 社区反馈）
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
+# IDG（file-analyzer）部署目录——AI 模型配置管理（①）写 .env / ai_providers.json 用
+LOG_ANALYZER_DIR = os.getenv("LOG_ANALYZER_DIR", "/opt/log-analyzer")
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", secrets.token_hex(16))
 
 
@@ -1239,6 +1241,200 @@ async def log_analyzer_proxy(path: str, request: Request):
 async def get_captcha():
     """（已停用——登录不再需要验证码）"""
     return {"captcha_id": "", "text": ""}
+
+
+
+
+# ═══════════════════════════════════════════════════════════════
+# ① AI 模型配置管理（管理员可视化——2026-08-28 方案）
+# 存储：{LOG_ANALYZER_DIR}/ai_providers.json；切换写 IDG .env + 尝试重启
+# ═══════════════════════════════════════════════════════════════
+AI_PROVIDERS_FILE = os.path.join(LOG_ANALYZER_DIR, "ai_providers.json")
+
+
+def _ai_providers_load() -> dict:
+    try:
+        with open(AI_PROVIDERS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"active": "", "providers": []}
+
+
+def _ai_providers_save(data: dict):
+    os.makedirs(LOG_ANALYZER_DIR, exist_ok=True)
+    tmp = AI_PROVIDERS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, AI_PROVIDERS_FILE)
+
+
+def _mask_key(key: str) -> str:
+    if not key:
+        return ""
+    if len(key) <= 10:
+        return key[:2] + "****"
+    return key[:6] + "****" + key[-4:]
+
+
+def _admin_required(request: Request):
+    user = _require_user(request)
+    if not user:
+        return None, JSONResponse({"error": "未登录"}, status_code=401)
+    if user.get("role") != "admin":
+        return None, JSONResponse({"error": "需要管理员权限"}, status_code=403)
+    return user, None
+
+
+def _apply_ai_provider(prov: dict, prev_active: dict):
+    """切换生效：写 IDG .env（主 = 目标，备 = 原 active）——原主自动降为备用（双通道容灾）。"""
+    env_path = os.path.join(LOG_ANALYZER_DIR, ".env")
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except Exception:
+        lines = []
+    new_lines, seen = [], set()
+    for ln in lines:
+        key = ln.split("=", 1)[0].strip() if "=" in ln else ""
+        if key in ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL",
+                   "DEEPSEEK_API_KEY_2", "DEEPSEEK_BASE_URL_2", "DEEPSEEK_MODEL_2"):
+            continue
+        new_lines.append(ln)
+        seen.add(key)
+    # 主通道 = 目标；备用 = 原 active（若存在且非目标）
+    new_lines.append(f"DEEPSEEK_API_KEY={prov['api_key']}")
+    new_lines.append(f"DEEPSEEK_BASE_URL={prov['base_url'].rstrip('/')}")
+    new_lines.append(f"DEEPSEEK_MODEL={prov['model']}")
+    if prev_active and prev_active.get("id") != prov.get("id"):
+        new_lines.append(f"DEEPSEEK_API_KEY_2={prev_active['api_key']}")
+        new_lines.append(f"DEEPSEEK_BASE_URL_2={prev_active['base_url'].rstrip('/')}")
+        new_lines.append(f"DEEPSEEK_MODEL_2={prev_active['model']}")
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(new_lines) + "\n")
+    # 尝试重启 IDG（systemd 存在时）——失败不阻塞（返回提示）
+    restart_hint = ""
+    try:
+        import subprocess
+        r = subprocess.run(["systemctl", "is-active", "file-analyzer"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and "inactive" not in r.stdout:
+            subprocess.run(["systemctl", "restart", "file-analyzer"], timeout=15)
+            subprocess.run(["systemctl", "restart", "file-analyzer-consumer"], timeout=15)
+            restart_hint = "（IDG 服务已自动重启）"
+        else:
+            restart_hint = "（未检测到 systemd 服务——请手动重启 IDG）"
+    except Exception:
+        restart_hint = "（请手动重启 IDG 生效）"
+    return restart_hint
+
+
+@app.get("/api/admin/ai/providers")
+async def ai_providers_list(request: Request):
+    _u, err = _admin_required(request)
+    if err:
+        return err
+    data = _ai_providers_load()
+    for pv in data.get("providers", []):
+        pv["api_key"] = _mask_key(pv.get("api_key", ""))
+    return JSONResponse(data)
+
+
+@app.post("/api/admin/ai/providers")
+async def ai_providers_create(request: Request):
+    _u, err = _admin_required(request)
+    if err:
+        return err
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    base_url = (body.get("base_url") or "").strip()
+    api_key = (body.get("api_key") or "").strip()
+    model = (body.get("model") or "").strip()
+    if not name or not base_url or not api_key or not model:
+        return JSONResponse({"error": "name/base_url/api_key/model 均必填"}, status_code=400)
+    data = _ai_providers_load()
+    pid = "prov" + secrets.token_hex(3)
+    data.setdefault("providers", []).append({
+        "id": pid, "name": name, "base_url": base_url,
+        "api_key": api_key, "model": model,
+        "created_at": datetime.now().isoformat()})
+    _ai_providers_save(data)
+    return JSONResponse({"ok": True, "id": pid})
+
+
+@app.put("/api/admin/ai/providers/{pid}")
+async def ai_providers_update(pid: str, request: Request):
+    _u, err = _admin_required(request)
+    if err:
+        return err
+    body = await request.json()
+    data = _ai_providers_load()
+    for pv in data.get("providers", []):
+        if pv["id"] == pid:
+            if body.get("name"):
+                pv["name"] = body["name"].strip()
+            if body.get("base_url"):
+                pv["base_url"] = body["base_url"].strip()
+            if body.get("model"):
+                pv["model"] = body["model"].strip()
+            if body.get("api_key"):  # 留空 = 保持不变
+                pv["api_key"] = body["api_key"].strip()
+            _ai_providers_save(data)
+            return JSONResponse({"ok": True})
+    return JSONResponse({"error": "provider 不存在"}, status_code=404)
+
+
+@app.delete("/api/admin/ai/providers/{pid}")
+async def ai_providers_delete(pid: str, request: Request):
+    _u, err = _admin_required(request)
+    if err:
+        return err
+    data = _ai_providers_load()
+    if data.get("active") == pid:
+        return JSONResponse({"error": "生效中的 provider 不可删除——请先切换"}, status_code=400)
+    data["providers"] = [p for p in data.get("providers", []) if p["id"] != pid]
+    _ai_providers_save(data)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/admin/ai/providers/{pid}/test")
+async def ai_providers_test(pid: str, request: Request):
+    _u, err = _admin_required(request)
+    if err:
+        return err
+    data = _ai_providers_load()
+    pv = next((p for p in data.get("providers", []) if p["id"] == pid), None)
+    if not pv:
+        return JSONResponse({"error": "provider 不存在"}, status_code=404)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                f"{pv['base_url'].rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {pv['api_key']}"},
+                json={"model": pv["model"], "messages": [{"role": "user", "content": "回复OK"}],
+                      "max_tokens": 100})
+            r.raise_for_status()
+            content = r.json()["choices"][0]["message"].get("content") or ""
+            return JSONResponse({"ok": True, "reply": content[:200] or "（空回复）"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=502)
+
+
+@app.post("/api/admin/ai/providers/{pid}/activate")
+async def ai_providers_activate(pid: str, request: Request):
+    _u, err = _admin_required(request)
+    if err:
+        return err
+    data = _ai_providers_load()
+    pv = next((p for p in data.get("providers", []) if p["id"] == pid), None)
+    if not pv:
+        return JSONResponse({"error": "provider 不存在"}, status_code=404)
+    prev = next((p for p in data.get("providers", []) if p["id"] == data.get("active")), None)
+    if data.get("active") == pid:
+        return JSONResponse({"ok": True, "hint": "已是生效中的 provider"})
+    data["active"] = pid
+    _ai_providers_save(data)
+    hint = _apply_ai_provider(pv, prev)
+    return JSONResponse({"ok": True, "hint": hint})
 
 
 @app.post("/api/auth/login")
@@ -1616,7 +1812,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.15"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.16"}
 
 
 @app.post("/api/debug_log")
@@ -2322,7 +2518,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.15",
+        "version": "0.13.16",
     }
 
 
@@ -2502,7 +2698,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.15</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.16</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -5495,7 +5691,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.15+）：
+    # 服务器主动定期发业务 ping（v0.13.16+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5650,7 +5846,7 @@ async def _startup_reaper():
 
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.15 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.16 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info("房间内存已清空——bridge/browser 重连时自动从 DB 恢复房间（无需重新创建）")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",
