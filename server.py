@@ -1067,7 +1067,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.18", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.19", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1836,7 +1836,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.18"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.19"}
 
 
 @app.post("/api/debug_log")
@@ -2553,7 +2553,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.18",
+        "version": "0.13.19",
     }
 
 
@@ -2733,7 +2733,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.18</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.19</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -5856,7 +5856,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.18+）：
+    # 服务器主动定期发业务 ping（v0.13.19+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -6020,7 +6020,7 @@ async def _startup_reaper():
 
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.18 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.19 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info("房间内存已清空——bridge/browser 重连时自动从 DB 恢复房间（无需重新创建）")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",

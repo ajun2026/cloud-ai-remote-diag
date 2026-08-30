@@ -53,9 +53,9 @@
 
   /* Auto-approve toggle */
   #auto-approve-btn {
-    font-size: 11px; padding: 3px 8px; border-radius: 4px;
+    font-size: 11px; padding: 4px 10px; border-radius: 20px; align-self: center;
     border: 1px solid var(--border); background: var(--bg); color: var(--text2); cursor: pointer;
-    display: none;
+    white-space: nowrap; flex-shrink: 0; display: none;
   }
   #auto-approve-btn.enabled { background: rgba(210,153,34,0.15); color: var(--warn); border-color: var(--warn); }
 
@@ -351,13 +351,20 @@
 
 <div id="app">
   <div id="header">
-    <div>
-      <span id="status-dot" class="connecting"></span>
-      <span class="title" data-i18n="app_title">云端 AI 远程运维助手</span>
-      <span id="status-text" data-i18n="status_connecting">正在连接...</span>
+    <div style="display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;">
+      <span id="status-dot" class="connecting" style="flex-shrink:0;"></span>
+      <span id="status-text" data-i18n="status_connecting" style="font-size:12px;flex-shrink:0;">正在连接...</span>
+      <span id="room-info-compact" style="display:none;align-items:center;gap:10px;font-size:12px;color:var(--text2);margin-left:6px;padding-left:10px;border-left:1px solid var(--border);white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis;">
+        <span>📋 房间 <b id="ri-code" style="color:var(--info);letter-spacing:1px;"></b></span>
+        <span>SN: <span id="ri-sn"></span></span>
+        <span>工单: <span id="ri-ticket"></span></span>
+        <span id="ri-validity">--</span>
+        <span id="ri-status" style="color:var(--info);"></span>
+      </span>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <button id="auto-approve-btn" title="Tier 2 自动审批：开启后鼠标/键盘等交互操作无需弹窗确认" onclick="toggleAutoApprove()">T2 Auto OFF</button>
+    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+      <button id="connect-toggle" onclick="toggleConnectPanel()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;" title="展开/收起一键连接命令">📶 连接你的电脑 ▾</button>
+      <button id="room-close-btn" onclick="closeRoom()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--error);border:1px solid var(--error);border-radius:4px;cursor:pointer;">⛔ 结束诊断</button>
       <div style="position:relative;display:inline-block;">
         <button id="export-btn" onclick="toggleExportMenu(event)" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;display:none;" title="导出对话 / 生成报告">📄 导出 ▾</button>
         <div id="export-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--surface2);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.4);z-index:100;min-width:150px;overflow:hidden;">
@@ -366,23 +373,15 @@
         </div>
       </div>
       <button id="reconnect-btn" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;display:none;" data-i18n="reconnect_btn">重新连接</button>
-      <div id="room-display"></div>
+      <div id="room-display" style="display:none;"></div>
     </div>
   </div>
 
-  <div id="room-info-bar" style="display:none;padding:8px 14px;background:var(--surface2);border-bottom:1px solid var(--border);font-size:12px;color:var(--text2);align-items:center;flex-wrap:wrap;gap:6px 16px;">
-    <span>📋 房间 <b id="ri-code" style="color:var(--info);letter-spacing:1px;"></b></span>
-    <span>SN: <span id="ri-sn"></span></span>
-    <span>工单: <span id="ri-ticket"></span></span>
-    <span>桥接器: <span id="ri-bridge">--</span></span>
-    <span>有效期: <span id="ri-validity">--</span></span>
-    <span>房间状态: <span id="ri-status">--</span></span>
-    <span style="flex:1;"></span>
-    <button id="connect-toggle" onclick="toggleConnectPanel()" style="padding:3px 10px;font-size:12px;background:var(--surface);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;">📶 连接你的电脑</button>
-    <button id="room-close-btn" onclick="closeRoom()" style="padding:3px 10px;font-size:12px;background:var(--surface);color:var(--error);border:1px solid var(--error);border-radius:4px;cursor:pointer;">⛔ 结束诊断</button>
-  </div>
-
   <div id="connect-panel" style="display:none;padding:12px 14px;background:var(--surface2);border-bottom:1px solid var(--border);font-size:13px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <span style="font-size:13px;font-weight:600;color:var(--info);">🔗 一键连接命令</span>
+      <span style="font-size:11px;color:var(--text2);">点击上方「📶 收起连接」可折叠本面板</span>
+    </div>
     <div style="display:flex;gap:6px;margin-bottom:10px;">
       <button class="cp-tab" data-tab="ps" onclick="cpTab('ps')" style="padding:4px 12px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--info);border-radius:4px;cursor:pointer;">PowerShell</button>
       <button class="cp-tab" data-tab="exe" onclick="cpTab('exe')" style="padding:4px 12px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;">Windows 双击版</button>
@@ -419,6 +418,7 @@
 
   <div id="input-area">
     <textarea id="input-box" data-i18n-placeholder="input_placeholder" placeholder="描述你的电脑问题，例如：帮我检查系统有没有异常" rows="1"></textarea>
+    <button id="auto-approve-btn" title="Tier 2 自动审批：开启后鼠标/键盘等交互操作无需弹窗确认（发送左侧）" onclick="toggleAutoApprove()">T2 Auto OFF</button>
     <button id="send-btn" disabled data-i18n="send_btn">发送</button>
   </div>
 </div>
@@ -489,11 +489,11 @@ window.onerror = function(msg, src, line, col, err) {
 // ============================================================
 const I18N = {
   'zh-CN': {
-    app_title: '云端 AI 远程运维助手',
+    app_title: '⚡ 云端AI运维',
     status_connecting: '正在连接...',
     status_disconnected: '未连接',
     status_waiting_bridge: '等待桥接器',
-    status_bridge_ok: '桥接器已连接 [OK]',
+    status_bridge_ok: '桥接器已连接',
     status_bridge_wait: '等待桥接器 [--]',
     status_connection_lost: '与服务器的连接已断开',
     export_btn: '导出对话',
@@ -800,7 +800,7 @@ let roomConnectData = null;
 let roomConnectTab = 'ps';
 
 async function loadRoomConnect(room) {
-  const bar = document.getElementById('room-info-bar');
+  const bar = document.getElementById('room-info-compact');
   if (!bar) return;
   try {
     const resp = await fetch('/api/room_connect/' + encodeURIComponent(room));
@@ -847,6 +847,8 @@ function toggleConnectPanel() {
   if (!p || !roomConnectData) return;
   const show = p.style.display === 'none';
   p.style.display = show ? 'block' : 'none';
+  const tb = document.getElementById('connect-toggle');
+  if (tb) { tb.textContent = show ? '📶 收起连接 ▴' : '📶 连接你的电脑 ▾'; }
   if (show) {
     applyOsTabs();  // 按房间系统收敛命令 tab（Linux 机器不显示 PowerShell）
     renderConnectTab();
@@ -1429,6 +1431,8 @@ const QUICK_DIAGNOSES = [
     prompt: '请对这台电脑执行【系统状态调查】：1) 系统版本与激活状态 2) 系统日志关键错误 3) TPM/安全状态 4) 驱动冲突检查 5) 输出观察结果：各项状态与异常项，只陈述事实。' },
   { key: 'bsod',    icon: '💥', title: '蓝屏分析',    platform: 'win', group: '系统诊断',
     prompt: '请对这台电脑执行【蓝屏/死机/重启调查】：1) 读取 90 天内蓝屏记录（BugCheck 事件）2) 解析 Minidump（停止码+参数）3) 检查 WHEA 硬件错误与 Kernel-Power 41 4) 输出观察结果：蓝屏时间线、停止码、相关事件记录，只陈述事实。' },
+  { key: 'reboot',  icon: '🔄', title: '意外重启',    platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【意外重启调查】（微软官方系统事件日志方法）：1) 查重启历史：Kernel-General 12（启动）/13（关闭）+ EventLog 6005/6009——近 90 天重启频率 2) 类型判定：Kernel-Power 41（未正常关机重启）+ EventLog 6008（上次关机意外）为意外重启标志；User32 1074（有原因代码）为正常重启标志 3) 找原因：与重启时间点关联——19（Windows 更新安装）/1001（WER 错误报告——含 BugCheck 停止码与转储路径）/7045（新服务安装）——以及 41 前后事件（断电/死机/硬件类）4) 输出观察结果：重启时间线（时间/类型/判定依据）、41 与 6008 出现次数与时间、1001 停止码（如有）、关联事件记录——只陈述事实。' },
   { key: 'slow',    icon: '🐢', title: '性能卡顿',    platform: 'all', group: '系统诊断',
     prompt: '请对这台电脑执行【性能调查】：1) 列出开机自启动项 2) 查看进程 CPU/内存占用 Top 3) 磁盘占用情况 4) 事件日志错误 5) 输出观察结果：启动项清单、占用数据、异常记录，只陈述事实。' },
   { key: 'thermal', icon: '🌡', title: '温度散热',    platform: 'all', group: '系统诊断',

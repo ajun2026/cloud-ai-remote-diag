@@ -1575,7 +1575,7 @@ function openChat(room) {
   document.getElementById('chat-empty').style.display = 'none';
   document.getElementById('chat-room-tag').textContent = t('room_prefix') + room;
   document.getElementById('chat-head').classList.remove('hidden');
-  document.getElementById('chat-frame').src = '/chat?room=' + room + '&connect=1';
+  document.getElementById('chat-frame').src = '/chat?room=' + room + '&connect=1&v=' + Date.now();
   switchTab('chat');
 }
 
