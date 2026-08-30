@@ -47,9 +47,15 @@
   .sidebar {
     width: 200px; flex-shrink: 0; background: var(--surface);
     border-right: 1px solid var(--border); padding: 14px 10px;
-    display: flex; flex-direction: column; justify-content: space-between;
+    display: flex; flex-direction: column;
     position: relative; transition: margin-left .2s ease;
   }
+  /* 侧边栏导航滚动（2026-08-30——选项多/窗口小时可下拉——footer 固定底部） */
+  #sidebar-nav { flex: 1; overflow-y: auto; min-height: 0; margin: 6px -6px 6px 0; padding-right: 6px; }
+  .sidebar-footer { flex-shrink: 0; }
+  #sidebar-nav::-webkit-scrollbar { width: 4px; }
+  #sidebar-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  #sidebar-nav::-webkit-scrollbar-track { background: transparent; }
   .sidebar.collapsed { width: 56px; min-width: 56px; }
   .sidebar.collapsed .nav-item { justify-content: center; padding: 11px 0; }
   .sidebar.collapsed .nav-item span { display: none; }
@@ -235,6 +241,7 @@
   #page-chat.active { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: -24px -28px; }
   /* IDG 日志分析：与对话页一致的 flex 自适应布局，容器高度跟随内容区，避免滚动条/边框不齐 */
   #page-idg.active { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: -24px -28px; }
+  #page-admin.active { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: -24px -28px; }
   /* 房间标签已按用户要求取消(不显示"房间: xxx") */
   .chat-head { display: none !important; }
   .chat-head.hidden { display: none; }
@@ -430,7 +437,7 @@
         <!-- FIELD_HIDE_START --><div class="nav-item" id="nav-chat" onclick="switchTab('chat')"><span data-i18n="nav_chat">💬 对话</span></div><!-- FIELD_HIDE_END -->
         <div class="nav-item admin-only" id="nav-download" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
         <div class="nav-divider"></div>
-        <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('workorders')" id="nav-workorders"><span data-i18n="nav_workorders">📋 我的工单</span></div><!-- FIELD_HIDE_END -->
+        <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('workorders')" id="nav-workorders"><span data-i18n="nav_workorders">📋 诊断记录</span></div><!-- FIELD_HIDE_END -->
         <div class="nav-item" onclick="switchTab('tools-win')" id="nav-tools-win"><span data-i18n="nav_tools_win">🪟 Windows 工具</span></div>
         <div class="nav-item" onclick="switchTab('idg')" id="nav-idg"><span>📊 IDG 日志分析</span></div>
         <div class="nav-item" onclick="switchTab('tools-linux')" id="nav-tools-linux"><span data-i18n="nav_tools_linux">🐧 Linux 工具</span></div>
@@ -439,7 +446,7 @@
         <div class="nav-item" onclick="switchTab('feedback')" id="nav-feedback"><span data-i18n="nav_feedback">📝 反馈</span></div><!-- FIELD_HIDE_END -->
         <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
         <div class="nav-item admin-only" id="nav-ai" onclick="switchTab('ai')"><span>🤖 AI 模型配置</span></div>
-        <div class="nav-item admin-only" id="nav-admin" onclick="location.href='/admin'"><span data-i18n="nav_admin">🛠 管理后台</span></div>
+        <div class="nav-item admin-only" id="nav-admin" onclick="switchTab('admin')"><span data-i18n="nav_admin">🛠 管理后台</span></div>
       </nav>
       <script>
       // 侧边栏折叠（记忆状态——2026-08-28）
@@ -504,7 +511,7 @@
         });
       })();
       </script>
-      <div class="sidebar-footer">v0.13.7</div>
+      <div class="sidebar-footer" id="ver-display">v0.13.7</div>
     </aside>
 
     <main class="content">
@@ -527,9 +534,9 @@
         </div>
       </section><!-- FIELD_HIDE_END -->
 
-      <!-- 我的工单 -->
+      <!-- 诊断记录 -->
       <!-- FIELD_HIDE_START --><section class="page" id="page-workorders">
-        <div class="page-title"><span data-i18n="nav_workorders">我的工单</span></div>
+        <div class="page-title"><span data-i18n="nav_workorders">诊断记录</span></div>
         <div class="page-desc" data-i18n="wo_desc">当前账号处理过的诊断房间</div>
         <div class="toolbar">
           <input id="search-input" data-i18n-placeholder="search_ph" placeholder="按 SN / 工单号 / 型号 / 房间码搜索" oninput="renderRooms()">
@@ -554,7 +561,7 @@
         <div class="chat-empty" id="chat-empty">
           <div class="big">💬</div>
           <div data-i18n="chat_empty1">尚未选择房间</div>
-          <div style="font-size:12px;" data-i18n="chat_empty2">在「我的工单」里点「进入对话」，或创建/加入房间后自动打开</div>
+          <div style="font-size:12px;" data-i18n="chat_empty2">在「诊断记录」里点「进入对话」，或创建/加入房间后自动打开</div>
         </div>
       </section>
 
@@ -599,7 +606,7 @@
       <section class="page" id="page-download">
         <div class="page-title"><span data-i18n="nav_download">下载桥接器</span></div>
         <div class="page-desc" data-i18n="dl_desc">在需要诊断的电脑上运行桥接器，输入房间码完成配对</div>
-        <div style="margin:8px 0 14px;padding:8px 12px;background:var(--surface2);border:1px dashed var(--info);border-radius:6px;font-size:13px;color:var(--info);">💡 创建房间后可在「我的工单 → 📶 连接」或对话页获取<b>房间专属一键连接</b>（预填房间码，无需再输入）</div>
+        <div style="margin:8px 0 14px;padding:8px 12px;background:var(--surface2);border:1px dashed var(--info);border-radius:6px;font-size:13px;color:var(--info);">💡 创建房间后可在「诊断记录 → 📶 连接」或对话页获取<b>房间专属一键连接</b>（预填房间码，无需再输入）</div>
         <div class="dl-steps">
           <span class="s"><span class="num">1</span><span data-i18n="dl_step1">安装桥接器</span></span>
           <span class="arrow">→</span>
@@ -730,10 +737,15 @@
 
       <!-- Windows 工具（非 AI 工具集合） -->
       <section class="page" id="page-idg">
-        <div class="page-title">📊 IDG 日志分析</div>
-        <div class="page-desc">日志诊断分析平台——上传 Windows / Linux / BMC 日志包，自动识别并结构化分析（蓝屏 Dump / SIO / 系统事件 / AI 辅助诊断）</div>
         <div style="flex:1;min-height:0;overflow:hidden;">
           <iframe src="/log-analyzer/" style="width:100%;height:100%;border:none;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"></iframe>
+        </div>
+      </section>
+
+      <!-- 管理后台：内嵌 iframe（2026-08-30——不再跳转新页面——与整体协调） -->
+      <section class="page" id="page-admin" style="margin:-24px -28px;padding:0;">
+        <div style="flex:1;min-height:0;overflow:hidden;">
+          <iframe src="/admin" style="width:100%;height:100%;border:none;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
         </div>
       </section>
 
@@ -1332,7 +1344,7 @@
 <script>
 const I18N = {
   'zh-CN': {
-    nav_workorders: '📋 我的工单', nav_chat: '💬 对话', nav_create: '➕ 创建房间', nav_join: '⇄ 加入房间',
+    nav_workorders: '📋 诊断记录', nav_chat: '💬 对话', nav_create: '➕ 创建房间', nav_join: '⇄ 加入房间',
     nav_download: '📦 下载桥接器', nav_password: '🔒 修改密码', nav_users: '👥 账号管理', nav_admin: '🛠 管理后台', nav_feedback: '📝 反馈',
     fb_desc: '把测试中发现的问题或建议告诉我们', fb_placeholder: '请描述您遇到的问题或建议（如：诊断结果不准确、页面报错、希望增加的功能…）', fb_submit: '提交反馈', fb_success: '反馈已提交，感谢您的建议！', fb_need: '请填写反馈内容', fb_empty: '暂无反馈记录', fb_history: '我的反馈记录',
     nav_home: '🏠 首页',
@@ -1362,7 +1374,7 @@ const I18N = {
     ph_tool_sn: '如 PC22XGDR', ph_tool_mtm: '如 30E1S5NV00',
     snmtm_warn: '⚠ 写入后无法撤销，请仔细核对 SN / MTM 再点击刷写',
     btn_snmtm_flash: '✍️ 刷写 SN/MTM',
-    sntm_no_room: '暂无可用的在线房间。请先在「我的工单」/「创建房间」让客户机桥接器上线',
+    sntm_no_room: '暂无可用的在线房间。请先在「诊断记录」/「创建房间」让客户机桥接器上线',
     need_model: '请选择机型型号',
     snmtm_running: '刷写执行中，请稍候（推送工具 → 写入 SN/MTM → 回读校验）...',
     snmtm_verify_label: '回读校验:',
@@ -1497,7 +1509,7 @@ const I18N = {
     status_enabled: '启用', status_disabled: '停用',
     btn_disable: '停用', btn_enable: '启用', btn_reset: '重置密码',
     reset_ok: '密码已重置', op_fail: '操作失败',
-    chat_empty1: '尚未选择房间', chat_empty2: '在「我的工单」里点「进入对话」，或创建/加入房间后自动打开',
+    chat_empty1: '尚未选择房间', chat_empty2: '在「诊断记录」里点「进入对话」，或创建/加入房间后自动打开',
     room_prefix: '房间: ',
     net_err: '网络错误',
     user_guest: '未登录', user_admin: ' (管理员)', user_prefix: '工号: ',
@@ -1715,6 +1727,18 @@ function fieldGuideBat() {
 }
 
 // ===== 用户信息 =====
+
+// 左下角版本号动态获取（2026-08-30——替换同步时硬编码 v0.13.7 遗留，改动态免每次打版手改）
+(function () {
+  fetch('/api/health', { headers: { 'Accept': 'application/json' } })
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById('ver-display');
+      if (el && d.version) el.textContent = 'v' + d.version;
+    })
+    .catch(function () {});
+})();
+
 async function loadMe() {
   try {
     const resp = await fetch('/api/auth/me');
