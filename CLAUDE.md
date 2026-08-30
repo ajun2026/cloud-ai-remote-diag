@@ -12,7 +12,7 @@
   登录页→工作台          FastAPI + Agent核心         执行 systeminfo/dxdiag/
   工单台账→对话页       大脑：Hermes（默认，自治 agent） 事件日志/PowerShell
   （登录+房间绑定）      └─ DeepSeek（兜底，前端入口隐藏）
-                         106.54.193.9:8000
+                         <公网入口IP>:8000
 ```
 
 ## v0.8.0：登录体系 + 工作台 + 房间业务绑定
@@ -41,7 +41,7 @@
 
 ## 服务器部署
 
-- **地址：** http://106.54.193.9:8000 （服务名 `server.py`）
+- **地址：** http://<公网入口IP>:8000 （服务名 `server.py`）
 - **进程管理：** 通过 SSH 操作
 - **项目路径：** `/home/ubuntu/cab-server/`
 - **Python 环境：** venv (`/home/ubuntu/cab-server/venv/`)
@@ -75,7 +75,7 @@
 - 所有 Python 文件、HTML 文件**避免使用 emoji**（Windows GBK 编码会崩溃）
 - bridge.py 用 `logging` 模块，不用 `print`
 - 服务器端文件编码 UTF-8
-- 桥接器默认连接 `ws://106.54.193.9:8000`
+- 桥接器默认连接 `ws://<公网入口IP>:8000`
 - DeepSeek API Key 在 `.env` 中
 
 ## 本地开发

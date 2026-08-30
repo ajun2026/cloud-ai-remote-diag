@@ -1,7 +1,7 @@
 # DEPLOY.md — 新服务器部署指南
 
 > 面向**其他团队 / 其他服务器**：从 GitHub 拉取本仓库，部署到你们自己的服务器上。
-> 本仓库是一个可移植项目，但代码里有 17 处写死了演示服务器地址（`106.54.193.9:8000`），
+> 本仓库是一个可移植项目，但代码里有 17 处写死了演示服务器地址（`<公网入口IP>:8000`），
 > **部署到自己的服务器必须全部替换**，否则页面能打开、房间能建，但桥接器/下载命令
 > 都会连到演示服务器上，完全不可用。本指南逐条列出"必须改成你自己的"的每一项。
 
@@ -63,7 +63,7 @@ python server.py
 > 把地址改成运行时动态化（`.env` 的 `PUBLIC_URL` 配置 + 自动推导），改完本项目
 > 本节即可跳过。不想改则继续按本节 sed 替换（两条路任选其一，都可用）。
 
-代码里写死了演示服务器 `106.54.193.9:8000`，共 **4 个文件 17 处**：
+代码里写死了演示服务器 `<公网入口IP>:8000`，共 **4 个文件 17 处**：
 
 | 文件 | 处数 | 影响 |
 |---|---|---|
@@ -79,7 +79,7 @@ python server.py
 ```bash
 cd cloud-ai-remote-diag
 
-sed -i 's|106.54.193.9:8000|your-server.com:8000|g' \
+sed -i 's|<公网入口IP>:8000|your-server.com:8000|g' \
   static/index.html static/dashboard.html static/bridge.ps1 static/install-linux.sh
 
 # 若用 HTTPS，另外把 ws:// 改成 wss://（bridge.ps1 内默认连接地址）
@@ -90,7 +90,7 @@ sed -i 's|ws://your-server.com|wss://your-server.com|g' static/bridge.ps1
 
 ```bash
 # 代码文件里不应再出现演示服务器地址（文档类文件除外）
-grep -rn "106.54.193.9" static/   # 应无输出
+grep -rn "<公网入口IP>" static/   # 应无输出
 
 # 人工核对关键点
 grep -n "your-server.com" static/index.html        # 连接弹窗默认服务器
@@ -197,7 +197,7 @@ curl -sI http://你的IP:8000/static/bridge-win64.exe # 200
 curl -sI http://你的IP:8000/static/bridge.ps1       # 200 + content-type: text/plain
 
 # 4. 硬编码地址已替换干净
-grep -rn "106.54.193.9" static/                     # 无输出
+grep -rn "<公网入口IP>" static/                     # 无输出
 
 # 5. 端到端：创建房间 → 客户机跑桥接器输入房间码 → 对话页显示在线 → 发"看看系统信息"能回
 ```
@@ -219,9 +219,9 @@ grep -rn "106.54.193.9" static/                     # 无输出
 
 ## 10. 与演示服务器的差异说明
 
-| 项 | 演示服务器（106.54.193.9） | 你们部署的服务器 |
+| 项 | 演示服务器（<公网入口IP>） | 你们部署的服务器 |
 |---|---|---|
-| 页面地址 | `http://106.54.193.9:8000` | `http://你们的IP:8000`（或域名） |
+| 页面地址 | `http://<公网入口IP>:8000` | `http://你们的IP:8000`（或域名） |
 | AI 大脑 | DeepSeek（默认）+ Hermes（可选） | DeepSeek 即可，Hermes 可选 |
 | 数据 | 演示数据，可随意清空 | 你们自己的工单/房间数据（SQLite：`logs/chat.db`） |
 | 桥接器 | 已编译好的二进制在 static/ | **需自行编译**（第 4 节） |

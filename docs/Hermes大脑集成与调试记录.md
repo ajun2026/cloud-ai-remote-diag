@@ -152,7 +152,7 @@ Hermes agent（会话 api-855021d5e0653671）在处理用户消息时**没有按
 | ② 安全红线 | `build_hermes_bridge_guide()` 增加"🚫 安全红线"：禁止读写 cab-server 文件、禁止 pkill/重启/nohup、禁止 import server.py、唯一允许的服务器操作是 curl 调 HTTP 桥 | prompt 层面约束行为 |
 
 ### 5.4 二次事故：gateway 重启连带杀 cab-server
-- 现象：`http://106.54.193.9:8000/` 无法访问
+- 现象：`http://<公网入口IP>:8000/` 无法访问
 - 根因：cab-server 用 Hermes `terminal(background=true)` 启动，进程挂在 gateway 会话下；gateway 重启（让工具集生效）时被连带杀掉
 - 修复：改用 `subprocess.Popen(start_new_session=True)` 启动，进程自成会话首领，脱离 gateway 进程组
 

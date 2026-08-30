@@ -7,7 +7,7 @@
 
 ## 问题 1：AI Agent 是谁？在哪里？
 
-**AI Agent 就是 `server.py` 里的 Agent 循环代码**，运行在云服务器 `106.54.193.9` 上。
+**AI Agent 就是 `server.py` 里的 Agent 循环代码**，运行在云服务器 `<公网入口IP>` 上。
 
 具体流程：
 1. 用户在浏览器发消息 → WebSocket 到 `server.py`
@@ -226,7 +226,7 @@ src/winremote/
   - **注意事项**：说明仅执行只读诊断
   - **下载按钮**：点击即下载 `/static/bridge.exe`
 
-**验证：** `curl -s -o /dev/null -w "%{http_code}" http://106.54.193.9:8000/static/bridge.exe` → 200
+**验证：** `curl -s -o /dev/null -w "%{http_code}" http://<公网入口IP>:8000/static/bridge.exe` → 200
 
 ---
 
@@ -260,7 +260,7 @@ src/winremote/
 **查看日志：**
 ```bash
 # 服务器端（SSH登录）
-ssh ubuntu@106.54.193.9
+ssh ubuntu@<公网入口IP>
 tail -f /home/ubuntu/cab-server/logs/chat.log      # 对话内容
 tail -f /home/ubuntu/cab-server/logs/server.log    # 连接记录
 

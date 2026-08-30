@@ -45,7 +45,7 @@
 - **导出下拉合并**：导出对话 + 生成报告 →「📄 导出 ▾」菜单
 - **开机自启动移入分组**（⚙️——去重 🔌 图标）
 
-### 同步（106.54.193.9 部署实例）
+### 同步（<公网入口IP> 部署实例）
 
 - **前端整体同步**（dashboard/login/index）：游客模式彻底化（非 IDG 页面内容全隐藏 + 首帧高亮 IDG）/ 页面标题描述全隐藏 / 对话页与 IDG iframe 负 margin 撑满（消除嵌入感）/ 徽章样式 / 首页步骤区移除 / 导出下拉样式
 - **bridge.ps1.tmpl console 支持**：`CreateNoWindow = -not $Spec.console`——AMIDEWIN 等工具在无控制台环境 SMBIOS 初始化失败——SN/MTM 刷写命令自动开窗口（server 端 command 消息透传 console；flash 工具 /SS /SP 两处 console=true）
@@ -543,7 +543,7 @@ v0.11.2 → v0.12.0（server.py + dashboard.html）
 
 ### 新增：HTTPS 部署（clouddiag.online）
 
-- 域名 clouddiag.online（腾讯云）DNS A 记录 → 124.221.188.3
+- 域名 clouddiag.online（腾讯云）DNS A 记录 → <服务器IP>
 - Caddy 反代 + Let's Encrypt 免费证书（90 天自动续期），HTTP 308 跳转 HTTPS
 - 旧 IP 80 端口缓冲器：提示页引导用户到新地址
 - 公网 8000 端口关闭（安全组），全站强制 HTTPS
@@ -671,7 +671,7 @@ v0.10.1 → v0.10.2（server.py 5 处 + dashboard.html 1 处）
 
 ### 修改
 
-- **桥接器内置默认服务器地址**：交互模式不再提示输入服务器地址，直接显示内置服务器（`ws://124.221.188.3:8000`），用户只需输入 8 位房间码；`CLOUDDIAG_SERVER` 环境变量 / `-server` 参数可覆盖
+- **桥接器内置默认服务器地址**：交互模式不再提示输入服务器地址，直接显示内置服务器（`ws://<服务器IP>:8000`），用户只需输入 8 位房间码；`CLOUDDIAG_SERVER` 环境变量 / `-server` 参数可覆盖
 - **服务器地址容错**：用户输入 `http://`/`https://` 前缀或漏填协议时自动规范化为 `ws://`/`wss://`（`normalizeServerURL`）
 - **房间码提示修正**：6 位 → 8 位（v0.8.0 起房间码已为 8 位）
 - 重新编译 bridge-win64.exe / bridge-linux-amd64
@@ -752,7 +752,7 @@ v0.10.0 → v0.10.1（server.py 5 处 + dashboard.html 1 处）
 
 ### 新增：命令版桥接器 `static/bridge.ps1`（ps-pipe）
 
-- **无文件运行**：`iex (iwr http://106.54.193.9:8000/static/bridge.ps1).Content` —— 纯文本脚本在内存执行，不落盘、不生成 .exe，规避杀软对二进制/下载文件的拦截
+- **无文件运行**：`iex (iwr http://<公网入口IP>:8000/static/bridge.ps1).Content` —— 纯文本脚本在内存执行，不落盘、不生成 .exe，规避杀软对二进制/下载文件的拦截
 - **协议完全兼容**：实现 v2 管道化全部消息——`identify`（含 platform/is_admin 上报，服务器自动识别为 v2）、`heartbeat` 25s、`command` 执行 + `command_result` 回传、`file_download` 分块上传、`file_upload` 分块写入（落 `%TEMP%\clouddiag\`，与 Go bridge 一致）、`ping/pong`、`close`
 - **命令执行**：PowerShell 走 `-NoProfile -NonInteractive -EncodedCommand`（base64 UTF-16 编码，彻底避开引号/编码转义陷阱，比 Go 直接拼参数更稳）；cmd/bash 分支尽力支持；超时用 `taskkill /F /T /PID` 杀进程树；输出强制 UTF-8 读取（GBK 不乱码）；命令异步执行不阻塞接收循环（对齐 Go bridge 的读超时修复思路）
 - **交互/免交互双模式**：直接 iex 会提示输入 8 位房间码；`$env:BRIDGE_ROOM="ABC12345"` 预置后免交互直连；也支持下载后 `-File bridge.ps1 -Room XXXX` 运行
@@ -892,7 +892,7 @@ v0.10.0 → v0.10.1（server.py 5 处 + dashboard.html 1 处）
 
 - **提权原理**：`ShellExecuteW + "runas"` → 触发 UAC 弹窗 → 用户确认 → 以管理员启动新进程（带 `--elevated` 内部标志防递归）→ 新进程自动重连同一房间
 - **两种触发方式**：
-  - 命令行：`bridge -server ws://106.54.193.9:8000 -room 房间码 --elevate`
+  - 命令行：`bridge -server ws://<公网入口IP>:8000 -room 房间码 --elevate`
   - 交互模式（双击）：启动时检测非管理员，询问"是否以管理员身份重新启动？[Y/n]"，回车默认提权
 - **权限检测**：Windows 用进程 Token Elevation（`windows.GetCurrentProcessToken().IsElevated()`），比 `whoami /groups` 更可靠；Linux/macOS 不支持自动提权（返回提示，手动 sudo）
 - **克制原则**：默认不提权，仅用户确认/显式请求时提权，维持"行为面最小"设计
@@ -1008,7 +1008,7 @@ v0.10.0 → v0.10.1（server.py 5 处 + dashboard.html 1 处）
 **问题**：bridge 强制要求命令行参数 `-room`，缺少时直接报错退出（`os.Exit(2)`）。用户按页面指引双击运行 exe 时没有参数，窗口一闪而过，表现为"闪退"。
 
 **修改**（bridge/main.go）：
-- 未提供 `-room` 参数时进入**交互模式**：欢迎界面 → 引导输入服务器地址（回车默认 `ws://106.54.193.9:8000`）→ 输入 6 位房间码 → 自动连接
+- 未提供 `-room` 参数时进入**交互模式**：欢迎界面 → 引导输入服务器地址（回车默认 `ws://<公网入口IP>:8000`）→ 输入 6 位房间码 → 自动连接
 - 房间码为空时提示错误并等待按键后再退出（不再瞬间关闭）
 - 命令行方式 `-server ws://... -room XXX` 完全兼容，不受影响
 
@@ -1113,7 +1113,7 @@ v0.10.0 → v0.10.1（server.py 5 处 + dashboard.html 1 处）
 
 ### 一、管理后台安全加固（admin 登录）
 
-**需求来源**：管理后台页 `http://106.54.193.9:8000/admin` 需要账号密码登录。
+**需求来源**：管理后台页 `http://<公网入口IP>:8000/admin` 需要账号密码登录。
 
 - 新增 Admin 认证体系（server.py）：
   - `ADMIN_USERNAME` / `ADMIN_PASSWORD` 环境变量，默认 `admin` / `admin`（可通过 `.env` 覆盖）

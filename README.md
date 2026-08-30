@@ -8,8 +8,8 @@
 
 A cloud-based AI remote diagnostics system for Windows computers. Users describe PC problems in natural language through a browser, and the cloud AI remotely executes diagnostic and repair commands via a lightweight bridge program, then provides analysis reports.
 
-> **Live Demo:** http://106.54.193.9:8000  
-> **Admin Dashboard:** http://106.54.193.9:8000/admin （需登录）
+> **Live Demo:** http://<公网入口IP>:8000  
+> **Admin Dashboard:** http://<公网入口IP>:8000/admin （需登录）
 > **Update Log:** 详见 [CHANGELOG.md](CHANGELOG.md)
 > **Project Evolution:** 项目演进史（Python → Go 重写原因、架构变化）详见 [HISTORY.md](HISTORY.md)
 > **Hermes 大脑集成记录:** [docs/Hermes大脑集成与调试记录.md](docs/Hermes大脑集成与调试记录.md)
@@ -24,7 +24,7 @@ Browser (Web UI)  <-->  Cloud Server (server.py)  <-->  Remote PC (Go bridge)
   Login page               FastAPI + Agent Core           Executes systeminfo/dxdiag/
   Dashboard (工单)         Brain: Hermes（默认, 自治 agent） PowerShell/process mgmt/
   Chat interface           └─ DeepSeek（兜底, 前端入口隐藏）   49 diagnostic tools
-  Approval dialog          106.54.193.9:8000              Linux/macOS/Windows
+  Approval dialog          <公网入口IP>:8000              Linux/macOS/Windows
 ```
 
 ## Features
