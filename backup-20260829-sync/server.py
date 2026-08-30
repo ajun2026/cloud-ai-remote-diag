@@ -1006,9 +1006,6 @@ class Room:
         self.pending_approvals: dict[str, asyncio.Future] = {}
         # Auto-approve setting: if True, skip approval prompts for Tier 2
         self.auto_approve_tier2: bool = False
-        # 任务级自动审批:本任务(当前用户消息)内已确认过一次 → 后续 Tier 2/3 直接放行
-        # 每次用户发新消息时重置(任务边界),防跨任务无限放行
-        self.task_auto_approved: bool = False
         # Machine identity — populated when bridge connects and sends identify
         self.machine: dict = {}
         self.remote_ip: str = ""
@@ -1057,7 +1054,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.17", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.16", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1826,7 +1823,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.17"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.16"}
 
 
 @app.post("/api/debug_log")
@@ -2543,7 +2540,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.17",
+        "version": "0.13.16",
     }
 
 
@@ -2723,7 +2720,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.17</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.16</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -3076,7 +3073,6 @@ async def execute_bridge_command(room: Room, fn_name: str, fn_args: dict, cmd_id
                     "cwd": "",
                     "shell": platform_shell(room.platform),
                     "tier": tier,
-                    "console": bool(fn_args.get("console", False)),
                 })
         else:
             await room.bridge_ws.send_json({
@@ -3231,12 +3227,8 @@ async def run_agent(
 
             # === APPROVAL CHECK for Tier 2/3 ===
             if tier >= 2:
-                # 任务级自动审批:本任务已确认过一次 → 直接放行(不再弹窗)
-                if room.task_auto_approved:
-                    save_approval(room.code, fn_name, fn_args, tier, 1)
-                    run_logger.info(f"[{room.code}] Task-auto-approved {fn_name} (tier {tier})")
                 # For Tier 2 with auto_approve, skip the prompt
-                elif tier == 2 and room.auto_approve_tier2:
+                if tier == 2 and room.auto_approve_tier2:
                     save_approval(room.code, fn_name, fn_args, tier, 1)
                     run_logger.info(f"[{room.code}] Auto-approved Tier 2: {fn_name}")
                 else:
@@ -3251,11 +3243,6 @@ async def run_agent(
                     approved, reason = await request_approval(
                         room, fn_name, fn_args, tier, browser_ws
                     )
-
-                    # 用户批准 → 记住本任务后续免弹窗(AI agent auto 模式)
-                    if approved:
-                        room.task_auto_approved = True
-                        run_logger.info(f"[{room.code}] Task auto-approve armed (first approval for this task)")
 
                     if not approved:
                         result = f"[approval_denied] Tier {tier} tool '{fn_name}' was denied by user."
@@ -3802,19 +3789,11 @@ async def api_bridge_execute(request: Request):
     if tier >= 2:
         if not room.browser_ws:
             return JSONResponse({"status": "error", "error": "no_browser_for_approval"}, status_code=409)
-        # 任务级自动审批:本任务已确认过一次 → 直接放行(不再弹窗)
-        if room.task_auto_approved:
-            save_approval(room.code, fn_name, fn_args, tier, 1)
-            run_logger.info(f"[{room.code}] HTTP bridge task-auto-approved {fn_name} (tier {tier})")
-        elif tier == 2 and room.auto_approve_tier2:
+        if tier == 2 and room.auto_approve_tier2:
             save_approval(room.code, fn_name, fn_args, tier, 1)
             run_logger.info(f"[{room.code}] HTTP bridge auto-approved Tier 2: {fn_name}")
         else:
             approved, reason = await request_approval(room, fn_name, fn_args, tier, room.browser_ws)
-            # 用户批准 → 记住本任务后续免弹窗
-            if approved:
-                room.task_auto_approved = True
-                run_logger.info(f"[{room.code}] HTTP bridge task auto-approve armed")
             if not approved:
                 save_approval(room.code, fn_name, fn_args, tier, -1)
                 run_logger.info(f"[{room.code}] HTTP bridge approval denied for {fn_name}")
@@ -3963,7 +3942,7 @@ async def tools_snmtm_flash(request: Request):
         cmd_sn = f'cd /d {SNMTM_TMP_DIR} && AMIDEWINx64.exe /SS "{sn}"'
         _log(f"写入 SN: AMIDEWINx64.exe /SS \"{sn}\"")
         r3 = await execute_bridge_command(room, "RunCommand",
-                                          {"command": cmd_sn, "timeout": 60, "cwd": "", "console": True},
+                                          {"command": cmd_sn, "timeout": 60, "cwd": ""},
                                           f"sntm_ss_{int(time.time())}", tier=3)
         _log(f"SN 写入输出: {r3[:300]}")
 
@@ -3971,7 +3950,7 @@ async def tools_snmtm_flash(request: Request):
         cmd_sp = f'cd /d {SNMTM_TMP_DIR} && AMIDEWINx64.exe /SP "{mtm}"'
         _log(f"写入 MTM: AMIDEWINx64.exe /SP \"{mtm}\"")
         r4 = await execute_bridge_command(room, "RunCommand",
-                                          {"command": cmd_sp, "timeout": 60, "cwd": "", "console": True},
+                                          {"command": cmd_sp, "timeout": 60, "cwd": ""},
                                           f"sntm_sp_{int(time.time())}", tier=3)
         _log(f"MTM 写入输出: {r4[:300]}")
 
@@ -4683,7 +4662,7 @@ async def tools_drivers_fetch(request: Request):
 
         # ④ 组装 + 缓存
         payload = {
-            "machine": {"sn": sn, "mt": mt, "model": mt, "search_key": search_key},
+            "machine": {"sn": sn, "mt": mt, "search_key": search_key},
             "drivers": drivers,
             "count": len(drivers),
             "source": "数据来源:联想官网 API (drive_listnew)",
@@ -5648,8 +5627,6 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                 # lang: zh-CN | zh-TW | en —— 控制 AI 回复语言
                 lang = msg_data.get("lang") or "zh-CN"
                 save_message(room_code, "user", user_message)
-                # 任务级自动审批:新用户消息 = 新任务边界 → 重置审批记忆(首次确认后本任务内免弹窗)
-                rooms[room_code].task_auto_approved = False
                 chat_logger.info(f"[{room_code}] USER: {user_message[:500]}")
 
                 # === 第 2 层：意图门控（服务器硬拦截，不进 agent 循环，0 token 消耗） ===
@@ -5848,7 +5825,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.17+）：
+    # 服务器主动定期发业务 ping（v0.13.16+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -6012,7 +5989,7 @@ async def _startup_reaper():
 
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.17 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.13.16 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info("房间内存已清空——bridge/browser 重连时自动从 DB 恢复房间（无需重新创建）")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",

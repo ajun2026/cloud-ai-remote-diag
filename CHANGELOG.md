@@ -1,3 +1,41 @@
+## v0.13.17 — 2026-08-30（驱动获取 + 任务级自动审批 + UI 同步 + 修复 3 项）
+
+### 新功能
+
+- **📥 驱动获取（脚本化——不经 AI）**：
+  - 对话页快捷工具「驱动获取」按钮（Windows）——识别机器（CIM 查 SN/MT）→ 联想官网驱动 API 直连 → 表格展示全部官方驱动（名称/版本/日期/大小/下载链接）
+  - 当天缓存秒开（drivers_cache/{SN}.json）；API 失败友好报错
+  - 真机验证（SN PC22XGDR → ThinkStation 20+ 驱动——主板/BIOS/微码/读卡器等）
+- **任务级自动审批（AI agent 模式）**：
+  - 本任务（当前用户消息）内已确认过一次 Tier 2/3 操作 → 后续直接放行（不再弹窗）
+  - 每次用户发新消息时重置（任务边界——防跨任务无限放行）
+  - ws 对话 + HTTP bridge 双通道生效；与 auto_approve_tier2 的关系：任务级优先
+
+### 修复（定制方案 Bug）
+
+- **room_bat 500（`_primary` 未定义）**：Windows 双击版 bat 下载接口补部署地址动态化（8443 降级/ws 映射）
+- **桥接器结果丢失 exit_code/error**：command_result 合并 stderr + 退出码（过滤 PowerShell CLIXML 进度流）——AMIDEWIN 等控制台程序可判断执行状态
+- **AI 机型识别乱猜**：系统提示词加交叉验证规则（20TH/20TJ = ThinkPad P1 Gen 3 而非 T14/T15p；Quadro/RTX A 系列/Xeon → 工作站；硬件证据优先于前缀记忆；不确定时"按 SN 确认"）
+
+### UI 调整（对话页——按定制方案）
+
+- **快捷诊断工具分组重排**：4 组（系统诊断/硬件诊断/外设网络/实用工具）+ 默认收起为一行（点击展开）
+- **删除「← 工作台」按钮**（左侧导航常驻——冗余）
+- **导出下拉合并**：导出对话 + 生成报告 →「📄 导出 ▾」菜单
+- **开机自启动移入分组**（⚙️——去重 🔌 图标）
+
+### 同步（106.54.193.9 部署实例）
+
+- **前端整体同步**（dashboard/login/index）：游客模式彻底化（非 IDG 页面内容全隐藏 + 首帧高亮 IDG）/ 页面标题描述全隐藏 / 对话页与 IDG iframe 负 margin 撑满（消除嵌入感）/ 徽章样式 / 首页步骤区移除 / 导出下拉样式
+- **bridge.ps1.tmpl console 支持**：`CreateNoWindow = -not $Spec.console`——AMIDEWIN 等工具在无控制台环境 SMBIOS 初始化失败——SN/MTM 刷写命令自动开窗口（server 端 command 消息透传 console；flash 工具 /SS /SP 两处 console=true）
+- **驱动获取响应补 machine.model 字段**（前端显示机型用）
+
+### 文档
+
+- 部署指南：frp 内网穿透章节（无公网 IP 部署方案）+ IDG 独立仓库部署说明（系统依赖/chmod/key）
+
+---
+
 ## v0.13.16 — 2026-08-28（Bug 修复 3 项 + AI 模型配置管理 + 合并社区方案）
 
 ### Bug 修复（合并上游后发现的）

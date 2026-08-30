@@ -140,7 +140,7 @@ async function doLogin() {
       btn.disabled = false; btn.textContent = 'Login';
       return;
     }
-    localStorage.setItem('cab_role', data.role || '');  // 写角色标记（防残留——Bug 8）
+    localStorage.setItem('cab_role', data.role || '');
     location.href = '/dashboard?role=' + (data.role || '');
   } catch (e) {
     showError('网络错误: ' + e.message);
@@ -163,7 +163,10 @@ document.getElementById('password').addEventListener('keydown', (e) => { if (e.k
 
 // 已登录直接进工作台
 fetch('/api/auth/me').then(r => r.json()).then(d => {
-  if (!d.error) location.href = '/dashboard?role=' + (d.role || '');
+  if (!d.error) {
+    localStorage.setItem('cab_role', d.role || '');
+    location.href = '/dashboard?role=' + (d.role || '');
+  }
 }).catch(() => {});
 </script>
 </body>

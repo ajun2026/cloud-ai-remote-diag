@@ -295,7 +295,7 @@ function Execute-CommandSpec {
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.UseShellExecute = $false
-    $psi.CreateNoWindow  = $true
+    $psi.CreateNoWindow  = -not [bool]$Spec.console
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError  = $true
     $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8

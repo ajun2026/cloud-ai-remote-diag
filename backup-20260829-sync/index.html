@@ -6,11 +6,10 @@
 <title>云端 AI 远程运维助手</title>
 <style>
   :root {
-    /* 对齐整体(GitHub 暗色系):与 dashboard/IDG 统一 */
-    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
-    --accent: #f778ba; --text: #e6edf3; --text2: #8b949e;
-    --border: #30363d; --success: #3fb950; --warn: #d29922;
-    --error: #f85149; --info: #58a6ff;
+    --bg: #1a1a2e; --surface: #16213e; --surface2: #0f3460;
+    --accent: #e94560; --text: #eaeaea; --text2: #a0a0b0;
+    --border: #2a2a4a; --success: #4ade80; --warn: #fbbf24;
+    --error: #f87171; --info: #60a5fa;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -18,14 +17,12 @@
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
     background: var(--bg); color: var(--text);
-    height: 100vh;
+    height: 100vh; display: flex; justify-content: center; align-items: center;
   }
 
   #app {
-    /* 撑满 iframe 全宽(去 max-width 1400 居中——宽屏时两侧露底色形成"嵌入边框"感);
-       背景与 dashboard 内容区一致(--bg),无边界融合 */
-    width: 100%; height: 100vh;
-    display: flex; flex-direction: column; background: var(--bg);
+    width: 100%; max-width: 1400px; height: 100vh;
+    display: flex; flex-direction: column; background: var(--surface);
   }
 
   /* ====== Header ====== */
@@ -57,7 +54,7 @@
     border: 1px solid var(--border); background: var(--bg); color: var(--text2); cursor: pointer;
     display: none;
   }
-  #auto-approve-btn.enabled { background: rgba(210,153,34,0.15); color: var(--warn); border-color: var(--warn); }
+  #auto-approve-btn.enabled { background: rgba(251,191,36,0.15); color: var(--warn); border-color: var(--warn); }
 
   /* ====== Messages ====== */
   #messages {
@@ -72,7 +69,7 @@
   }
   .msg .msg-body { min-width: 0; flex: 1; }
   .msg .msg-time { font-size: 11px; opacity: 0.65; flex-shrink: 0; margin-top: 3px; white-space: nowrap; }
-  .msg.user { align-self: flex-end; background: #1f6feb; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.user { align-self: flex-end; background: var(--info); color: #fff; border-bottom-right-radius: 4px; }
   .msg.user .msg-time { order: 2; }
   .msg.ai {
     align-self: flex-start; background: var(--surface2);
@@ -89,7 +86,7 @@
   .msg.system { align-self: center; font-size: 12px; color: var(--text2); background: transparent; padding: 4px 8px; display: block; }
   .msg.error {
     align-self: center; font-size: 13px;
-    background: rgba(248,81,73,0.15); border: 1px solid rgba(248,81,73,0.3); color: var(--error);
+    background: rgba(248,113,113,0.15); border: 1px solid rgba(248,113,113,0.3); color: var(--error);
     display: block;
   }
 
@@ -122,8 +119,8 @@
 
   /* Tier badge */
   .tier-badge { padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
-  .tier-badge.t2 { background: rgba(210,153,34,0.2); color: var(--warn); }
-  .tier-badge.t3 { background: rgba(248,81,73,0.2); color: var(--error); }
+  .tier-badge.t2 { background: rgba(251,191,36,0.2); color: var(--warn); }
+  .tier-badge.t3 { background: rgba(248,113,113,0.2); color: var(--error); }
 
   /* ====== Approval Dialog ====== */
   #approval-overlay {
@@ -190,16 +187,6 @@
   }
   .qa-btn:hover:not(:disabled) { border-color: var(--info); color: var(--info); }
   .qa-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-  /* 快捷功能按钮分组:组内 flex 紧凑排列,组间留白 */
-  .qa-group { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-  .qa-group:last-child { margin-bottom: 0; }
-  /* 快捷诊断工具:默认收起(小屏/笔记本不占对话空间),点击展开 */
-  #quick-bar { display: none !important; }
-  #quick-bar.qa-open { display: flex !important; flex-direction: column; }
-  .qa-toggle { border-style: dashed; opacity: .85; }
-  /* 导出菜单项 */
-  .em-item { padding: 8px 12px; font-size: 12px; cursor: pointer; color: var(--text); }
-  .em-item:hover { background: var(--surface); color: var(--info); }
   /* 启动项面板 */
   .startup-panel {
     margin: 8px 14px; padding: 12px 14px; background: var(--surface2);
@@ -210,7 +197,7 @@
     display: flex; align-items: center; gap: 8px; padding: 6px 8px;
     border-radius: 6px; cursor: pointer;
   }
-  .startup-item:hover { background: rgba(88,166,255,0.08); }
+  .startup-item:hover { background: rgba(96,165,250,0.08); }
   .startup-item.disabled { opacity: 0.55; cursor: not-allowed; }
   .startup-item input { accent-color: var(--info); }
   .st-name { font-weight: 600; min-width: 140px; }
@@ -242,7 +229,7 @@
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     transition: all 0.15s;
   }
-  .dialog-close:hover { color: var(--error); border-color: var(--error); background: rgba(248,81,73,0.12); }
+  .dialog-close:hover { color: var(--error); border-color: var(--error); background: rgba(248,113,113,0.12); }
 
   /* ====== Download Section ====== */
   .dl-section { margin-top: 14px; text-align: left; }
@@ -359,15 +346,16 @@
     <div style="display:flex;align-items:center;gap:8px;">
       <button id="auto-approve-btn" title="Tier 2 自动审批：开启后鼠标/键盘等交互操作无需弹窗确认" onclick="toggleAutoApprove()">T2 Auto OFF</button>
       <div style="position:relative;display:inline-block;">
-        <button id="export-btn" onclick="toggleExportMenu(event)" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;display:none;" title="导出对话 / 生成报告">📄 导出 ▾</button>
-        <div id="export-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--surface2);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.4);z-index:100;min-width:150px;overflow:hidden;">
-          <div class="em-item" onclick="doExportChat(event)" title="导出完整对话记录(含 AI 分析)">💬 导出完整对话</div>
-          <div class="em-item" onclick="doExportReport(event)" title="生成诊断观察报告(仅执行记录与采集数据,不含 AI 分析)">📊 生成诊断报告</div>
+        <button id="export-btn" onclick="toggleExportMenu(event)" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;display:none;" title="导出对话 / 生成诊断报告">📄 导出 ▾</button>
+        <div id="export-menu" style="display:none;position:absolute;right:0;top:28px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;z-index:60;min-width:160px;box-shadow:0 4px 16px rgba(0,0,0,.4);">
+          <div class="em-item" onclick="doExportChat(event)" style="padding:10px 14px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);">💬 导出完整对话</div>
+          <div class="em-item" onclick="doExportReport(event)" style="padding:10px 14px;font-size:13px;cursor:pointer;">📊 生成诊断报告</div>
         </div>
       </div>
       <button id="reconnect-btn" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;display:none;" data-i18n="reconnect_btn">重新连接</button>
       <div id="room-display"></div>
     </div>
+    <style>.em-item:hover{background:var(--border);}</style>
   </div>
 
   <div id="room-info-bar" style="display:none;padding:8px 14px;background:var(--surface2);border-bottom:1px solid var(--border);font-size:12px;color:var(--text2);align-items:center;flex-wrap:wrap;gap:6px 16px;">
@@ -407,15 +395,9 @@
     ⚠ 上门工程师账号：可使用「📶 连接你的电脑」与快捷工具；对话诊断由远程工程师处理（不可发送消息）
   </div>
 
-  <div id="quick-actions" style="display:flex;gap:8px;padding:8px 14px 0;flex-wrap:wrap;">
-    <!-- 快捷诊断工具:默认收起为一行,点击展开(小屏/笔记本不占对话空间) -->
-    <button class="qa-btn qa-toggle" onclick="toggleQuickBar()" title="展开/收起快捷诊断工具">
-      ⚡ 快捷诊断工具 <span id="qa-arrow">▾</span>
-    </button>
-  </div>
-
-  <!-- 快捷诊断选项卡（11 类——按平台显隐——点击自动发送预设诊断指令） -->
-  <div id="quick-bar" style="display:none;padding:8px 12px;border-top:1px solid var(--border);flex-wrap:wrap;gap:6px;background:var(--surface);"></div>
+  <!-- 快捷诊断工具（分组 + 折叠——2026-08-29 UI 调整） -->
+  <button class="qa-btn qa-toggle" onclick="toggleQuickBar()" title="展开/收起快捷诊断工具">⚡ 快捷诊断工具 <span id="qa-arrow">▾</span></button>
+  <div id="quick-bar" class="qa-collapsed" style="display:none;padding:8px 12px;border-top:1px solid var(--border);background:var(--surface);flex-direction:column;"></div>
 
   <div id="input-area">
     <textarea id="input-box" data-i18n-placeholder="input_placeholder" placeholder="描述你的电脑问题，例如：帮我检查系统有没有异常" rows="1"></textarea>
@@ -442,7 +424,6 @@
   <div id="approval-dialog">
     <h3 id="approval-title" data-i18n="approval_title">操作确认</h3>
     <p id="approval-desc" style="font-size:13px;color:var(--text2);" data-i18n="approval_desc">助手想执行以下操作：</p>
-    <p style="font-size:12px;color:var(--success);margin:0 0 6px;">✅ 允许后，本次任务后续操作将不再询问（自动放行）</p>
     <div class="human-desc" id="approval-human"></div>
     <button class="detail-toggle" id="approval-toggle-detail" onclick="toggleApprovalDetail()">▸ 查看命令详情</button>
     <div class="tool-info" id="approval-detail">
@@ -574,7 +555,7 @@ const I18N = {
 
 
 let currentLang = 'zh-CN';
-function t(key) { return (I18N[currentLang] && I18N[currentLang][key]) || I18N['zh-CN'][key] || key; }
+function t(key) { return I18N[currentLang]?.[key] || I18N['zh-CN'][key] || key; }
 
 function applyLang(lang) {
   currentLang = lang;
@@ -1282,16 +1263,57 @@ document.getElementById('deny-reason').addEventListener('keydown', function(e) {
 // ============================================================
 // Message rendering
 // ============================================================
-let sysmsgSeq = 0;
-function addSystemMsg(text) {
-  const el = document.createElement('div'); el.className = 'msg system';
-  el.id = 'sysmsg-' + (++sysmsgSeq);
-  el.textContent = text; messagesEl.appendChild(el); scrollBottom();
-  return sysmsgSeq;  // 返回序号,便于后续更新该条消息
-}
+// HTML 渲染系统消息（驱动表格等——原 addSystemMsg 用 textContent 不渲染）
 function addSystemMsgHtml(html) {
   const el = document.createElement('div'); el.className = 'msg system';
   el.innerHTML = html; messagesEl.appendChild(el); scrollBottom();
+}
+
+// 📥 驱动获取（脚本化——不经 AI——2026-08-29 方案）
+async function runDriverFetch() {
+  if (!roomCode) { alert('未连接房间'); return; }
+  addSystemMsg('⏳ 正在识别机器并查询联想官方驱动...');
+  try {
+    const resp = await fetch('/api/tools/drivers/fetch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: roomCode })
+    });
+    const d = await resp.json();
+    if (!resp.ok || d.status !== 'ok') {
+      addSystemMsgHtml('<span style="color:#f85149;">❌ 驱动获取失败：' + (d.error || resp.status) + '</span>');
+      return;
+    }
+    const sn = d.machine ? (d.machine.sn || d.machine.mt || '') : '';
+    const groups = {};
+    (d.drivers || []).forEach(x => { (groups[x.category] = groups[x.category] || []).push(x); });
+    let html = '<div style="font-size:13px;">📥 <strong>驱动清单</strong>（' + d.count + ' 个）——机器 ' + esc(sn) + (d.cached ? '（缓存）' : '');
+    html += '<br><span style="color:#8b949e;font-size:11px;">' + esc(d.source || '') + '</span></div>';
+    Object.keys(groups).forEach(g => {
+      html += '<div style="margin-top:10px;"><strong style="color:#58a6ff;">' + esc(g) + '</strong>（' + groups[g].length + '）</div>';
+      html += '<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:4px;"><thead><tr>'
+        + '<th style="text-align:left;padding:5px;border-bottom:1px solid var(--border);">驱动名称</th>'
+        + '<th style="text-align:left;padding:5px;border-bottom:1px solid var(--border);">版本</th>'
+        + '<th style="text-align:left;padding:5px;border-bottom:1px solid var(--border);">日期</th>'
+        + '<th style="text-align:left;padding:5px;border-bottom:1px solid var(--border);">大小</th>'
+        + '<th style="text-align:left;padding:5px;border-bottom:1px solid var(--border);">下载</th></tr></thead><tbody>';
+      groups[g].forEach(x => {
+        html += '<tr><td style="padding:5px;border-bottom:1px solid var(--border);">' + esc(x.name)
+          + '</td><td style="padding:5px;border-bottom:1px solid var(--border);">' + esc(x.version)
+          + '</td><td style="padding:5px;border-bottom:1px solid var(--border);">' + esc(x.date)
+          + '</td><td style="padding:5px;border-bottom:1px solid var(--border);">' + esc(x.size)
+          + '</td><td style="padding:5px;border-bottom:1px solid var(--border);"><a href="' + esc(x.url) + '" target="_blank" rel="noopener">⬇</a></td></tr>';
+      });
+      html += '</tbody></table>';
+    });
+    addSystemMsgHtml(html);
+  } catch (e) {
+    addSystemMsgHtml('<span style="color:#f85149;">❌ 驱动获取异常：' + esc(e.message) + '</span>');
+  }
+}
+
+function addSystemMsg(text) {
+  const el = document.createElement('div'); el.className = 'msg system';
+  el.textContent = text; messagesEl.appendChild(el); scrollBottom();
 }
 
 function addErrorMsg(text) {
@@ -1420,51 +1442,44 @@ function escapeHtml(str) {
 // User actions
 // ============================================================
 // ============================================================
-// 快捷诊断选项卡(按分组排列——系统/硬件/外设网络/实用工具)
+// 快捷诊断选项卡（11 类——V1：预设指令引导 AI 按流程诊断）
 // platform: all=通用 / win=Windows 专用 / linux=Linux 专用
 // ============================================================
 const QUICK_DIAGNOSES = [
   // ── 系统诊断 ──
+  { key: 'network', icon: '🌐', title: '网络诊断',    platform: 'all', group: '系统诊断',
+    prompt: '请对这台电脑执行【网络调查】：1) 测试连通性（ping 网关与外网）2) 丢包与延迟 3) 网卡设备与驱动状态 4) IP/DNS 配置 5) 输出观察结果：各测试数据与异常项，只陈述事实。' },
+  { key: 'slow',    icon: '🐢', title: '性能卡顿',    platform: 'all', group: '系统诊断',
+    prompt: '请对这台电脑执行【性能调查】：1) 列出开机自启动项 2) 查看进程 CPU/内存占用 Top 3) 磁盘占用情况 4) 事件日志错误 5) 输出观察结果：启动项清单、占用数据、异常记录，只陈述事实。' },
   { key: 'system',  icon: '🖥', title: '系统问题',    platform: 'all', group: '系统诊断',
     prompt: '请对这台电脑执行【系统状态调查】：1) 系统版本与激活状态 2) 系统日志关键错误 3) TPM/安全状态 4) 驱动冲突检查 5) 输出观察结果：各项状态与异常项，只陈述事实。' },
   { key: 'bsod',    icon: '💥', title: '蓝屏分析',    platform: 'win', group: '系统诊断',
     prompt: '请对这台电脑执行【蓝屏/死机/重启调查】：1) 读取 90 天内蓝屏记录（BugCheck 事件）2) 解析 Minidump（停止码+参数）3) 检查 WHEA 硬件错误与 Kernel-Power 41 4) 输出观察结果：蓝屏时间线、停止码、相关事件记录，只陈述事实。' },
-  { key: 'slow',    icon: '🐢', title: '性能卡顿',    platform: 'all', group: '系统诊断',
-    prompt: '请对这台电脑执行【性能调查】：1) 列出开机自启动项 2) 查看进程 CPU/内存占用 Top 3) 磁盘占用情况 4) 事件日志错误 5) 输出观察结果：启动项清单、占用数据、异常记录，只陈述事实。' },
-  { key: 'thermal', icon: '🌡', title: '温度散热',    platform: 'all', group: '系统诊断',
-    prompt: '请对这台电脑执行【温度调查】：1) 先识别机器型号，判断是否为 ThinkStation 中高端工作站（决定是否可用 SIO 硬件日志）2) 用通用方式读取温度（WMI 热区温度）与风扇状态 3) 如为 ThinkStation 中高端机型且支持，追加 SIO 日志事件分析 4) 输出观察结果：温度数值、风扇状态、相关事件，只陈述事实。' },
   // ── 硬件诊断 ──
   { key: 'disk',    icon: '🔧', title: '硬盘健康',    platform: 'all', group: '硬件诊断',
     prompt: '请对这台电脑执行【硬盘健康调查】：1) 用 SMART 工具读取全量健康度（重映射扇区/通电时长/温度/健康状态）2) 检查坏道与固件版本 3) 输出观察结果：各项指标数值与发现的异常项（如有），只陈述事实。' },
   { key: 'battery', icon: '🔋', title: '电池健康',    platform: 'win', group: '硬件诊断',
     prompt: '请对这台电脑执行【电池状态调查】：1) 生成电池报告（设计容量/满充容量/循环次数/健康度）2) 检查当前充电状态 3) 输出观察结果：各项数值与状态，只陈述事实。' },
-  { key: 'display', icon: '🎨', title: '花屏显示',    platform: 'win', group: '硬件诊断',
-    prompt: '请对这台电脑执行【显示调查】：1) 显卡设备与驱动状态 2) 分辨率/刷新率设置 3) 外接显示器测试建议 4) 显示相关事件日志 5) 输出观察结果：驱动状态、设置、事件记录中的异常项，只陈述事实。' },
-  { key: 'keyboard',icon: '⌨', title: '键盘触控板',  platform: 'win', group: '硬件诊断',
-    prompt: '请对这台电脑执行【键盘/触控板调查】：1) 检查设备管理器中键盘与触控板状态（是否有异常/禁用）2) 驱动版本 3) 排除外接设备干扰 4) 输出观察结果：设备状态、驱动信息、异常项，只陈述事实。' },
+  { key: 'thermal', icon: '🌡', title: '温度散热',    platform: 'all', group: '硬件诊断',
+    prompt: '请对这台电脑执行【温度调查】：1) 先识别机器型号，判断是否为 ThinkStation 中高端工作站（决定是否可用 SIO 硬件日志）2) 用通用方式读取温度（WMI 热区温度）与风扇状态 3) 如为 ThinkStation 中高端机型且支持，追加 SIO 日志事件分析 4) 输出观察结果：温度数值、风扇状态、相关事件，只陈述事实。' },
   // ── 外设网络 ──
+  { key: 'keyboard',icon: '⌨', title: '键盘触控板',  platform: 'win', group: '外设网络',
+    prompt: '请对这台电脑执行【键盘/触控板调查】：1) 检查设备管理器中键盘与触控板状态（是否有异常/禁用）2) 驱动版本 3) 排除外接设备干扰 4) 输出观察结果：设备状态、驱动信息、异常项，只陈述事实。' },
+  { key: 'display', icon: '🎨', title: '花屏显示',    platform: 'win', group: '外设网络',
+    prompt: '请对这台电脑执行【显示调查】：1) 显卡设备与驱动状态 2) 分辨率/刷新率设置 3) 外接显示器测试建议 4) 显示相关事件日志 5) 输出观察结果：驱动状态、设置、事件记录中的异常项，只陈述事实。' },
   { key: 'usb',     icon: '🔌', title: 'USB 接口',    platform: 'win', group: '外设网络',
     prompt: '请对这台电脑执行【USB 调查】：1) USB 设备枚举状态 2) 驱动与电源管理设置 3) USB 相关事件日志 4) 输出观察结果：设备状态、驱动信息、异常事件，只陈述事实。' },
   { key: 'audio',   icon: '🎵', title: '音频设备',    platform: 'win', group: '外设网络',
     prompt: '请对这台电脑执行【音频调查】：1) 音频设备状态（是否有禁用/异常）2) 驱动版本 3) 音频服务状态 4) 输出观察结果：设备状态、驱动信息、异常项，只陈述事实。' },
-  { key: 'network', icon: '🌐', title: '网络诊断',    platform: 'all', group: '外设网络',
-    prompt: '请对这台电脑执行【网络调查】：1) 测试连通性（ping 网关与外网）2) 丢包与延迟 3) 网卡设备与驱动状态 4) IP/DNS 配置 5) 输出观察结果：各测试数据与异常项，只陈述事实。' },
   // ── 实用工具 ──
-  { key: 'startup', icon: '⚙️', title: '开机自启动',  platform: 'all', group: '实用工具', action: 'startup',
-    prompt: '' },
-  { key: 'driver',  icon: '📥', title: '驱动获取',    platform: 'win', group: '实用工具', script: true,
-    prompt: '' },
+  { key: 'driver',  icon: '📥', title: '驱动获取',    platform: 'win', group: '实用工具', script: true, prompt: '',
+    desc: '识别机器 → 联想官网 API → 官方驱动清单（脚本化——秒出）' },
+  { key: 'startup', icon: '⚙️', title: '开机自启动',  platform: 'all', group: '实用工具', action: 'startup', prompt: '',
+    desc: '扫描开机自启动项（注册表+启动文件夹）——可勾选关闭' },
+];
 ];
 
 let quickBarShown = false;
-
-function toggleQuickBar() {
-  const bar = document.getElementById('quick-bar');
-  const arrow = document.getElementById('qa-arrow');
-  if (!bar || !arrow) return;
-  const open = bar.classList.toggle('qa-open');
-  arrow.textContent = open ? '▴' : '▾';
-}
 
 function renderQuickBar() {
   const bar = document.getElementById('quick-bar');
@@ -1476,17 +1491,26 @@ function renderQuickBar() {
     if (os === 'windows' || os === 'win') return d.platform === 'win';
     return true; // os 未知：全显示
   });
-  // 按分组排列(系统诊断/硬件诊断/外设网络/实用工具),组间留白
+  // 按组分渲染（2026-08-29 UI 调整）
   const groups = {};
   items.forEach(d => { (groups[d.group || '其他'] = groups[d.group || '其他'] || []).push(d); });
-  let html = '';
-  for (const g of Object.keys(groups)) {
-    html += '<div class="qa-group">' + groups[g].map(d =>
-      `<button class="qa-btn" onclick="quickDiagnose('${d.key}')" title="点击自动发送诊断指令：${d.title}">${d.icon} ${d.title}</button>`
-    ).join('') + '</div>';
-  }
-  bar.innerHTML = html;
+  bar.innerHTML = Object.keys(groups).map(g =>
+    '<div class="qa-group-label">' + g + '</div><div class="qa-group">' +
+    groups[g].map(d =>
+      `<button class="qa-btn" onclick="quickDiagnose('${d.key}')" title="${d.desc || ('点击自动发送诊断指令：' + d.title)}">${d.icon} ${d.title}</button>`
+    ).join('') + '</div>'
+  ).join('');
+  bar.style.display = 'flex';
   quickBarShown = true;
+}
+
+// 快捷诊断折叠开关（默认收起——点击展开）
+function toggleQuickBar() {
+  const bar = document.getElementById('quick-bar');
+  if (!bar) return;
+  const open = bar.classList.toggle('qa-open');
+  const arrow = document.getElementById('qa-arrow');
+  if (arrow) arrow.textContent = open ? '▴' : '▾';
 }
 
 function quickDiagnose(key) {
@@ -1496,65 +1520,10 @@ function quickDiagnose(key) {
     alert('请先连接客户机（桥接器在线）后再使用快捷诊断');
     return;
   }
-  if (item.action === 'startup') { quickStartupScan(); return; }  // 开机自启动(server 直处理)
-  if (item.script) { runDriverFetch(); return; }  // 脚本模式(不经 AI 对话)
+  if (item.script) { runDriverFetch(); return; }   // 脚本模式：不经 AI
+  if (item.action === 'startup') { quickStartupScan(); return; }  // 自启动：server 直处理
   inputBox.value = item.prompt;
   sendMessage();
-}
-
-// 驱动获取(脚本模式):识别机器 → 后端脚本抓联想官网驱动 → 表格展示,不经 AI 对话
-async function runDriverFetch() {
-  if (!roomCode) { alert('缺少房间码'); return; }
-  const waitMsg = addSystemMsg('📥 正在识别机器并抓取联想官网驱动清单（首次约 1~3 分钟，之后走缓存秒开）…');
-  // 等待计时(每 15 秒更新,让用户知道还在抓取)
-  let waited = 0;
-  const timer = setInterval(function () {
-    waited += 15;
-    const el = document.getElementById('sysmsg-' + waitMsg);
-    if (el) el.textContent = '📥 仍在抓取联想官网驱动…已等待 ' + waited + ' 秒（官网抓取较慢，请耐心等待）';
-  }, 15000);
-  try {
-    const resp = await fetch('/api/tools/drivers/fetch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ room_code: roomCode }),
-    });
-    clearInterval(timer);
-    const doneEl = document.getElementById('sysmsg-' + waitMsg);
-    if (doneEl) doneEl.textContent = '✅ 驱动清单获取完成';
-    const data = await resp.json();
-    if (data.status === 'error' || data.error) {
-      addSystemMsg('❌ 驱动获取失败：' + (data.error || '未知错误') + (data.raw ? '<br><small>' + escapeHtml(String(data.raw).slice(0, 300)) + '</small>' : ''));
-      return;
-    }
-    const esc = escapeHtml;
-    let html = '<div class="drv-result" style="font-size:13px;">';
-    html += '<h4 style="margin:4px 0 6px;">📥 联想官网驱动清单' + (data.cached ? ' <small style="color:var(--success);">(缓存)</small>' : '') + '</h4>';
-    html += '<p style="font-size:12px;color:var(--text2);margin:0 0 8px;">机型：<b>' + esc(data.machine.model || data.machine.mt) + '</b> | SN：' + esc(data.machine.sn) + ' | 共 <b>' + data.count + '</b> 项' + (data.note ? '<br>📝 ' + esc(data.note) : '') + '</p>';
-    const groups = {};
-    (data.drivers || []).forEach(d => { (groups[d.category] = groups[d.category] || []).push(d); });
-    for (const cat of Object.keys(groups)) {
-      html += '<h5 style="margin:10px 0 4px;font-size:13px;">📂 ' + esc(cat) + '（' + groups[cat].length + '）</h5>';
-      html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
-      html += '<thead><tr><th style="text-align:left;padding:4px;border-bottom:1px solid var(--border);">驱动名称</th><th style="text-align:left;padding:4px;border-bottom:1px solid var(--border);">版本</th><th style="padding:4px;border-bottom:1px solid var(--border);">日期</th><th style="padding:4px;border-bottom:1px solid var(--border);">大小</th><th style="padding:4px;border-bottom:1px solid var(--border);">下载</th></tr></thead><tbody>';
-      groups[cat].forEach(d => {
-        html += '<tr>'
-          + '<td style="padding:4px;border-bottom:1px solid var(--border);">' + esc(d.name) + '</td>'
-          + '<td style="padding:4px;border-bottom:1px solid var(--border);">' + esc(d.version) + '</td>'
-          + '<td style="padding:4px;border-bottom:1px solid var(--border);">' + esc(d.date) + '</td>'
-          + '<td style="padding:4px;border-bottom:1px solid var(--border);">' + esc(d.size) + '</td>'
-          + '<td style="padding:4px;border-bottom:1px solid var(--border);"><a href="' + esc(d.url) + '" target="_blank" rel="noopener noreferrer" style="color:var(--info);">下载 →</a></td>'
-          + '</tr>';
-      });
-      html += '</tbody></table>';
-    }
-    html += '<p style="font-size:11px;color:var(--text2);margin-top:8px;">⚠️ 联想下载链接带时效 token，如失效请到官网按 SN 查询；需要更新判断可在对话中继续询问 AI。</p>';
-    html += '</div>';
-    addSystemMsgHtml(html);
-  } catch (e) {
-    clearInterval(timer);
-    addSystemMsg('❌ 驱动获取失败：' + e.message);
-  }
 }
 
 // 页面加载即渲染（os 未知时全显示；连接后 loadRoomConnect 按 os 收敛）
@@ -1586,23 +1555,14 @@ document.getElementById('reconnect-btn').addEventListener('click', () => {
 });
 
 // ============================================================
-// Export
-// ============================================================
-// 导出菜单:📄 导出 ▾ → 完整对话 / 诊断报告
+// Export（下拉：导出对话 / 生成报告——2026-08-29 UI 调整）
 function toggleExportMenu(e) {
-  if (e) e.stopPropagation();
+  e.stopPropagation();
   const menu = document.getElementById('export-menu');
-  if (!menu) return;
-  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  if (menu) menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
 }
-document.addEventListener('click', function () {
-  const menu = document.getElementById('export-menu');
-  if (menu) menu.style.display = 'none';
-});
-function doExportChat(e) {
-  if (e) e.stopPropagation();
-  const menu = document.getElementById('export-menu');
-  if (menu) menu.style.display = 'none';
+document.addEventListener('click', () => { const m = document.getElementById('export-menu'); if (m) m.style.display = 'none'; });
+function doExportChat(e) { if (e) e.stopPropagation();
   const lines = [];
   const now = new Date().toLocaleString(currentLang === 'en' ? 'en-US' : 'zh-CN');
   lines.push(t('export_title')); lines.push(t('export_time') + ': ' + now);
@@ -1614,9 +1574,9 @@ function doExportChat(e) {
     if (el.classList.contains('user')) { lines.push('[' + t('export_user') + '] ' + el.textContent.trim()); }
     else if (el.classList.contains('ai')) { lines.push('[' + t('export_ai') + ']'); lines.push(el.textContent.trim()); lines.push(''); }
     else if (el.classList.contains('tool')) {
-      const name = (el.querySelector('.name') || {}).textContent || '';
-      const status = (el.querySelector('.tool-status') || {}).textContent || '';
-      const body = (el.querySelector('pre') || {}).textContent || '';
+      const name = el.querySelector('.name')?.textContent || '';
+      const status = el.querySelector('.tool-status')?.textContent || '';
+      const body = el.querySelector('pre')?.textContent || '';
       lines.push('--- ' + t('export_tool') + ': ' + name + ' (' + status + ') ---');
       lines.push(body.trim()); lines.push('---'); lines.push('');
     } else if (el.classList.contains('error')) { lines.push('[' + t('export_error') + '] ' + el.textContent.trim()); }
@@ -1628,13 +1588,7 @@ function doExportChat(e) {
   const a = document.createElement('a');
   a.href = url; a.download = 'diagnostic_report_' + roomCode + '_' + new Date().toISOString().slice(0,10) + '.txt';
   a.click(); URL.revokeObjectURL(url);
-}
-function doExportReport(e) {
-  if (e) e.stopPropagation();
-  const menu = document.getElementById('export-menu');
-  if (menu) menu.style.display = 'none';
-  downloadReport();
-}
+});
 
 // ============================================================
 // Init

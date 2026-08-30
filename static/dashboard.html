@@ -61,6 +61,13 @@
   }
   /* 游客模式首帧置灰（无闪烁）：非 IDG 导航全部禁用 */
   html.guest-mode .nav-item:not(#nav-idg) { opacity: .4; cursor: not-allowed; pointer-events: none; }
+  /* 游客模式:非 IDG 页面内容全部隐藏(首页/工单/工具等一概不显示) */
+  html.guest-mode .page:not(#page-idg) { display: none !important; }
+  /* 游客模式:导航高亮首帧同步——首页不高亮、IDG 高亮(避免 DOMContentLoaded 后高亮跳动) */
+  html.guest-mode #nav-home { background: transparent; color: var(--text2); border-left-color: transparent; font-weight: normal; }
+  html.guest-mode #nav-idg { background: var(--surface2); color: var(--info); border-left-color: var(--info); font-weight: 600; }
+  /* 游客模式:「连接客户机」field 专属,首帧即隐藏(否则 body 顶部 script 拿不到 DOM,选项闪现后消失) */
+  html.guest-mode #nav-field-guide { display: none !important; }
   .nav-item {
     display: flex; align-items: center; gap: 10px; padding: 11px 12px; margin-bottom: 4px;
     font-size: 14px; color: var(--text2); border-radius: 8px; cursor: pointer; user-select: none;
@@ -81,8 +88,8 @@
   }
   .page { display: none; }
   .page.active { display: block; }
-  .page-title { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
-  .page-desc { font-size: 12px; color: var(--text2); margin-bottom: 20px; }
+  .page-title { font-size: 17px; font-weight: 600; margin-bottom: 4px; display: none !important; }
+  .page-desc { font-size: 12px; color: var(--text2); margin-bottom: 20px; display: none !important; }
 
   /* ===== 卡片/表单 ===== */
   .panel {
@@ -224,14 +231,20 @@
   .row-actions .btn-sm { padding: 3px 9px; font-size: 11px; }
 
   /* ===== 对话（iframe 嵌入） ===== */
-  #page-chat.active { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-  .chat-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-  .chat-head .page-title { margin-bottom: 0; }
+  /* 与 IDG 一致:负 margin 抵消 content padding,iframe 撑满内容区(消除"嵌入感/没撑满") */
+  #page-chat.active { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: -24px -28px; }
+  /* IDG 日志分析：与对话页一致的 flex 自适应布局，容器高度跟随内容区，避免滚动条/边框不齐 */
+  #page-idg.active { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: -24px -28px; }
+  /* 房间标签已按用户要求取消(不显示"房间: xxx") */
+  .chat-head { display: none !important; }
+  .chat-head.hidden { display: none; }
+  .chat-head .page-title { margin-bottom: 0; display: none !important; }
   .chat-head .room-tag {
     background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
     padding: 4px 14px; font-size: 12px; color: var(--text2);
   }
-  .chat-frame-wrap { flex: 1; min-height: 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+  /* 对话 iframe 容器:无边框无圆角(与 IDG 一致,消除边框"嵌入感") */
+  .chat-frame-wrap { flex: 1; min-height: 0; overflow: hidden; }
   #chat-frame { width: 100%; height: 100%; border: 0; background: var(--surface); display: block; }
   .chat-empty {
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -309,6 +322,9 @@
   .tool-card .msg-box { margin-bottom: 12px; }
   .badge-write { background: rgba(248,81,73,.12); color: var(--error); border: 1px solid rgba(248,81,73,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
   .badge-read { background: rgba(52,120,246,.12); color: var(--info); border: 1px solid rgba(52,120,246,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .badge { padding: 2px 10px; border-radius: 10px; font-size: 11px; background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
+  .badge-ok { background: rgba(34,197,94,.12); color: var(--success); border-color: rgba(34,197,94,.35); }
+  .badge-warn { background: rgba(255,165,0,.12); color: var(--warn); border-color: rgba(255,165,0,.4); }
   .oa3-result { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 10px; background: var(--surface); }
   .oa3-key-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .oa3-label { font-size: 13px; color: var(--text2); }
@@ -337,7 +353,6 @@
   .step-num { width: 26px; height: 26px; min-width: 26px; border-radius: 50%; background: var(--info); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
   .home-step b { font-size: 13px; }
   .step-desc { font-size: 12px; color: var(--text2); margin-top: 4px; line-height: 1.5; }
-  .home-steps { display: flex; flex-direction: column; gap: 12px; max-width: 640px; }
   .toast {
     position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 200;
     background: var(--surface2); color: var(--text); border: 1px solid var(--border);
@@ -350,10 +365,10 @@
 </head>
 <body>
 <script>
-  // 首帧同步：游客模式置灰（防闪烁）——仅信 URL 参数（防 localStorage 残留误置灰——Bug 7）
+  // 首帧同步：游客模式置灰（防闪烁——仅 URL 明确 ?role=guest 时置灰；localStorage 残留交给 loadMe 校准，避免工程师误置灰）
   (function () {
-    var r = new URLSearchParams(location.search).get('role');
-    if (r === 'guest') document.documentElement.classList.add('guest-mode');
+    var u = new URLSearchParams(location.search).get('role');
+    if (u === 'guest') document.documentElement.classList.add('guest-mode');
   })();
 </script>
 <script>
@@ -449,13 +464,18 @@
       });
       // 角色同步裁剪（防"普通界面闪现"）：登录跳转带 ?role=，同步立即应用
       (function () {
-        var r = new URLSearchParams(location.search).get('role');
+        var urlRole = new URLSearchParams(location.search).get('role');
+        var r = urlRole;
         if (!r) r = localStorage.getItem('cab_role');
         if (!r) return;
         localStorage.setItem('cab_role', r);
-        // 游客（guest）：仅 IDG 可用——其余 CSS 置灰（html.guest-mode——首帧无闪烁）
+        // 游客（guest）：仅 URL 明确 ?role=guest 时首帧置灰；localStorage 残留交给 loadMe 校准（防工程师误置灰）
         if (r === 'guest') {
-          document.documentElement.classList.add('guest-mode');
+          if (urlRole === 'guest') document.documentElement.classList.add('guest-mode');
+          // 游客自动进入 IDG 日志分析（默认页是首页，但 guest-mode 下被隐藏 → 空白）
+          document.addEventListener('DOMContentLoaded', function () {
+            switchTab('idg');
+          });
           return;
         }
         if (r !== 'field') return;
@@ -525,8 +545,7 @@
 
       <!-- 对话（iframe 嵌入聊天页） -->
       <section class="page" id="page-chat">
-        <div class="chat-head">
-          <div class="page-title"><span data-i18n="nav_chat">对话</span></div>
+        <div class="chat-head hidden" id="chat-head">
           <span class="room-tag" id="chat-room-tag"></span>
         </div>
         <div class="chat-frame-wrap" id="chat-frame-wrap" style="display:none;">
@@ -713,19 +732,9 @@
       <section class="page" id="page-idg">
         <div class="page-title">📊 IDG 日志分析</div>
         <div class="page-desc">日志诊断分析平台——上传 Windows / Linux / BMC 日志包，自动识别并结构化分析（蓝屏 Dump / SIO / 系统事件 / AI 辅助诊断）</div>
-        <div style="margin-top:14px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--surface);height:calc(100vh - 210px);min-height:520px;">
-          <iframe src="/log-analyzer/" style="width:100%;height:100%;border:none;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
+        <div style="flex:1;min-height:0;overflow:hidden;">
+          <iframe src="/log-analyzer/" style="width:100%;height:100%;border:none;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"></iframe>
         </div>
-      </section>
-
-      <section class="page" id="page-ai">
-        <div class="page-title">🤖 AI 模型配置</div>
-        <div class="page-desc" data-i18n="ai_desc">多套 AI 供应商配置管理——切换生效自动写 IDG 配置并重启（原主通道自动降为备用）</div>
-        <div style="margin-bottom:14px;"><button class="btn" onclick="openAiForm()">➕ 新增模型配置</button></div>
-        <table class="tbl" style="width:100%;border-collapse:collapse;">
-          <thead><tr><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">名称</th><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">调用链接</th><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">模型</th><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">API Key</th><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">状态</th><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">操作</th></tr></thead>
-          <tbody id="ai-providers-body"><tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text2);">加载中...</td></tr></tbody>
-        </table>
       </section>
 
       <section class="page" id="page-tools-win">
@@ -1209,6 +1218,33 @@
         </div>
       </section><!-- FIELD_HIDE_END -->
 
+      <!-- 🤖 AI 模型配置(admin) -->
+      <section class="page" id="page-ai">
+        <div class="page-title">🤖 AI 模型配置</div>
+        <div class="page-desc">管理 IDG AI 分析/深度分析的模型 API——多套配置可保存、测试、一键切换生效</div>
+        <div class="toolbar">
+          <button class="btn-main" onclick="aiOpenForm()">➕ 新增配置</button>
+          <span class="count" id="ai-count"></span>
+        </div>
+        <div class="panel" id="ai-form-panel" style="display:none;margin-bottom:16px;">
+          <div style="font-weight:600;margin-bottom:14px;" id="ai-form-title">新增模型配置</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="field"><label>模型提供者(名称)*</label><input id="ai-name" placeholder="如:New-API 中转站 / 商汤 SenseNova"></div>
+            <div class="field"><label>模型调用链接(Base URL)*</label><input id="ai-base-url" placeholder="https://xxx/v1"></div>
+            <div class="field"><label>模型 API Key*</label><input id="ai-key" type="password" placeholder="sk-..."></div>
+            <div class="field"><label>模型识别名(Model)*</label><input id="ai-model" placeholder="deepseek-v4-flash"></div>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button class="btn-main" onclick="aiSave()">保存</button>
+            <button class="btn-ghost" onclick="aiCancelForm()">取消</button>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>提供者</th><th>调用链接</th><th>模型</th><th>API Key</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody id="ai-tbody"><tr><td colspan="6" class="empty">加载中...</td></tr></tbody>
+        </table>
+      </section>
+
     </main>
   </div>
 </div>
@@ -1494,101 +1530,6 @@ let currentRole = 'engineer';
 // ===== Tab 切换 =====
 let currentChatRoom = null;
 
-// ═══════════════ AI 模型配置（① 管理员可视化）═══════════════
-async function loadAiProviders() {
-  const body = document.getElementById('ai-providers-body');
-  if (!body) return;
-  try {
-    const r = await fetch('/api/admin/ai/providers');
-    if (r.status === 403) { body.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;">需要管理员权限</td></tr>'; return; }
-    const d = await r.json();
-    const active = d.active || '';
-    const list = d.providers || [];
-    if (!list.length) { body.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text2);">暂无配置——点击「➕ 新增模型配置」</td></tr>'; return; }
-    body.innerHTML = list.map(p => {
-      const st = p.id === active ? '<span style="color:#3fb950;">● 生效中</span>' : '<span style="color:var(--text2);">○ 未启用</span>';
-      return '<tr><td style="padding:8px;border-bottom:1px solid var(--border);">' + esc(p.name)
-        + '</td><td style="padding:8px;border-bottom:1px solid var(--border);font-size:12px;">' + esc(p.base_url)
-        + '</td><td style="padding:8px;border-bottom:1px solid var(--border);">' + esc(p.model)
-        + '</td><td style="padding:8px;border-bottom:1px solid var(--border);font-family:monospace;">' + esc(p.api_key)
-        + '</td><td style="padding:8px;border-bottom:1px solid var(--border);">' + st
-        + '</td><td style="padding:8px;border-bottom:1px solid var(--border);">'
-        + (p.id !== active ? '<button class="qa-btn" onclick="aiActivate(\'' + p.id + '\')">切换生效</button> ' : '')
-        + '<button class="qa-btn" onclick="aiTest(\'' + p.id + '\')">测试</button> '
-        + '<button class="qa-btn" onclick="aiEdit(\'' + p.id + '\')">编辑</button> '
-        + (p.id !== active ? '<button class="qa-btn" onclick="aiDelete(\'' + p.id + '\')">删除</button>' : '')
-        + '</td></tr>';
-    }).join('');
-  } catch (e) { body.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;color:#f85149;">加载失败: ' + esc(e.message) + '</td></tr>'; }
-}
-
-let aiEditingId = null;
-function openAiForm(p) {
-  aiEditingId = p ? p.id : null;
-  const name = p ? p.name : '';
-  const url = p ? p.base_url : '';
-  const model = p ? p.model : '';
-  const key = p ? '' : '';  // 编辑时 key 留空 = 保持不变
-  const html = '<div style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99;display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this)this.remove()">'
-    + '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:22px;width:440px;">'
-    + '<h3 style="margin:0 0 16px;">' + (aiEditingId ? '编辑模型配置' : '新增模型配置') + '</h3>'
-    + '<div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--text2);">名称</label><input id="ai-f-name" style="width:100%;padding:9px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:#fff;" value="' + esc(name) + '"></div>'
-    + '<div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--text2);">调用链接（Base URL，含 /v1）</label><input id="ai-f-url" style="width:100%;padding:9px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:#fff;" value="' + esc(url) + '"></div>'
-    + '<div style="margin-bottom:10px;"><label style="font-size:13px;color:var(--text2);">模型名</label><input id="ai-f-model" style="width:100%;padding:9px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:#fff;" value="' + esc(model) + '"></div>'
-    + '<div style="margin-bottom:16px;"><label style="font-size:13px;color:var(--text2);">API Key' + (aiEditingId ? '（留空 = 保持不变）' : '') + '</label><input id="ai-f-key" type="password" style="width:100%;padding:9px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:#fff;" value="' + esc(key) + '"></div>'
-    + '<div style="display:flex;gap:10px;justify-content:flex-end;"><button class="qa-btn" onclick="this.closest(\'div\').remove()">取消</button>'
-    + '<button class="qa-btn" style="background:var(--accent);color:#fff;border:none;font-weight:600;" onclick="aiSave()">保存</button></div>'
-    + '</div></div>';
-  document.body.insertAdjacentHTML('beforeend', html);
-}
-function aiEdit(id) {
-  fetch('/api/admin/ai/providers').then(r => r.json()).then(d => {
-    const p = (d.providers || []).find(x => x.id === id);
-    if (p) openAiForm(p);
-  });
-}
-async function aiSave() {
-  const name = document.getElementById('ai-f-name').value.trim();
-  const url = document.getElementById('ai-f-url').value.trim();
-  const model = document.getElementById('ai-f-model').value.trim();
-  const key = document.getElementById('ai-f-key').value.trim();
-  if (!name || !url || !model) { alert('名称/调用链接/模型 必填'); return; }
-  const body = { name: name, base_url: url, model: model };
-  if (key) body.api_key = key;
-  const r = await fetch(aiEditingId ? '/api/admin/ai/providers/' + aiEditingId : '/api/admin/ai/providers', {
-    method: aiEditingId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-  });
-  const d = await r.json();
-  if (!r.ok) { alert(d.error || '保存失败'); return; }
-  const overlay = document.querySelector('div[style*="position:fixed"]'); if (overlay) overlay.remove();
-  loadAiProviders();
-}
-async function aiActivate(id) {
-  if (!confirm('切换生效将写 IDG 配置并重启（原主通道自动降为备用）——确定？')) return;
-  const r = await fetch('/api/admin/ai/providers/' + id + '/activate', { method: 'POST' });
-  const d = await r.json();
-  alert(d.ok ? '切换成功 ' + (d.hint || '') : (d.error || '切换失败'));
-  loadAiProviders();
-}
-async function aiTest(id) {
-  const r = await fetch('/api/admin/ai/providers/' + id + '/test', { method: 'POST' });
-  const d = await r.json();
-  alert(d.ok ? '✅ 连通正常：' + (d.reply || '') : '❌ ' + (d.error || '测试失败'));
-}
-async function aiDelete(id) {
-  if (!confirm('确定删除该配置？')) return;
-  const r = await fetch('/api/admin/ai/providers/' + id, { method: 'DELETE' });
-  const d = await r.json();
-  if (!r.ok) { alert(d.error || '删除失败'); return; }
-  loadAiProviders();
-}
-// switchTab('ai') 时加载
-const _origSwitchTab = window.switchTab;
-window.switchTab = function (tab) {
-  if (typeof _origSwitchTab === 'function') _origSwitchTab(tab);
-  if (tab === 'ai') loadAiProviders();
-};
-
 function switchTab(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -1621,6 +1562,7 @@ function openChat(room) {
   document.getElementById('chat-frame-wrap').style.display = 'block';
   document.getElementById('chat-empty').style.display = 'none';
   document.getElementById('chat-room-tag').textContent = t('room_prefix') + room;
+  document.getElementById('chat-head').classList.remove('hidden');
   document.getElementById('chat-frame').src = '/chat?room=' + room + '&connect=1';
   switchTab('chat');
 }
@@ -1783,6 +1725,7 @@ async function loadMe() {
     document.getElementById('user-name').textContent = t('user_prefix') + data.username + roleTag;
     if (data.role === 'admin') {
       document.querySelectorAll('.admin-only').forEach(el => el.classList.add('show'));
+      aiLoad();
     } else if (data.role === 'field') {
       // 上门工程师极简界面：只保留 创建/加入 + 工具（隐藏对话/工单/密码/反馈/首页）
       ['nav-chat', 'nav-workorders', 'nav-password', 'nav-feedback', 'nav-home'].forEach(id => {
@@ -1801,8 +1744,96 @@ async function loadMe() {
 }
 
 function doLogout() {
-  localStorage.removeItem('cab_role');  // 清除角色标记（防残留误置灰——Bug 7）
+  localStorage.removeItem('cab_role');   // 清除角色标记,防止游客残留误置灰
   fetch('/api/auth/logout', { method: 'POST' }).finally(() => { location.href = '/login'; });
+}
+
+// ===== AI 模型配置(admin) =====
+let aiEditingId = null;
+function aiLoad() {
+  fetch('/api/admin/ai/providers').then(r => r.json()).then(d => {
+    const tbody = document.getElementById('ai-tbody');
+    document.getElementById('ai-count').textContent = '共 ' + (d.providers ? d.providers.length : 0) + ' 套';
+    if (!d.providers || d.providers.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无配置,点击「➕ 新增配置」添加</td></tr>';
+      return;
+    }
+    let html = '';
+    d.providers.forEach(p => {
+      const isActive = p.id === d.active;
+      const isBackup = !isActive && d.providers.length > 1;
+      const badge = isActive ? '<span class="badge badge-ok">● 生效中</span>'
+        : (isBackup ? '<span class="badge badge-warn">◐ 备用</span>' : '<span class="badge">○ 未启用</span>');
+      html += `<tr>
+        <td style="font-weight:600;">${p.name || p.id}</td>
+        <td style="color:var(--text2);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${p.base_url}">${p.base_url}</td>
+        <td style="color:var(--info);">${p.model}</td>
+        <td style="color:var(--text2);font-family:monospace;font-size:12px;">${p.api_key_masked || '-'}</td>
+        <td>${badge}</td>
+        <td style="white-space:nowrap;">
+          ${isActive ? '' : `<button class="btn-main" onclick="aiActivate('${p.id}','${p.name || ''}')" style="padding:4px 12px;font-size:12px;margin-right:6px;">切换生效</button>`}
+          <button class="btn-ghost" onclick="aiTest('${p.id}')" style="padding:4px 10px;font-size:12px;margin-right:4px;">测试</button>
+          <button class="btn-ghost" onclick="aiEdit('${p.id}')" style="padding:4px 10px;font-size:12px;margin-right:4px;">编辑</button>
+          <button class="btn-ghost" onclick="aiDelete('${p.id}','${p.name || ''}')" style="padding:4px 10px;font-size:12px;color:var(--error);border-color:var(--error);">删除</button>
+        </td></tr>`;
+    });
+    tbody.innerHTML = html;
+  }).catch(e => { document.getElementById('ai-tbody').innerHTML = '<tr><td colspan="6" class="empty">加载失败:' + e + '</td></tr>'; });
+}
+function aiOpenForm() {
+  aiEditingId = null;
+  document.getElementById('ai-form-title').textContent = '新增模型配置';
+  ['ai-name', 'ai-base-url', 'ai-key', 'ai-model'].forEach(i => document.getElementById(i).value = '');
+  document.getElementById('ai-form-panel').style.display = 'block';
+}
+function aiEdit(id) {
+  fetch('/api/admin/ai/providers').then(r => r.json()).then(d => {
+    const p = d.providers.find(x => x.id === id);
+    if (!p) return;
+    aiEditingId = id;
+    document.getElementById('ai-form-title').textContent = '编辑配置:' + (p.name || id);
+    document.getElementById('ai-name').value = p.name || '';
+    document.getElementById('ai-base-url').value = p.base_url || '';
+    document.getElementById('ai-key').value = '';
+    document.getElementById('ai-key').placeholder = '留空保持不变(当前:' + (p.api_key_masked || '') + ')';
+    document.getElementById('ai-model').value = p.model || '';
+    document.getElementById('ai-form-panel').style.display = 'block';
+  });
+}
+function aiCancelForm() { document.getElementById('ai-form-panel').style.display = 'none'; }
+function aiSave() {
+  const name = document.getElementById('ai-name').value.trim();
+  const base_url = document.getElementById('ai-base-url').value.trim();
+  const api_key = document.getElementById('ai-key').value.trim();
+  const model = document.getElementById('ai-model').value.trim();
+  if (!name || !base_url || !api_key || !model) { alert('模型提供者/调用链接/API/模型名 均必填'); return; }
+  const body = { name, base_url, api_key, model };
+  const url = aiEditingId ? '/api/admin/ai/providers/' + aiEditingId : '/api/admin/ai/providers';
+  const method = aiEditingId ? 'PUT' : 'POST';
+  fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(r => r.json()).then(d => {
+      if (d.ok) { aiCancelForm(); aiLoad(); alert('保存成功'); }
+      else alert(d.error || '保存失败');
+    }).catch(e => alert('保存失败:' + e));
+}
+function aiDelete(id, name) {
+  if (!confirm('确定删除配置「' + name + '」?')) return;
+  fetch('/api/admin/ai/providers/' + id, { method: 'DELETE' }).then(r => r.json()).then(d => {
+    if (d.ok) { aiLoad(); alert('已删除'); }
+    else alert(d.error || '删除失败');
+  });
+}
+function aiTest(id) {
+  fetch('/api/admin/ai/providers/' + id + '/test', { method: 'POST' }).then(r => r.json()).then(d => {
+    alert((d.ok ? '✅ ' : '❌ ') + (d.detail || ''));
+  }).catch(e => alert('测试请求失败:' + e));
+}
+function aiActivate(id, name) {
+  if (!confirm('确认切换到配置「' + name + '」?\n切换将写入 .env 并重启 IDG 分析服务(约 3 秒),期间 IDG 短暂不可用。')) return;
+  fetch('/api/admin/ai/providers/' + id + '/activate', { method: 'POST' }).then(r => r.json()).then(d => {
+    if (d.ok) { aiLoad(); alert('已切换生效:' + name + '\nAI 分析将使用新配置'); }
+    else alert(d.error || '切换失败');
+  }).catch(e => alert('切换失败:' + e));
 }
 
 // ===== 创建房间 =====
