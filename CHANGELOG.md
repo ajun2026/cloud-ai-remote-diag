@@ -1,3 +1,39 @@
+## v0.14.0 — 2026-09-11（工具采集日志一键上传 IDG）
+
+### 新功能：工具采集日志 → 一键上传 IDG 日志分析
+
+**背景**：Windows「ThinkStation 日志采集」与 Linux「打包系统日志」原先只能打包到客户机本地（数据不上云），
+工程师需手动取文件再上传 IDG。本版打通全自动上传链路。
+
+**工具卡两个选项**（每张卡）：
+- `📦 打包到本地`（原有行为不变）
+- `📤 打包并上传到 IDG`（新）——打包 → 自动上传 → IDG 分析 → 结果卡返回「在右侧打开 IDG 分析」链接
+  （dashboard 内嵌 iframe 打开指定 job，不跳独立页）
+
+**机器信息纯自动**：创建房间时 SN 必填（服务端强校验，实测 145 房间 0 空）——上传自动携带 room.sn，无需手动填写。
+
+### 技术实现（全链路）
+
+- **Go bridge**（`bridge/upload.go` 新增）：收到 file_upload_request → 读客户机文件 → **io.Pipe 流式 multipart HTTP 直传**（几百 MB 一次传——实测 74MB 仅 2.7 秒）；`ws.go` 增加分发分支
+- **服务器**（`server.py`）：`POST /api/bridge/upload`（multipart 流式收文件 → room token 校验 → 转 IDG → 返回 job）；`POST /api/tools/upload`（前端触发链路，等待 bridge 结果）
+- **前端**（`static/dashboard.html`）：两个工具卡加「📤 打包并上传到 IDG」按钮 + 上传状态 + `openIdgJob` 内嵌打开
+- **ps1 命令版**（`static/bridge.ps1.tmpl`）：同步支持（curl.exe HTTP 直传 + 协议转换 wss→https）
+- **bridge 二进制**：Go 交叉编译重打包（win64 + linux amd64/arm64/loong64）
+
+### 关键修复
+
+- **reaper 误踢 bridge**：命令执行/上传中豁免（ps1 keepalive 是 piggy-back 型——长任务期间无消息不是半死，20 分钟内不踢）+ 收到任何 bridge 消息刷新心跳
+- **tools_tslog 返回优化**：服务端裁剪 output 尾部 3KB + 提取 `pkg_path` 字段（原 8MB 整传前端 → 前端挂起卡死）
+- **前端长操作交互**：动态等待反馈（每 15s 更新"已等待 X 分 X 秒"）+ 适度超时兜底（原长时间无感知干等被批评）
+- **结果链接内嵌**：`openIdgJob`（切 IDG 页签 + iframe 加载指定 job）——不再跳独立分析页
+- **上传接口健壮性**：补 import uuid/File/UploadFile + 主 venv 装 python-multipart；`/api/bridge/upload` 不要求 room 在线（token 有效即可）+ fid 双保险（直接完成前端等待，防 bridge 断线丢结果）
+- **前端结果卡**：每次点击清旧结果（防"失败提示 + 旧成功结果"并存混淆）
+
+### 说明
+
+- 数据边界：点「上传」= 工程师明确授权上传（IDG 日志分析场景）——与"诊断数据不上云"原则不冲突
+- 兼容：Go bridge（主力）+ ps1 命令版 + 旧 Python v1 版（均支持上传）
+
 ## v0.13.19 — 2026-08-30（意外重启选项卡 + 对话页布局优化 + 缓存修复）
 
 ### 新功能

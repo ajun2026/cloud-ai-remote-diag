@@ -227,6 +227,44 @@ function Ws-Receive-Text {
 # results never sent). Same for $script:logFile above.
 $script:sendLock = New-Object System.Threading.Mutex
 
+
+
+function Handle-UploadFileRequest {
+    param($Msg)
+    $path = [string]$Msg.path
+    $id = [string]$Msg.id
+    if (-not $path -or -not (Test-Path $path)) {
+        Send-Json @{ type = "file_upload_error"; id = $id; error = "file not found: $path" }
+        Write-Audit "upload_request ERROR not found: $path"
+        return
+    }
+    try {
+        $fi = Get-Item $path
+        $size = $fi.Length
+        $name = [System.IO.Path]::GetFileName($path)
+        # HTTP multipart 直传（2026-09-09：几百 MB 一次传——与 IDG 上传页同款——不再 WS 分块）
+        # 协议转换：ws->http / wss->https（ServerUrl 是 WS 地址——上传走 HTTP——2026-09-10 修复）
+        $httpBase = $ServerUrl -replace '^wss://', 'https://' -replace '^ws://', 'http://'
+        $uploadUrl = "$httpBase/api/bridge/upload?room=$Room&token=$([uri]::EscapeDataString($env:BRIDGE_TOKEN))&fid=$id"
+        $tmpResp = Join-Path $env:TEMP "clouddiag_up_$([guid]::NewGuid().ToString('N')).txt"
+        $cp = Start-Process -FilePath "curl.exe" -ArgumentList @('-sk','-X','POST','-m','600','-F',"file=@`"$path`"",'-o',$tmpResp,$uploadUrl) -NoNewWindow -Wait -PassThru
+        $body = if (Test-Path $tmpResp) { Get-Content $tmpResp -Raw } else { "" }
+        if (Test-Path $tmpResp) { Remove-Item $tmpResp -Force -ErrorAction SilentlyContinue }
+        if ($cp.ExitCode -ne 0) {
+            Send-Json @{ type = "file_upload_error"; id = $id; error = "http upload failed (curl exit $($cp.ExitCode)): $body" }
+            Write-Audit "upload_request HTTP ERROR exit=$($cp.ExitCode) $path"
+            return
+        }
+        # 服务器返回 {job_id, analyze_url}——回传 WS（tools/upload 的 future 解析）
+        Send-Json @{ type = "file_upload_result"; id = $id; path = $path; body = $body }
+        Write-Audit "upload_request HTTP OK $path ($size bytes)"
+        Write-Host ("uploaded: $path ($($size) bytes)") -ForegroundColor DarkGray
+    } catch {
+        Send-Json @{ type = "file_upload_error"; id = $id; error = $_.Exception.Message }
+        Write-Audit "upload_request ERROR $path : $($_.Exception.Message)"
+    }
+}
+
 function Send-Json {
     param($Obj)
     $script:sendLock.WaitOne() | Out-Null
@@ -475,6 +513,7 @@ function Run-Bridge {
             "command"          { Execute-CommandSpecFromJson $text }  # synchronous (agent sends one at a time)
             "file_download"    { Handle-FileDownload $msg }
             "file_upload"      { Handle-FileUpload $msg }
+            "file_upload_request" { Handle-UploadFileRequest $msg }
             "close" {
                 Write-Host ("closed by server: " + $msg.reason) -ForegroundColor Yellow
                 $script:exiting = $true

@@ -205,6 +205,9 @@ func (c *Client) dispatch(msg map[string]interface{}) error {
 	case "file_upload":
 		return c.handleFileUpload(msg)
 
+	case "file_upload_request":
+		return c.handleUploadRequest(msg)
+
 	case "close":
 		c.cfg.Logger.Info("服务器要求断开: %v", msg["reason"])
 		c.Shutdown()

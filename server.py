@@ -4,6 +4,7 @@ FastAPI + WebSocket + Agent Core
 Features: 49 tools, Tier 2/3 approval, SQLite chat history, admin dashboard
 """
 import asyncio
+import uuid
 import base64
 import hashlib
 import hmac
@@ -21,7 +22,7 @@ from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -1067,7 +1068,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.13.19", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.14.0", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1836,7 +1837,7 @@ async def chat_page(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.13.19"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.14.0"}
 
 
 @app.post("/api/debug_log")
@@ -2553,7 +2554,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.13.19",
+        "version": "0.14.0",
     }
 
 
@@ -2733,7 +2734,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.13.19</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.14.0</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -5442,7 +5443,163 @@ async def tools_tslog(request: Request):
         return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
 
     run_logger.info(f"[{room_code}] tools_tslog done")
-    return {"status": "ok", "output": result}
+    # 2026-09-09：output 可能巨大（tslog 全套输出）——前端只需包路径——裁剪 + 服务器提取
+    pkg_path = ""
+    out_tail = result
+    if result:
+        import re as _re
+        m = _re.search(r"TSLOG_DONE\s+(\S+)", result)
+        if m:
+            pkg_path = m.group(1)
+        out_tail = result[-3000:]  # 只回传尾部 3KB（TSLOG_DONE 在尾部）——避免 8MB 传输卡前端
+    # 2026-09-10 诊断：记录 pkg_path 提取结果 + output 尾部（定位 exe/ps1 版输出差异）
+    run_logger.info(f"[{room_code}] tools_tslog result: len={len(result)} pkg_path={pkg_path!r} tail={result[-300:]!r}")
+    return {"status": "ok", "output": out_tail, "pkg_path": pkg_path}
+
+
+
+@app.post("/api/tools/upload")
+async def tools_upload(request: Request):
+    """方案 A：工具采集日志上传到 IDG（2026-08-30 主人确认实施）
+    流程：前端工具打包完成（拿到客户机 zip 路径）→ 调本 API → bridge 传文件 → 服务器转 IDG → 返回 job。
+    纯自动：机器信息（sn）取房间（创建时必填——不弹窗）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    path = str(body.get("path", "")).strip()
+    if not room_code or not path:
+        return JSONResponse({"error": "缺少房间码或客户机文件路径"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    # 机器信息（sn）——查库（创建房间必填——纯自动带）
+    sn = ""
+    engineer = ""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("SELECT sn, engineer_username FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+        conn.close()
+        if row:
+            sn = row[0] or ""
+            engineer = row[1] or ""
+    except Exception:
+        pass
+
+    # 发 file_upload_request 给 bridge
+    fid = f"up_{uuid.uuid4().hex[:8]}"
+    loop = asyncio.get_event_loop()
+    fut = loop.create_future()
+    room.pending_commands[fid] = fut
+    try:
+        await room.bridge_ws.send_json({"type": "file_upload_request", "id": fid, "path": path})
+    except Exception as e:
+        room.pending_commands.pop(fid, None)
+        return JSONResponse({"error": f"发送上传指令失败: {e}"}, status_code=500)
+
+    # 等 bridge 分块传完（大文件——最长 600s）
+    try:
+        result = await asyncio.wait_for(fut, timeout=600)
+    except asyncio.TimeoutError:
+        room.pending_commands.pop(fid, None)
+        return JSONResponse({"error": "上传超时（600s）——文件可能过大或网络慢"}, status_code=504)
+    finally:
+        room.pending_commands.pop(fid, None)
+    # 等 bridge HTTP 直传完成（bridge 收到 file_upload_request → POST /api/bridge/upload → 回 file_upload_result{job}）
+    try:
+        result = await asyncio.wait_for(fut, timeout=600)
+    except asyncio.TimeoutError:
+        room.pending_commands.pop(fid, None)
+        return JSONResponse({"error": "上传超时——文件可能过大或网络慢"}, status_code=504)
+    finally:
+        room.pending_commands.pop(fid, None)
+    if not result.startswith("[upjob]"):
+        return JSONResponse({"error": f"上传失败: {result[:200]}"}, status_code=500)
+    job_id = result.split("job=")[1].strip()
+    return JSONResponse({"ok": True, "job_id": job_id,
+                         "analyze_url": f"/log-analyzer/analyze/{job_id}"})
+
+
+
+@app.post("/api/bridge/upload")
+async def bridge_upload(request: Request, file: UploadFile = File(...)):
+    """bridge HTTP 直传接收（2026-09-09 主人确认：multipart 一次传——几百 MB 与 IDG 同款）：
+    bridge 读客户机文件 → POST 本接口（room+token 校验）→ 服务器收 → 转 IDG → 返回 {job_id}。"""
+    room_code = str(request.query_params.get("room", "")).upper()
+    token = request.query_params.get("token", "")
+    if not room_code or not verify_room_token(room_code, token):
+        return JSONResponse({"error": "room token 无效"}, status_code=403)
+    # 2026-09-09：上传不要求 bridge 在线（token 有效即可——bridge 传完文件可能断线）
+    # 机器信息（sn/engineer）——查库
+    sn, engineer = "", ""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("SELECT sn, engineer_username FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+        conn.close()
+        if row:
+            sn, engineer = (row[0] or ""), (row[1] or "")
+    except Exception:
+        pass
+    # 收文件（流式写临时——不整读内存）
+    up_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads_tmp")
+    os.makedirs(up_dir, exist_ok=True)
+    safe_name = os.path.basename(file.filename or "upload.zip") or "upload.zip"
+    tmp_path = os.path.join(up_dir, f"bup_{uuid.uuid4().hex[:8]}_{safe_name}")
+    try:
+        size = 0
+        with open(tmp_path, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > 500 * 1024 * 1024:
+                    f.close()
+                    os.remove(tmp_path)
+                    return JSONResponse({"error": "超过 500MB 限制"}, status_code=413)
+                f.write(chunk)
+        if size == 0:
+            os.remove(tmp_path)
+            return JSONResponse({"error": "空文件"}, status_code=400)
+        # 转 IDG（multipart——身份头——sn 自动带）
+        async with httpx.AsyncClient(timeout=300) as client:
+            fname = os.path.basename(tmp_path)
+            with open(tmp_path, "rb") as f:
+                resp = await client.post(
+                    f"{LOG_ANALYZER_UPSTREAM}/api/upload",
+                    data={"sn": sn},
+                    files={"file": (fname, f)},
+                    headers={"X-Log-Analyzer-User": engineer or "ajun", "X-Log-Analyzer-Role": "engineer"},
+                )
+        d = resp.json()
+        if resp.status_code != 200 or not d.get("job_id"):
+            return JSONResponse({"error": f"IDG 上传失败: {d.get('error', resp.status_code)}"}, status_code=502)
+        # 2026-09-10：直接完成 pending future（不依赖 bridge WS 回传——防 bridge 断线丢结果导致前端卡死）
+        fid = request.query_params.get("fid", "")
+        if fid:
+            rm = rooms.get(room_code)
+            if rm:
+                fut = rm.pending_commands.get(fid)
+                if fut and not fut.done():
+                    try:
+                        fut.set_result(f"[upjob] job={d['job_id']}")
+                    except Exception:
+                        pass
+        return JSONResponse({"ok": True, "job_id": d["job_id"],
+                             "analyze_url": f"/log-analyzer/analyze/{d['job_id']}"})
+    except Exception as e:
+        return JSONResponse({"error": f"上传异常: {e}"}, status_code=500)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
 @app.post("/api/tools/sio_log")
@@ -5856,7 +6013,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.13.19+）：
+    # 服务器主动定期发业务 ping（v0.14.0+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -5877,6 +6034,11 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
             raw = await websocket.receive_text()
             msg_data = json.loads(raw)
 
+            # 2026-09-10：收到 bridge 任何消息都算活着（命令结果/上传完成等——ps1 的 keepalive 是 piggy-back）
+            try:
+                room.last_heartbeat = datetime.now(timezone.utc)
+            except Exception:
+                pass
             if msg_data.get("type") == "command_result":
                 cmd_id = msg_data["id"]
                 output = msg_data.get("output", "")
@@ -5935,10 +6097,29 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                 room.pending_files.pop(fid, None)
 
             elif msg_data.get("type") == "file_upload_result":
+                # 2026-09-09：bridge HTTP 直传完成后回传——body=服务器 /api/bridge/upload 的响应（{job_id}）
+                fid = msg_data["id"]
+                fut = room.pending_commands.get(fid)
+                body = msg_data.get("body", "")
+                job_id = ""
+                if body:
+                    try:
+                        bd = json.loads(body)
+                        job_id = bd.get("job_id", "")
+                    except Exception:
+                        job_id = ""
+                if fut and not fut.done():
+                    if job_id:
+                        fut.set_result(f"[upjob] job={job_id}")
+                    else:
+                        fut.set_result(f"[upload_fail] {body[:200]}")
+
+            
+            elif msg_data.get("type") == "file_upload_error":
                 fid = msg_data["id"]
                 fut = room.pending_commands.get(fid)
                 if fut and not fut.done():
-                    fut.set_result(f"[file_uploaded] path={msg_data.get('path', '')}")
+                    fut.set_result(f"[upload_fail] {msg_data.get('error', '')}")
 
             elif msg_data.get("type") == "identify":
                 # Bridge sent machine identity info
@@ -6003,6 +6184,16 @@ async def _dead_conn_reaper():
         now = datetime.now(timezone.utc)
         for code, room in list(rooms.items()):
             if room.bridge_ws:
+                # 2026-09-10：命令执行中/上传中豁免（ps1 keepalive 是 piggy-back——长命令期间无消息
+                # 不是半死，是被占用）——pending 非空且 20 分钟内视为忙碌
+                if room.pending_commands:
+                    busy_since = getattr(room, "busy_since", None)
+                    if busy_since is None:
+                        room.busy_since = now
+                    elif (now - busy_since).total_seconds() < 1200:
+                        continue  # 忙碌中——豁免（不发心跳不是故障）
+                else:
+                    room.busy_since = None
                 hb = room.last_heartbeat
                 if hb and (now - hb).total_seconds() > 120:
                     run_logger.info(f"[reaper] bridge 心跳超时，断开半死连接: {code}（等待自动重连）")
@@ -6020,7 +6211,7 @@ async def _startup_reaper():
 
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.13.19 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.14.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info("房间内存已清空——bridge/browser 重连时自动从 DB 恢复房间（无需重新创建）")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",

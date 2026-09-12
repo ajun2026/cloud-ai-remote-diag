@@ -3,6 +3,7 @@
 运行在用户 Windows 电脑上，连接云端服务器，接收并执行诊断命令
 """
 import asyncio
+import base64
 import json
 import os
 import subprocess
@@ -254,6 +255,44 @@ async def connect_and_serve(server_url: str, room_code: str):
 
                 elif msg.get("type") == "status":
                     print(f"[服务器] {msg['content']}")
+
+                elif msg.get("type") == "ping":
+                    await ws.send(json.dumps({"type": "pong"}))
+
+                elif msg.get("type") == "file_upload_request":
+                    # 方案 A：客户机文件上传（工具采集日志传 IDG）——HTTP multipart 直传（2026-09-09 主人确认：几百 MB 一次传）
+                    fid = msg.get("id", "")
+                    path = msg.get("path", "")
+                    print(f"\n▶ [file_upload] {path}")
+                    if not path or not os.path.exists(path):
+                        await ws.send(json.dumps({"type": "file_upload_error", "id": fid, "error": f"file not found: {path}"}))
+                        continue
+                    try:
+                        import httpx as _httpx
+                        size = os.path.getsize(path)
+                        name = os.path.basename(path)
+                        # HTTP 地址从 server_url 推导（wss->https / ws->http）
+                        http_url = server_url.replace("wss://", "https://").replace("ws://", "http://").rstrip("/")
+                        tok = os.environ.get("BRIDGE_TOKEN", "")
+                        up_url = f"{http_url}/api/bridge/upload?room={room_code}&token={tok}"
+                        with open(path, "rb") as f:
+                            r = _httpx.post(up_url, files={"file": (name, f)}, timeout=600)
+                        d = r.json()
+                        if r.status_code == 200:
+                            # 服务器返回 {job_id, analyze_url}——回传 WS（tools/upload future 解析）
+                            await ws.send(json.dumps({"type": "file_upload_result", "id": fid,
+                                                      "path": path, "body": json.dumps(d)}))
+                            print(f"◀ [file_upload] HTTP OK {name} ({size} bytes) job={d.get('job_id')}")
+                        else:
+                            err = d.get("error", r.status_code)
+                            await ws.send(json.dumps({"type": "file_upload_error", "id": fid, "error": str(err)}))
+                            print(f"✗ [file_upload] HTTP {r.status_code}: {err}")
+                    except Exception as e:
+                        print(f"✗ [file_upload] 失败: {e}")
+                        try:
+                            await ws.send(json.dumps({"type": "file_upload_error", "id": fid, "error": str(e)}))
+                        except Exception:
+                            pass
 
                 elif msg.get("type") == "error":
                     print(f"[服务器错误] {msg['content']}")

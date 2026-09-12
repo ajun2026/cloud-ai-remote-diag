@@ -738,7 +738,7 @@
       <!-- Windows 工具（非 AI 工具集合） -->
       <section class="page" id="page-idg">
         <div style="flex:1;min-height:0;overflow:hidden;">
-          <iframe src="/log-analyzer/" style="width:100%;height:100%;border:none;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"></iframe>
+          <iframe id="idg-frame" src="/log-analyzer/" style="width:100%;height:100%;border:none;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"></iframe>
         </div>
       </section>
 
@@ -914,7 +914,8 @@
                 <select id="tslog-room" onchange="tslogClear()"></select>
               </div>
               <div class="tool-card-actions">
-                <button class="btn-main" id="tslog-btn" onclick="tslogFetch()">📦 开始采集（约 3-5 分钟）</button>
+                <button class="btn-main" id="tslog-btn" onclick="tslogFetch(false)">📦 打包到本地</button>
+                <button class="btn-main btn-green" id="tslog-upload-btn" onclick="tslogFetch(true)">📤 打包并上传到 IDG</button>
               </div>
               <div id="tslog-result" style="display:none;"></div>
             </div>
@@ -1161,7 +1162,8 @@
                 <select id="linux-logpack-room"></select>
               </div>
               <div class="tool-card-actions">
-                <button class="btn-main" id="linux-logpack-btn" data-i18n="btn_linux_logpack" onclick="linuxLogPack()">📦 打包日志到桌面</button>
+                <button class="btn-main" id="linux-logpack-btn" data-i18n="btn_linux_logpack" onclick="linuxLogPack(false)">📦 打包到本地</button>
+                <button class="btn-main btn-green" id="linux-logpack-upload-btn" onclick="linuxLogPack(true)">📤 打包并上传到 IDG</button>
               </div>
               <div id="linux-logpack-result" style="display:none;">
                 <div class="bios-info" id="linux-logpack-info"></div>
@@ -1562,6 +1564,13 @@ function switchTab(name) {
   }
 }
 
+// 方案 A：工具上传 IDG 后——dashboard 内嵌打开分析页（不跳独立页——2026-09-08 主人要求）
+function openIdgJob(jobId) {
+  switchTab('idg');
+  const f = document.getElementById('idg-frame');
+  if (f) f.src = '/log-analyzer/analyze/' + jobId + '?v=' + Date.now();
+}
+
 // 打开对话（iframe 加载 /chat?room=XXX，不跳页）
 function openChat(room) {
   currentChatRoom = room;
@@ -1739,6 +1748,7 @@ function fieldGuideBat() {
     .catch(function () {});
 })();
 
+// 主题切换（2026-08-30——全局：GitHub 暗黑 / 天蓝浅色——localStorage 记忆）
 async function loadMe() {
   try {
     const resp = await fetch('/api/auth/me');
@@ -2309,32 +2319,92 @@ function fillTslogRoom() {
 
 function tslogClear() { document.getElementById('tslog-result').style.display = 'none'; }
 
-async function tslogFetch() {
+async function tslogFetch(uploadToIdg) {
   const room = document.getElementById('tslog-room').value;
   const msg = document.getElementById('tslog-msg');
-  const btn = document.getElementById('tslog-btn');
+  const btn = uploadToIdg ? document.getElementById('tslog-upload-btn') : document.getElementById('tslog-btn');
+  const btn2 = uploadToIdg ? document.getElementById('tslog-btn') : document.getElementById('tslog-upload-btn');
   if (!room) { msg.textContent = '请选择在线房间'; msg.className = 'msg-box err'; return; }
-  msg.textContent = '采集进行中（约 3-5 分钟）——请耐心等待，完成后自动显示结果...';
+  msg.textContent = uploadToIdg ? '采集打包中（约 3-5 分钟）——完成后自动上传到 IDG 分析...' : '采集进行中（约 3-5 分钟）——请耐心等待，完成后自动显示结果...';
   msg.className = 'msg-box';
-  btn.disabled = true;
+  const _rbox = document.getElementById('tslog-result');
+  if (_rbox) { _rbox.style.display = 'none'; _rbox.innerHTML = ''; }  // 清旧结果（避免混淆）
+  btn.disabled = true; if (btn2) btn2.disabled = true;
+  // 动态等待反馈（2026-09-09：显示已等待时间——不让用户干等无感知）
+  var _tw0 = Date.now();
+  var _twTimer = setInterval(function () {
+    if (!msg) return;
+    var s = Math.round((Date.now() - _tw0) / 1000);
+    if (s > 0 && s % 15 === 0) msg.textContent = '仍在执行（已等待 ' + Math.floor(s / 60) + ' 分 ' + (s % 60) + ' 秒）——请耐心等待...';
+  }, 15000);
+  function _clearTw() { if (_twTimer) { clearInterval(_twTimer); _twTimer = null; } }
   try {
+    // 超时保护（2026-09-09：请求挂起会导致按钮永久灰——680s 后报错恢复）
+    const ac = new AbortController();
+    const toTimer = setTimeout(() => ac.abort(), 680000);
     const resp = await fetch('/api/tools/tslog', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ room_code: room }),
+      signal: ac.signal,
     });
+    clearTimeout(toTimer);
     const data = await resp.json();
-    if (!resp.ok) { msg.textContent = data.error || '采集失败'; msg.className = 'msg-box err'; btn.disabled = false; return; }
-    msg.textContent = '✅ 采集完成';
-    msg.className = 'msg-box';
+    if (!resp.ok) { _clearTw(); msg.textContent = data.error || '采集失败'; msg.className = 'msg-box err'; btn.disabled = false; if (btn2) btn2.disabled = false; return; }
     const box = document.getElementById('tslog-result');
     box.style.display = 'block';
-    box.innerHTML = '<pre style="white-space:pre-wrap;background:#0b1220;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;color:#cbd5e1;margin-top:10px;">' + (data.output || '').replace(/</g, '&lt;') + '</pre>';
-    btn.disabled = false;
+    if (!uploadToIdg) {
+      _clearTw();
+      msg.textContent = '✅ 采集完成（已打包到客户机本地）';
+      msg.className = 'msg-box';
+      box.innerHTML = '<pre style="white-space:pre-wrap;background:#0b1220;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;color:#cbd5e1;margin-top:10px;">' + (data.output || '').replace(/</g, '&lt;') + '</pre>';
+      btn.disabled = false; if (btn2) btn2.disabled = false;
+      return;
+    }
+    // 上传模式：包路径（服务器已提取 pkg_path——正则兜底）
+    const out = data.output || '';
+    let pkgPath = data.pkg_path || '';
+    if (!pkgPath) {
+      const m = out.match(/TSLOG_DONE\s+(\S+)/);
+      if (m) pkgPath = m[1];
+    }
+    if (!pkgPath) {
+      _clearTw();
+      msg.textContent = '打包完成但未找到包路径（可能采集异常）——请先点「打包到本地」看输出';
+      msg.className = 'msg-box err';
+      btn.disabled = false; if (btn2) btn2.disabled = false;
+      return;
+    }
+    _clearTw();
+    msg.textContent = '打包完成——正在上传到 IDG 日志分析（大包可能需要几分钟）...';
+    const ac2 = new AbortController();
+    const to2 = setTimeout(() => ac2.abort(), 620000);
+    const upResp = await fetch('/api/tools/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room, path: pkgPath }),
+      signal: ac2.signal,
+    });
+    clearTimeout(to2);
+    const upData = await upResp.json();
+    if (!upResp.ok) {
+      _clearTw();
+      msg.textContent = '❌ 上传失败: ' + (upData.error || '');
+      msg.className = 'msg-box err';
+    } else {
+      _clearTw();
+      msg.textContent = '✅ 已上传到 IDG 日志分析';
+      msg.className = 'msg-box';
+      box.innerHTML = '<div style="margin-top:10px;padding:12px;background:#0b1220;border:1px solid var(--border);border-radius:8px;font-size:13px;">' +
+        '📤 日志包已上传 IDG 并完成分析<br><br>' +
+        '<a href="#" onclick="openIdgJob(\'' + upData.job_id + '\');return false;" style="color:#58a6ff;font-weight:600;">👉 在右侧打开 IDG 分析（job: ' + upData.job_id + '）</a></div>';
+    }
+    btn.disabled = false; if (btn2) btn2.disabled = false;
   } catch (e) {
+    _clearTw();
     msg.textContent = '网络错误: ' + e.message;
     msg.className = 'msg-box err';
-    btn.disabled = false;
+    btn.disabled = false; if (btn2) btn2.disabled = false;
   }
 }
 
@@ -3230,14 +3300,15 @@ function fillLinuxLogPackRoom() {
   }
 }
 
-async function linuxLogPack() {
+async function linuxLogPack(uploadToIdg) {
   const msg = document.getElementById('linux-logpack-msg');
   msg.className = 'msg-box';
   const room = document.getElementById('linux-logpack-room').value;
   if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
-  const btn = document.getElementById('linux-logpack-btn');
-  btn.disabled = true;
-  msg.textContent = t('linux_logpack_running');
+  const btn = uploadToIdg ? document.getElementById('linux-logpack-upload-btn') : document.getElementById('linux-logpack-btn');
+  const btn2 = uploadToIdg ? document.getElementById('linux-logpack-btn') : document.getElementById('linux-logpack-upload-btn');
+  btn.disabled = true; if (btn2) btn2.disabled = true;
+  msg.textContent = uploadToIdg ? '打包中——完成后自动上传到 IDG 分析...' : t('linux_logpack_running');
   msg.className = 'msg-box info';
   document.getElementById('linux-logpack-result').style.display = 'none';
   try {
@@ -3247,26 +3318,58 @@ async function linuxLogPack() {
       body: JSON.stringify({ room_code: room }),
     });
     const data = await resp.json();
-    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; btn.disabled = false; if (btn2) btn2.disabled = false; return; }
     if (data.pack_error) {
       msg.textContent = '⚠ ' + data.pack_error;
       msg.className = 'msg-box warn';
-    } else if (data.pack_path) {
+      btn.disabled = false; if (btn2) btn2.disabled = false;
+      return;
+    }
+    if (!data.pack_path) {
+      msg.textContent = '⚠ ' + t('linux_logpack_empty');
+      msg.className = 'msg-box warn';
+      btn.disabled = false; if (btn2) btn2.disabled = false;
+      return;
+    }
+    if (!uploadToIdg) {
       const sizeMB = (data.pack_size / 1024 / 1024).toFixed(2);
       msg.textContent = '✅ ' + t('linux_logpack_done');
       msg.className = 'msg-box ok';
       document.getElementById('linux-logpack-info').textContent =
         t('linux_logpack_file') + data.pack_path + '  (' + sizeMB + ' MB)';
       document.getElementById('linux-logpack-result').style.display = 'block';
-    } else {
-      msg.textContent = '⚠ ' + t('linux_logpack_empty');
-      msg.className = 'msg-box warn';
+      btn.disabled = false; if (btn2) btn2.disabled = false;
+      return;
     }
+    // 上传模式
+    msg.textContent = '打包完成——正在上传到 IDG 日志分析...';
+    const upResp = await fetch('/api/tools/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room, path: data.pack_path }),
+    });
+    const upData = await upResp.json();
+    if (!upResp.ok) {
+      _clearTw();
+      msg.textContent = '❌ 上传失败: ' + (upData.error || '');
+      msg.className = 'msg-box err';
+    } else {
+      _clearTw();
+      msg.textContent = '✅ 已上传到 IDG 日志分析';
+      msg.className = 'msg-box ok';
+      document.getElementById('linux-logpack-info').textContent = '';
+      document.getElementById('linux-logpack-result').style.display = 'block';
+      document.getElementById('linux-logpack-result').innerHTML =
+        '<div style="margin-top:10px;padding:12px;background:#0b1220;border:1px solid var(--border);border-radius:8px;font-size:13px;">' +
+        '📤 日志包已上传 IDG 并完成分析<br><br>' +
+        '<a href="#" onclick="openIdgJob(\'' + upData.job_id + '\');return false;" style="color:#58a6ff;font-weight:600;">👉 在右侧打开 IDG 分析（job: ' + upData.job_id + '）</a></div>';
+    }
+    btn.disabled = false; if (btn2) btn2.disabled = false;
   } catch (e) {
     msg.textContent = t('net_err') + ': ' + e.message;
     msg.className = 'msg-box err';
+    btn.disabled = false; if (btn2) btn2.disabled = false;
   }
-  btn.disabled = false;
 }
 
 // ===== 工具 =====
