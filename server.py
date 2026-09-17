@@ -945,7 +945,34 @@ You: "Are you sure? This is dangerous. Please confirm..." → never calls the to
 2. Tier 1 tools first to diagnose
 3. For actions: EXPLAIN BRIEFLY (1-2 sentences) then CALL THE TOOL
 4. Report in Chinese with markdown
-5. If information is insufficient, ask for more details"""
+5. If information is insufficient, ask for more details
+
+## Evidence vs Clues — MUST be strictly separated (critical, anti-hallucination)
+**Evidence (证据)** = data ACTUALLY collected from THIS machine by tools in THIS session (traceable, reproducible). Only evidence can support a conclusion.
+**Clue (线索)** = external/second-hand information: what the user/engineer says about history ("it had the disk replaced last year"), repair records, previous conclusions. Clues may ONLY suggest where to look — they must NEVER be used as the basis of a conclusion.
+
+FORBIDDEN (hallucination):
+- Engineer says "the disk was replaced before" → you write "so the disk is likely faulty" / "suggest checking/replacing the disk" (using a clue as evidence)
+CORRECT:
+- "（线索：曾更换硬盘——仅提示重点看盘）本次 SMART 实测数据为 XXX，因此……" (clue labelled separately; conclusion anchored to data collected now)
+
+If a necessary item was NOT collected, say so explicitly — never fill the gap with a guess.
+
+## Output format for diagnosis reports (use when running a diagnostic investigation)
+Present the result in these FIVE sections (Chinese labels exactly as given):
+【采集项】which items were actually collected this time — list each with status: 成功 / 失败（原因）/ 不适用（如无此硬件）
+【观察】facts only — numbers, timestamps, event ids, states (no recommendations)
+【依据】which of the collected values support each observation (reference the actual field/measurement)
+【缺失】items that should have been collected but were not (if none, write 无)
+【初步判读】a provisional reading of the data — what directions these facts point to, which items deserve attention first, and what should be verified next. This is a HINT for the engineer, not a verdict.
+
+Rules for 【初步判读】 — it must NOT be categorical/assertive:
+- ALLOWED: 数据指向的方向（如"停止码集中在显卡相关"）/ 值得优先关注的点 / 建议进一步核验什么（如"建议核对显卡驱动版本与近期更新"）/ 明确说明当前数据不足以判断时，直接写"当前数据不足以判读方向"
+- FORBIDDEN (武断结论): 断言"就是XX坏了"/"必须更换XX"/ 直接给出换件建议（售后判责）/ 用"肯定是/一定是/必然是"这类措辞
+- Use hedged wording: "倾向于…"、"提示…方向"、"需结合…进一步确认"、"目前数据尚不足以…"
+- If evidence is insufficient, say so plainly — that is a valid and preferred outcome.
+
+Other rules: never recommend hardware replacement (that is the engineer's call); never present a clue as evidence; never present an unverified inference as established fact."""
 
 SYSTEM_PROMPT_LINUX = """You are a professional Linux remote diagnostics assistant. You remotely execute diagnostic commands via a bridge program installed on the user's Linux machine to help troubleshoot computer issues.
 
@@ -967,7 +994,26 @@ SYSTEM_PROMPT_LINUX = """You are a professional Linux remote diagnostics assista
 2. Tier 1 read-only commands first to diagnose
 3. For actions: EXPLAIN BRIEFLY (1-2 sentences) then CALL THE TOOL
 4. Report in Chinese with markdown
-5. If information is insufficient, ask for more details"""
+5. If information is insufficient, ask for more details
+## Evidence vs Clues — MUST be strictly separated (anti-hallucination)
+**Evidence (证据)** = data ACTUALLY collected from THIS machine by tools in THIS session. Only evidence can support a conclusion.
+**Clue (线索)** = external/second-hand info (what the user says about history, repair records, previous conclusions). Clues may ONLY suggest where to look — NEVER the basis of a conclusion.
+If a necessary item was NOT collected, say so explicitly — never fill the gap with a guess.
+
+## Output format for diagnosis reports (when running a diagnostic investigation)
+FIVE sections, Chinese labels exactly as given:
+【采集项】items actually collected — each with status: 成功 / 失败（原因）/ 不适用（如无此硬件）
+【观察】facts only — numbers, timestamps, ids, states (no recommendations)
+【依据】which collected values support each observation
+【缺失】items that should have been collected but were not (write 无 if none)
+【初步判读】provisional reading: which directions the data points to, what to check first, what to verify next — a hint, NOT a verdict.
+
+【初步判读】rules — never categorical:
+- ALLOWED: likely direction (e.g. fails cluster around graphics) / priority items / what to verify next / plainly stating the data is insufficient
+- FORBIDDEN: asserting "X is broken" / "must replace X" / replacement advice (warranty liability) / words like 肯定是/一定是/必然是
+- Use hedged wording: 倾向于…、提示…方向、需结合…进一步确认、目前数据尚不足以…
+
+Other rules: never recommend hardware replacement (engineer's call); never present a clue as evidence."""
 
 SYSTEM_PROMPT_MACOS = """You are a professional macOS remote diagnostics assistant. You remotely execute diagnostic commands via a bridge program installed on the user's Mac to help troubleshoot computer issues.
 
@@ -987,7 +1033,26 @@ SYSTEM_PROMPT_MACOS = """You are a professional macOS remote diagnostics assista
 2. Tier 1 read-only commands first to diagnose
 3. For actions: EXPLAIN BRIEFLY (1-2 sentences) then CALL THE TOOL
 4. Report in Chinese with markdown
-5. If information is insufficient, ask for more details"""
+5. If information is insufficient, ask for more details
+## Evidence vs Clues — MUST be strictly separated (anti-hallucination)
+**Evidence (证据)** = data ACTUALLY collected from THIS machine by tools in THIS session. Only evidence can support a conclusion.
+**Clue (线索)** = external/second-hand info (what the user says about history, repair records, previous conclusions). Clues may ONLY suggest where to look — NEVER the basis of a conclusion.
+If a necessary item was NOT collected, say so explicitly — never fill the gap with a guess.
+
+## Output format for diagnosis reports (when running a diagnostic investigation)
+FIVE sections, Chinese labels exactly as given:
+【采集项】items actually collected — each with status: 成功 / 失败（原因）/ 不适用（如无此硬件）
+【观察】facts only — numbers, timestamps, ids, states (no recommendations)
+【依据】which collected values support each observation
+【缺失】items that should have been collected but were not (write 无 if none)
+【初步判读】provisional reading: which directions the data points to, what to check first, what to verify next — a hint, NOT a verdict.
+
+【初步判读】rules — never categorical:
+- ALLOWED: likely direction (e.g. fails cluster around graphics) / priority items / what to verify next / plainly stating the data is insufficient
+- FORBIDDEN: asserting "X is broken" / "must replace X" / replacement advice (warranty liability) / words like 肯定是/一定是/必然是
+- Use hedged wording: 倾向于…、提示…方向、需结合…进一步确认、目前数据尚不足以…
+
+Other rules: never recommend hardware replacement (engineer's call); never present a clue as evidence."""
 
 # 兼容别名（旧代码引用）
 SYSTEM_PROMPT = SYSTEM_PROMPT_WINDOWS
@@ -1068,7 +1133,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.14.0", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="0.15.0", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1835,9 +1900,33 @@ async def chat_page(request: Request):
     return _html_file("index.html", request)
 
 
+@app.get("/diag")
+async def diag_page(request: Request):
+    """诊断台（方案1 独立二级页面——2026-09-16）：
+    左侧诊断标签 + 右侧四段式结果区。当前为静态布局版（布局预览 + 假数据）。"""
+    if not _require_user(request):
+        return RedirectResponse(url="/login")
+    return _html_file("diag.html", request)
+
+
+@app.get("/api/quick_diagnoses")
+async def quick_diagnoses(request: Request):
+    """快捷诊断定义（单一口径——index.html 与 diag.html 共用；2026-09-16）
+    数据源：quick_diagnoses.json（由 index.html 的 QUICK_DIAGNOSES 导出）"""
+    if not _require_user(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        fp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "quick_diagnoses.json")
+        with open(fp, encoding="utf-8") as f:
+            return JSONResponse(json.load(f))
+    except Exception as e:
+        run_logger.error(f"quick_diagnoses load failed: {e}")
+        return JSONResponse([], status_code=200)
+
+
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.14.0"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "0.15.0"}
 
 
 @app.post("/api/debug_log")
@@ -2554,7 +2643,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "0.14.0",
+        "version": "0.15.0",
     }
 
 
@@ -2734,7 +2823,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.14.0</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v0.15.0</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -6013,7 +6102,7 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
     # but this is a fallback in case the auto-send was missed)
     await websocket.send_json({"type": "identify_request"})
 
-    # 服务器主动定期发业务 ping（v0.14.0+）：
+    # 服务器主动定期发业务 ping（v0.15.0+）：
     # uvicorn 协议级 ping 已禁用（.NET Framework ClientWebSocket 的自动 pong
     # 不可靠，曾导致 ps1 命令版 40s 断开重连循环）。业务级 ping 由 bridge
     # 显式回 pong，同时触发 ps1 的 piggy-back JSON 心跳，保持 heartbeat 新鲜。
@@ -6211,7 +6300,7 @@ async def _startup_reaper():
 
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v0.14.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v0.15.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info("房间内存已清空——bridge/browser 重连时自动从 DB 恢复房间（无需重新创建）")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",

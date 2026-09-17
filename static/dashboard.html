@@ -123,21 +123,6 @@
   }
   .btn-ghost:hover { color: var(--text); }
 
-  .room-result {
-    display: none; margin-top: 16px; background: rgba(63,185,80,.08);
-    border: 1px solid rgba(63,185,80,.35); border-radius: 8px; padding: 14px;
-  }
-  .room-result .tip { font-size: 12px; color: var(--text2); text-align: center; margin-bottom: 4px; }
-  .room-result .code {
-    font-size: 30px; font-weight: 700; letter-spacing: 5px; color: var(--success);
-    text-align: center; margin: 6px 0 12px; font-family: "Consolas", monospace;
-  }
-  .room-result .actions { display: flex; gap: 10px; }
-  .room-result .actions a, .room-result .actions button {
-    flex: 1; text-align: center; padding: 9px; font-size: 14px; border-radius: 6px; cursor: pointer;
-    text-decoration: none; border: 1px solid var(--border);
-  }
-  .btn-enter { background: var(--success); color: #fff; border: none !important; font-weight: 600; }
 
   .dl-row { display: flex; flex-direction: column; gap: 9px; }
   .dl-btn {
@@ -582,14 +567,6 @@
           </div>
           <div class="field"><label>有效期</label><select id="f-validity" style="width:100%;padding:9px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;"><option value="30" selected>30 天</option><option value="15">15 天</option><option value="7">7 天</option><option value="0">永久</option></select><div style="font-size:12px;color:var(--text2);margin-top:4px;">过期后房间只读（历史保留），管理员可见全部记录</div></div>
           <button class="btn-main" id="create-btn" data-i18n="btn_create" onclick="createRoom()">创建房间</button>
-          <div class="room-result" id="room-result">
-            <div class="tip" data-i18n="room_ok_tip">房间创建成功，请让客户电脑运行一键命令或连接包（进入对话页获取）</div>
-            <div class="code" id="room-code"></div>
-            <div class="actions">
-              <a class="btn-enter" id="room-enter" href="#" data-i18n="enter_chat">进入对话</a>
-              <button class="btn-ghost" data-i18n="copy_room" onclick="copyRoomCode()">复制房间码</button>
-            </div>
-          </div>
         </div>
       </section>
 
@@ -1572,6 +1549,58 @@ function openIdgJob(jobId) {
 }
 
 // 打开对话（iframe 加载 /chat?room=XXX，不跳页）
+// ── 界面分流弹窗（2026-09-16）：创建/加入房间后选择进入哪个界面 ──
+function chooseInterface(room, sn, ticket, title) {
+  const old = document.getElementById('iface-modal');
+  if (old) old.remove();
+  const box = document.createElement('div');
+  box.id = 'iface-modal';
+  box.style.cssText = 'position:fixed;inset:0;background:rgba(1,4,9,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  box.innerHTML =
+    '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:520px;width:100%;padding:26px 28px;">'
+    + '<div style="font-size:17px;font-weight:650;color:#e6edf3;margin-bottom:6px;">' + (title || '选择进入方式') + '</div>'
+    + '<div style="font-size:12.5px;color:#8b949e;margin-bottom:18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+    + '房间 <b style="color:#e6edf3;font-family:Consolas,monospace;letter-spacing:1px;font-size:14px;">' + room + '</b>'
+    + '<button onclick="copyRoomCodeNew(\'' + room + '\')" id="iface-copy-btn" '
+    + 'style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">📋 复制房间码</button>'
+    + (sn ? '<span>· SN ' + sn + '</span>' : '') + (ticket ? '<span>· 工单 ' + ticket + '</span>' : '') + '</div>'
+
+    + '<div onclick="ifaceGo(\'/diag?room=' + room + (sn ? '&sn=' + encodeURIComponent(sn) : '') + (ticket ? '&ticket=' + encodeURIComponent(ticket) : '') + '\')" '
+    + 'style="cursor:pointer;border:1.5px solid #58a6ff;background:rgba(56,139,253,.08);border-radius:10px;padding:15px 18px;margin-bottom:12px;">'
+    + '<div style="font-size:14.5px;font-weight:650;color:#e6edf3;margin-bottom:4px;">🔍 诊断台（推荐）</div>'
+    + '<div style="font-size:12.5px;color:#8b949e;line-height:1.55;">左侧 26 项诊断工具 → 右侧结构化结果（采集项清单 / 观察 / 依据 / 缺失）<br>点击工具自动执行标准化诊断，结果可追溯</div>'
+    + '</div>'
+
+    + '<div onclick="ifaceGo(\'/chat?room=' + room + '\')" '
+    + 'style="cursor:pointer;border:1px solid #30363d;background:#1c2128;border-radius:10px;padding:15px 18px;margin-bottom:18px;">'
+    + '<div style="font-size:14.5px;font-weight:650;color:#e6edf3;margin-bottom:4px;">💬 AI 对话界面</div>'
+    + '<div style="font-size:12.5px;color:#8b949e;line-height:1.55;">与 AI 自由对话，适合复杂问题排查与追问<br>保留原有全部能力（工具矩阵 / 一键连接 / 导出）</div>'
+    + '</div>'
+
+    + '<div style="text-align:right;"><button onclick="document.getElementById(\'iface-modal\').remove()" '
+    + 'style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:7px;padding:7px 16px;font-size:13px;cursor:pointer;">稍后再说</button></div>'
+    + '</div>';
+  document.body.appendChild(box);
+}
+// 复制房间码（分流弹窗内）
+function copyRoomCodeNew(code) {
+  navigator.clipboard.writeText(code).then(function () {
+    const b = document.getElementById('iface-copy-btn');
+    if (b) { const old = b.textContent; b.textContent = '✅ 已复制'; setTimeout(function () { b.textContent = old; }, 1800); }
+  }).catch(function () {
+    // 降级：选中弹窗里的房间码文本
+    const sel = window.getSelection(); const r = document.createRange();
+    const b = document.getElementById('iface-copy-btn');
+    if (b && b.previousElementSibling) { r.selectNodeContents(b.previousElementSibling); sel.removeAllRanges(); sel.addRange(r); }
+  });
+}
+
+function ifaceGo(url) {
+  const m = document.getElementById('iface-modal');
+  if (m) m.remove();
+  location.href = url;
+}
+
 function openChat(room) {
   currentChatRoom = room;
   // 记录加入（账号隔离）
@@ -1898,9 +1927,8 @@ async function createRoom() {
       btn.disabled = false; btn.textContent = t('btn_create');
       return;
     }
-    document.getElementById('room-code').textContent = data.room_code;
-    document.getElementById('room-enter').onclick = function (e) { e.preventDefault(); openChat(data.room_code); };
-    document.getElementById('room-result').style.display = 'block';
+    // 创建成功 → 直接弹分流选择（房间码/SN/工单都在弹窗内显示——2026-09-16）
+    chooseInterface(data.room_code, sn, ticket, '房间创建成功 · 选择进入方式');
     document.getElementById('f-sn').value = '';
     document.getElementById('f-ticket').value = '';
     document.getElementById('f-model').value = '';
@@ -1909,10 +1937,7 @@ async function createRoom() {
   btn.disabled = false; btn.textContent = t('btn_create');
 }
 
-function copyRoomCode() {
-  const code = document.getElementById('room-code').textContent;
-  copyText(code).then(() => showToast(t('copied_room') + ': ' + code));
-}
+
 
 // ===== 加入房间 =====
 async function joinRoom() {
@@ -1934,7 +1959,7 @@ async function joinRoom() {
       openFieldGuide(code);
       return;
     }
-    openChat(code);
+    chooseInterface(code, '', '', '已加入房间 · 选择进入方式');
   } catch (e) { showToast(t('net_err') + ': ' + e.message); }
 }
 
@@ -1996,7 +2021,7 @@ function renderRooms() {
       + '<td>' + stHtml + '</td>'
       + '<td>' + validityBadge(r.days_left) + '</td>'
       + '<td><div class="row-actions">'
-      + '<button class="btn-sm" onclick="openChat(\'' + r.room_code + '\')">' + t('enter_chat') + '</button>'
+      + '<button class="btn-sm" onclick="chooseInterface(\'' + r.room_code + '\', \'' + (r.sn||'') + '\', \'' + (r.ticket_no||'') + '\', \'选择进入方式\')">' + t('enter_chat') + '</button>'
       + '<button class="btn-sm" onclick="connectRoom(\'' + r.room_code + '\')" title="一键连接">📶 连接</button>'
       + '<button class="btn-sm" onclick="viewHistory(\'' + r.room_code + '\')">' + t('view_history') + '</button>'
       + '<button class="btn-sm" onclick="exportRoom(\'' + r.room_code + '\')">' + t('export_record') + '</button>'
